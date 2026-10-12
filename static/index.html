@@ -2908,16 +2908,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V10-12.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V10-12.1791813471" scrolling="yes"></iframe>
             <iframe id="frame-enhance" data-src="/static/enhance.html?v=V10-12.1791813471" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=V10-12.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=V10-12.1791813471" scrolling="yes"></iframe>
             <iframe id="frame-angle" data-src="/static/angle.html?v=V10-12.1791813471" scrolling="yes"></iframe>
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=V10-12.1791813471" scrolling="yes"></iframe>
-            <iframe id="frame-settings" data-src="/static/settings.html?v=V10-12.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-settings" data-src="/static/settings.html?v=V10-12.1791813471" scrolling="yes"></iframe>
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V10-12.1791813471" scrolling="yes"></iframe>
             <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V10-12.1791813471" scrolling="yes"></iframe>
-            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V10-12.1791543961" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V10-12.1791811585" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V10-12.1791813471" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V10-12.1791813471" class="active" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3721,7 +3721,9 @@
         function sourceConnectivityStats(source, results = []) {
             const sourceItems = (results || []).filter(item => item.source === source);
             const required = sourceItems.filter(item => item.required);
-            const okRequired = required.length ? required.every(item => item.ok) : false;
+            // 无 required 项的源（如 GitHub 可选源）：按自身全部探测结果判定，而非恒判不可用
+            const okRequired = required.length ? required.every(item => item.ok)
+                : (sourceItems.length ? sourceItems.every(item => item.ok) : false);
             const okItems = sourceItems.filter(item => item.ok);
             const avg = okItems.length
                 ? Math.round(okItems.reduce((sum, item) => sum + Number(item.elapsed_ms || 0), 0) / okItems.length)
