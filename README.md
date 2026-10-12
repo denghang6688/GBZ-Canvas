@@ -6,8 +6,6 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
 
-![cover](docs/cover.png)
-
 ## 亮点
 
 - 🧩 **无限画布**：节点 + 连线 + 分组，支持复制粘贴、Ctrl 拖拽复制、缩略图拖入工作流。
