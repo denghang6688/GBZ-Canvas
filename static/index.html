@@ -1,0 +1,4230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/assets/output/canvas-top-left-icon-v4-bw.png" type="image/png">
+    <title>AI Studio</title>
+    <style>
+        html.studio-route-booting body {
+            visibility: hidden !important;
+        }</style>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'dark';
+                if(theme === 'custom') {
+                    theme = 'dark';
+                    localStorage.setItem('studio_theme', 'dark');
+                    localStorage.setItem('canvas_theme', 'dark');
+                }
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+                document.documentElement.classList.add('studio-route-booting');
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V10-09.1790042522"></script>
+    <script src="/static/js/theme.js?v=V10-09.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V10-09.1790305929"></script>
+    <style>
+        @import url('/static/vendor/css/fonts.css?v=V10-09.1790042522');
+
+        /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
+        .w-1\.5 { width: 0.375rem; }
+        .h-1\.5 { height: 0.375rem; }
+        .w-4 { width: 1rem; }
+        .h-4 { height: 1rem; }
+        .w-5 { width: 1.25rem; }
+        .h-5 { height: 1.25rem; }
+        .flex-shrink-0 { flex-shrink: 0; }
+        .rounded-full { border-radius: 9999px; }
+        .mb-12 { margin-bottom: 3rem; }
+        .transition-colors { transition-property: color, background-color, border-color, fill, stroke; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+        .animate-pulse { animation: studio-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes studio-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+
+        :root {
+            --accent: #000000;
+            --fluid-ease: cubic-bezier(0.3, 0, 0, 1);
+            --bg: #ffffff;
+            --sidebar-bg: #ffffff;
+            --stage-bg: #fcfcfc;
+            --border: #f2f2f2;
+            --stage-border: #f0f0f0;
+            --text: #121212;
+            --muted: #999;
+            --nav-hover-bg: #fafafa;
+            --monitor-bg: rgba(255, 255, 255, 0.7);
+            --monitor-border: rgba(0, 0, 0, 0.05);
+            --monitor-shadow: rgba(0, 0, 0, 0.04);
+            --divider: rgba(0, 0, 0, 0.1);
+            --scrollbar: #d8d8d8;
+            --scrollbar-hover: #c0c0c0;
+            --author-name: #000;
+            --social-icon: #ccc;
+        }
+
+        html.theme-dark,
+        body.theme-dark {
+            --bg: #050505;
+            --sidebar-bg: #050505;
+            --stage-bg: #080808;
+            --border: #242424;
+            --stage-border: #2d2d2d;
+            --text: #f1f1f1;
+            --muted: #9a9a9a;
+            --nav-hover-bg: #181818;
+            --monitor-bg: rgba(24, 24, 24, 0.82);
+            --monitor-border: rgba(255, 255, 255, 0.1);
+            --monitor-shadow: rgba(0, 0, 0, 0.42);
+            --divider: rgba(255, 255, 255, 0.14);
+            --scrollbar: #3a3a3a;
+            --scrollbar-hover: #555555;
+            --author-name: #f1f1f1;
+            --social-icon: #888888;
+        }
+
+        /* 极简滚动条 */
+        html,
+        body {
+            overscroll-behavior: auto;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        *::-webkit-scrollbar {
+            width: 10px !important;
+            height: 10px !important;
+            background: transparent !important;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: transparent !important;
+            border: none !important;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background-color: var(--scrollbar) !important;
+            border: 3px solid transparent !important;
+            border-right-width: 3px !important;
+            background-clip: padding-box !important;
+            border-radius: 10px !important;
+            min-height: 36px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background-color: var(--scrollbar-hover) !important;
+        }
+
+        *::-webkit-scrollbar-corner {
+            background: transparent !important;
+        }
+
+        * {
+            scrollbar-width: thin !important;
+            scrollbar-color: var(--scrollbar) transparent !important;
+        }
+
+        body {
+            background: var(--bg);
+            font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            overflow: hidden;
+            height: 100vh;
+            color: var(--text);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .app-shell {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+            background: var(--bg);
+            position: relative;
+            transition: background 0.3s;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 80px;
+            min-width: 80px;
+            height: 100vh;
+            max-height: 100vh;
+            background: var(--sidebar-bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border-right: 1px solid var(--border);
+            padding: 40px 0;
+            transition: width 0.5s var(--fluid-ease) 0.5s, background 0.3s, border-color 0.3s;
+            z-index: 50;
+            overflow: hidden;
+        }
+
+        .sidebar:hover {
+            width: 220px;
+            transition-delay: 0s;
+        }
+
+        body.studio-scale-host .sidebar {
+            height: calc(100vh / var(--studio-ui-scale, 1));
+            max-height: calc(100vh / var(--studio-ui-scale, 1));
+            zoom: var(--studio-ui-scale, 1);
+        }
+
+        /* 首次加载时与 iframe 的 0.5s 淡入同步播放，避免侧栏"焊死"在原地造成视觉断层 */
+        @keyframes sidebar-enter {
+            from { opacity: 0; transform: translateX(-6px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        html:not(.studio-route-booting) .sidebar {
+            animation: sidebar-enter 0.5s var(--fluid-ease);
+        }
+
+        .logo-ring {
+            width: 36px;
+            height: 36px;
+            /* 2026-09-20 去掉白色描边：var(--text) 在暗色主题下接近白色，形成白边 */
+            border: 2px solid transparent;
+            border-radius: 12px;
+            background: transparent;
+            padding: 0;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex: 0 0 auto;
+            /* 仅保留 hover 真正会用到的属性过渡，避免 transition: all 因首屏属性补齐被意外触发 */
+            transition: transform 0.6s var(--fluid-ease) 0.5s, border-radius 0.6s var(--fluid-ease) 0.5s, border-color 0.3s, background-color .18s, box-shadow .2s;
+        }
+
+        .sidebar:hover .logo-ring {
+            transform: rotate(90deg);
+            border-radius: 50%;
+            transition-delay: 0s;
+        }
+
+        .logo-ring:hover,
+        .logo-ring:focus-visible {
+            background: var(--nav-hover-bg);
+            border-color: var(--text);
+            box-shadow: 0 0 0 4px rgba(148, 163, 184, .16), 0 10px 24px rgba(15, 23, 42, .08);
+            outline: none;
+        }
+
+        .logo-ring:hover #logo-dot,
+        .logo-ring:focus-visible #logo-dot {
+            transform: scale(1.8);
+        }
+
+        .logo-ring:active {
+            transform: scale(.94);
+            transition-delay: 0s;
+        }
+
+        .sidebar:hover .logo-ring:active {
+            transform: rotate(90deg) scale(.94);
+        }
+
+        #logo-dot {
+            transition: transform .16s ease, background-color .16s ease, box-shadow .16s ease;
+        }
+
+        /* 导航项 */
+        .nav-item {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            border-radius: 18px;
+            cursor: pointer;
+            /* 只对 width 做带延迟的过渡（侧栏悬停展开效果）；background/color 不参与过渡，避免 active 切换时底色"流动" */
+            transition: width 0.3s var(--fluid-ease) 0.5s;
+            color: var(--muted);
+            overflow: hidden;
+            padding-left: 14px;
+        }
+
+        .sidebar:hover .nav-item {
+            width: 190px;
+            transition-delay: 0s;
+        }
+
+        .nav-item:hover {
+            background: var(--nav-hover-bg);
+            color: var(--text);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        html.theme-dark .nav-item.active,
+        body.theme-dark .nav-item.active {
+            background: #f1f5f9;
+            color: #0f172a;
+        }
+
+        .nav-text {
+            opacity: 0;
+            margin-left: 16px;
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: opacity 0.3s 0.5s;
+        }
+
+        .sidebar:hover .nav-text {
+            opacity: 1;
+            transition-delay: 0.1s;
+        }
+
+        .nav-fold-toggle {
+            position: relative;
+            width: 48px;
+            height: 36px;
+            flex: 0 0 36px;
+            margin: 0 0 6px;
+            padding-left: 14px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: transparent;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            cursor: pointer;
+            overflow: hidden;
+            transition: width 0.3s var(--fluid-ease) 0.5s, background-color 0.2s, color 0.2s, border-color 0.2s;
+        }
+
+        .sidebar:hover .nav-fold-toggle {
+            width: 190px;
+            transition-delay: 0s;
+        }
+
+        .nav-fold-toggle:hover {
+            background: var(--nav-hover-bg);
+            color: var(--text);
+            border-color: var(--stage-border);
+        }
+
+        .nav-fold-icon {
+            width: 18px;
+            height: 18px;
+            flex: 0 0 auto;
+            transition: transform 0.25s var(--fluid-ease);
+        }
+
+        .nav-fold-toggle[aria-expanded="false"] .nav-fold-icon {
+            transform: rotate(-90deg);
+        }
+
+        .nav-fold-group {
+            width: 100%;
+            flex: 0 0 auto;
+            max-height: 720px;
+            opacity: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: max-height 0.3s var(--fluid-ease), opacity 0.2s ease;
+        }
+
+        .nav-fold-group.is-collapsed {
+            max-height: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sidebar nav {
+            width: 100%;
+            min-height: 0;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 0 6px;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148, 163, 184, .34) transparent;
+        }
+
+        .sidebar::-webkit-scrollbar { width: 4px !important; }
+        .sidebar::-webkit-scrollbar-track { background: transparent !important; }
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, .34) !important;
+            border: 0 !important;
+            border-radius: 999px !important;
+        }
+
+        .sidebar nav::-webkit-scrollbar { width: 4px !important; }
+        .sidebar nav::-webkit-scrollbar-track { background: transparent !important; }
+        .sidebar nav::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, .34) !important;
+            border: 0 !important;
+            border-radius: 999px !important;
+        }
+
+        .sidebar nav > * {
+            flex-shrink: 0;
+        }
+
+        /* 主舞台区 */
+        .stage {
+            flex: 1;
+            background: var(--stage-bg);
+            margin: 16px;
+            border-radius: 32px;
+            overflow: hidden;
+            border: 1px solid var(--stage-border);
+            position: relative;
+            transition: background 0.3s, border-color 0.3s;
+        }
+
+        body.studio-scale-host .stage {
+            margin: max(10px, calc(16px * var(--studio-ui-scale, 1)));
+            border-radius: max(20px, calc(32px * var(--studio-ui-scale, 1)));
+        }
+
+        iframe {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            opacity: 0;
+            transform: scale(1.02);
+            filter: blur(4px);
+            transition: all 0.5s var(--fluid-ease);
+            pointer-events: none;
+        }
+
+        iframe.active {
+            opacity: 1;
+            transform: scale(1);
+            filter: blur(0);
+            pointer-events: auto;
+        }
+
+        /* 左下角监视器 */
+        .nano-monitor {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--monitor-bg);
+            backdrop-filter: blur(12px);
+            padding: 7px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--monitor-border);
+            box-shadow: 0 4px 20px var(--monitor-shadow);
+            font-family: monospace;
+            transition: all 0.4s var(--fluid-ease);
+        }
+
+        .nano-monitor.is-busy {
+            background: #000;
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-group {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .stat-group:first-child {
+            gap: 8px;
+        }
+
+        .nano-monitor.is-busy .stat-group {
+            color: #fff;
+        }
+
+        .divider {
+            width: 1px;
+            height: 12px;
+            background: var(--divider);
+        }
+
+        .is-busy .divider {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .pulse-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            margin-right: 2px;
+            flex: 0 0 auto;
+        }
+
+        .spinner-nano {
+            width: 10px;
+            height: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        .is-busy .spinner-nano { display: block; }
+        .is-busy .pulse-dot { display: none; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .label-nano {
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.5;
+            font-size: 9px;
+        }
+
+        /* 作者组件 */
+        .author-box {
+            width: 100%;
+            height: 60px;
+            flex: 0 0 60px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible; /* 2026-09-26 三个社交图标超出盒宽，裁剪职责移交给 .dx-letters-clip */
+        }
+
+        /* 2026-09-26 只裁剪滑出的 D/H 字母，不影响悬停展开的图标行。
+           flex 居中：字母是绝对定位无 left/top，靠静态位置居中（原 author-box 也是这么做的） */
+        .dx-letters-clip {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .dx-letter {
+            position: absolute;
+            font-size: 14px;
+            font-weight: 800;
+            color: var(--text);
+            /* 只过渡 hover 时真正改的 transform/opacity，避免 all 触发延迟 */
+            transition: transform 0.5s var(--fluid-ease) 0.4s, opacity 0.5s var(--fluid-ease) 0.4s;
+            z-index: 10;
+        }
+
+        .letter-d { transform: translateX(-8px); }
+        .letter-x { transform: translateX(8px); }
+
+        .sidebar:hover .letter-d {
+            transform: translateX(-120px);
+            opacity: 0;
+            transition-delay: 0s;
+        }
+
+        .sidebar:hover .letter-x {
+            transform: translateX(120px);
+            opacity: 0;
+            transition-delay: 0s;
+        }
+
+        .author-content-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start; /* 2026-09-26 三个图标改左对齐，避免 GitHub 被顶出屏幕左缘 */
+            padding-left: 2px;
+            white-space: nowrap;
+            opacity: 0;
+            transform: scale(0.9);
+            transition: all 0.4s var(--fluid-ease) 0s;
+            pointer-events: none;
+        }
+
+        .sidebar:hover .author-content-wrap {
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0.2s;
+            pointer-events: auto;
+        }
+
+        .author-name-lite {
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--author-name);
+        }
+
+        .social-row-lite { display: flex; gap: 12px; }
+
+        .social-icon-lite {
+            color: var(--social-icon);
+            transition: color 0.2s, transform 0.2s;
+        }
+
+        .social-icon-lite:hover {
+            color: var(--text);
+            transform: translateY(-1px);
+        }
+
+        .side-actions {
+            margin-top:auto;
+            margin-bottom:12px;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            gap:8px;
+            width:100%;
+            flex:0 0 auto;
+        }
+
+        .side-pill {
+            width:44px;
+            height:36px;
+            border-radius:999px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            /* 只过渡 hover/激活会改的属性，避免 all 触发延迟 */
+            transition: width 0.3s var(--fluid-ease) 0.5s, gap 0.3s var(--fluid-ease) 0.5s, background-color 0.2s, color 0.2s, border-color 0.2s;
+            flex-shrink: 0;
+            overflow:hidden;
+            gap:8px;
+            position:relative;
+        }
+
+        .sidebar:hover .side-pill {
+            width: 170px;
+            transition-delay: 0s;
+        }
+
+        .side-pill:hover {
+            background: var(--nav-hover-bg);
+            color: var(--text);
+            border-color: var(--stage-border);
+        }
+
+        .side-pill.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
+
+        .side-pill.update-available {
+            border-color:#22c55e;
+            color:#16a34a;
+            overflow:visible;
+        }
+
+        html.theme-dark .side-pill.update-available,
+        body.theme-dark .side-pill.update-available {
+            border-color:#86efac;
+            color:#86efac;
+        }
+
+        .side-pill.update-available::after {
+            content:"NEW";
+            position:absolute;
+            top:-7px;
+            right:-9px;
+            min-width:28px;
+            height:16px;
+            padding:0 5px;
+            border-radius:999px;
+            background:#22c55e;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#fff;
+            font-size:9px;
+            font-weight:900;
+            letter-spacing:.02em;
+            box-shadow:0 6px 16px rgba(34,197,94,.28), 0 0 0 3px rgba(34,197,94,.12);
+            pointer-events:none;
+        }
+
+        html.theme-dark .side-pill.update-available::after,
+        body.theme-dark .side-pill.update-available::after {
+            background:#4ade80;
+            color:#052e16;
+            box-shadow:0 6px 16px rgba(74,222,128,.22), 0 0 0 3px rgba(74,222,128,.12);
+        }
+
+        .side-pill svg { width: 16px; height: 16px; flex:0 0 auto; }
+        .theme-dock {
+            width:44px;
+            height:36px;
+            padding:3px;
+            border-radius:999px;
+            border:1px solid var(--border);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:2px;
+            overflow:hidden;
+            flex-shrink:0;
+            transition: width 0.3s var(--fluid-ease) 0.5s, gap 0.3s var(--fluid-ease) 0.5s, border-color .2s, background-color .2s;
+        }
+        .sidebar:hover .theme-dock,
+        .sidebar.is-pinned .theme-dock {
+            width:170px;
+            gap:6px;
+            transition-delay:0s;
+        }
+        .theme-dock-btn {
+            width:100%;
+            min-width:0;
+            height:28px;
+            border:0;
+            border-radius:999px;
+            background:transparent;
+            color:var(--muted);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:6px;
+            cursor:pointer;
+            font-size:12px;
+            font-weight:850;
+            letter-spacing:.02em;
+            overflow:hidden;
+            transition:background-color .18s, color .18s;
+        }
+        .theme-dock-btn:hover {
+            background:var(--nav-hover-bg);
+            color:var(--text);
+        }
+        .theme-dock-btn.active {
+            background:var(--text);
+            color:var(--bg);
+        }
+        .theme-dock-btn svg {
+            width:15px;
+            height:15px;
+            flex:0 0 auto;
+        }
+        .theme-dock-btn span {
+            opacity:0;
+            max-width:0;
+            white-space:nowrap;
+            overflow:hidden;
+            transition:opacity .24s .5s, max-width .24s var(--fluid-ease) .5s;
+        }
+        .nav-theme-dock { margin:6px 0 2px; }
+        .sidebar:hover .theme-dock-btn span,
+        .sidebar.is-pinned .theme-dock-btn span {
+            opacity:1;
+            max-width:80px;
+            transition-delay:.12s;
+        }
+        .settings-fold-chevron {
+            width: 13px !important;
+            height: 13px !important;
+            margin-left: -2px;
+            opacity: 0;
+            max-width: 0;
+            overflow: hidden;
+            transition: opacity 0.3s 0.5s, max-width 0.3s var(--fluid-ease) 0.5s, transform .22s var(--fluid-ease);
+        }
+        .sidebar:hover .settings-fold-chevron,
+        .sidebar.is-pinned .settings-fold-chevron {
+            opacity: .72;
+            max-width: 16px;
+            transition-delay: .15s, .15s, 0s;
+        }
+        .settings-fold-toggle[aria-expanded="true"] .settings-fold-chevron {
+            transform: rotate(180deg);
+        }
+        .settings-fold-group {
+            width: 100%;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+            transition: max-height .28s var(--fluid-ease), opacity .18s ease;
+        }
+        .settings-fold-group:not(.is-collapsed) {
+            max-height: 88px;
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .side-pill-text {
+            opacity:0;
+            max-width:0;
+            font-size:12px;
+            font-weight:800;
+            letter-spacing:.02em;
+            white-space:nowrap;
+            overflow:hidden;
+            transition: opacity 0.3s 0.5s, max-width 0.3s var(--fluid-ease) 0.5s;
+        }
+        .sidebar:hover .side-pill-text {
+            opacity:1;
+            max-width:120px;
+            transition-delay:.15s;
+        }
+        /* 折叠态去除 gap，避免图标被推偏 */
+        .side-pill { gap:0; }
+        .sidebar:hover .side-pill { gap:8px; }
+
+        .project-version-badge {
+            width:44px;
+            min-height:18px;
+            padding:0 4px;
+            border-radius:999px;
+            border:1px solid var(--border);
+            background:var(--nav-hover-bg);
+            color:var(--muted);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:9px;
+            font-weight:800;
+            line-height:1;
+            white-space:nowrap;
+            overflow:hidden;
+            cursor:pointer;
+            transition:width 0.3s var(--fluid-ease) 0.5s, color .2s, border-color .2s, background-color .2s;
+        }
+        .project-version-badge:hover { color:var(--text); border-color:var(--accent, #6366f1); }
+        .project-version-badge.checking { opacity:.6; animation:badge-pulse 1s ease-in-out infinite; }
+        @keyframes badge-pulse { 0%,100%{opacity:.5;} 50%{opacity:1;} }
+        /* 2026-09-21 GBZ 更新入口：发现新版本时版本徽章变绿，显示可更新的新版本号 */
+        .project-version-badge.update-available {
+            border-color:#16a34a;
+            background:rgba(34,197,94,.12);
+            color:#16a34a;
+            animation:badge-glow 2s ease-in-out infinite;
+        }
+        .project-version-badge.update-available:hover {
+            background:#16a34a;
+            color:#ffffff;
+        }
+        html.theme-dark .project-version-badge.update-available,
+        body.theme-dark .project-version-badge.update-available {
+            border-color:rgba(134,239,172,.45);
+            background:rgba(74,222,128,.14);
+            color:#86efac;
+        }
+        html.theme-dark .project-version-badge.update-available:hover,
+        body.theme-dark .project-version-badge.update-available:hover {
+            background:#16a34a;
+            color:#ffffff;
+        }
+        @keyframes badge-glow { 0%,100%{ box-shadow:0 0 0 0 rgba(34,197,94,0);} 50%{ box-shadow:0 0 0 3px rgba(34,197,94,.25);} }
+        .project-version-badge .project-version-brand { margin-right:3px; opacity:.85; }
+
+        .sidebar:hover .project-version-badge {
+            width:170px;
+            transition-delay:0s;
+        }
+
+        .project-version-full { display:none; }
+        .sidebar:hover .project-version-compact { display:none; }
+        .sidebar:hover .project-version-full { display:inline; }
+
+        .update-now-btn {
+            display:none;
+            width:56px;
+            min-height:24px;
+            padding:0 7px;
+            border-radius:999px;
+            border:1px solid rgba(34,197,94,.35);
+            background:rgba(34,197,94,.1);
+            color:#16a34a;
+            align-items:center;
+            justify-content:center;
+            gap:5px;
+            font-size:9px;
+            font-weight:900;
+            overflow:hidden;
+            transition:width 0.3s var(--fluid-ease) 0.5s, background-color .2s, color .2s, border-color .2s;
+        }
+        .update-now-btn.show { display:flex; }
+        .sidebar:hover .update-now-btn { width:170px; transition-delay:0s; }
+        .update-now-btn:hover { background:#16a34a; color:#fff; border-color:#16a34a; }
+        .update-now-btn[disabled] { opacity:.7; cursor:wait; }
+        .update-now-btn svg { display:none; width:14px; height:14px; flex:0 0 auto; }
+        .sidebar:hover .update-now-btn svg { display:block; }
+        .update-now-text {
+            opacity:1;
+            max-width:42px;
+            white-space:nowrap;
+            overflow:hidden;
+            transition: opacity 0.3s 0.5s, max-width 0.3s var(--fluid-ease) 0.5s;
+        }
+        .update-action-prefix { display:none; }
+        .update-version-full { display:none; }
+        .sidebar:hover .update-version-compact { display:none; }
+        .sidebar:hover .update-version-full { display:inline; }
+        .sidebar:hover .update-action-prefix { display:inline; }
+        .sidebar:hover .update-now-text { max-width:130px; transition-delay:.15s; }
+        /* 2026-09-21 有更新时徽章保持可见（绿色显示新版本号），不再被一键更新按钮隐藏 */
+        html.theme-dark .update-now-btn,
+        body.theme-dark .update-now-btn {
+            border-color:rgba(134,239,172,.42);
+            background:rgba(74,222,128,.12);
+            color:#86efac;
+        }
+        html.theme-dark .update-now-btn:hover,
+        body.theme-dark .update-now-btn:hover {
+            background:#86efac;
+            border-color:#86efac;
+            color:#052e16;
+        }
+
+        @media (max-height: 760px) {
+            .sidebar {
+                padding: 18px 0 14px;
+                overflow-y:hidden;
+                overflow-x:hidden;
+                overscroll-behavior:contain;
+                -webkit-overflow-scrolling:touch;
+                scrollbar-width:thin;
+                scrollbar-color:rgba(148,163,184,.34) transparent;
+            }
+            .sidebar nav {
+                flex:1 1 auto;
+                min-height:0;
+                overflow-y:auto;
+                overflow-x:hidden;
+                padding-bottom:0;
+            }
+            .logo-ring { margin-bottom: 16px !important; }
+            .nav-item {
+                height: 42px;
+                flex-basis: 42px;
+                margin: 5px 0;
+                border-radius: 15px;
+            }
+            .nav-fold-toggle {
+                height: 32px;
+                flex-basis: 32px;
+                margin-bottom: 4px;
+                border-radius: 14px;
+            }
+            .nav-fold-group { max-height: 720px; }
+            .side-actions {
+                margin-top:auto;
+                margin-bottom:6px;
+                gap:5px;
+                padding-top:8px;
+                border-top:1px solid var(--border);
+            }
+            .settings-fold-group {
+                gap: 5px;
+            }
+            .settings-fold-group:not(.is-collapsed) {
+                max-height: 70px;
+            }
+            .theme-dock { height:30px; width:40px; padding:2px; }
+            .theme-dock-btn { height:24px; }
+            .side-pill {
+                height:30px;
+                flex-basis:30px;
+                width:40px;
+            }
+            .project-version-badge { width:40px; min-height:16px; font-size:8px; }
+            .update-now-btn.show { min-height:22px; width:48px; }
+            .author-box {
+                height:32px;
+                flex-basis:32px;
+            }
+            .dx-letter {
+                font-size:12px;
+            }
+        }
+
+        @media (max-height: 660px) {
+            .sidebar { padding: 12px 0; }
+            .sidebar nav {
+                flex:1 1 auto;
+                min-height:0;
+                overflow-y:auto;
+                overflow-x:hidden;
+                padding-bottom:0;
+            }
+            .logo-ring {
+                width:32px;
+                height:32px;
+                border-radius:10px;
+                margin-bottom:10px !important;
+            }
+            .nav-item {
+                height:38px;
+                flex-basis:38px;
+                margin:3px 0;
+                border-radius:14px;
+            }
+            .nav-fold-toggle { height:30px; flex-basis:30px; }
+            .nav-fold-group { max-height: 720px; }
+            .side-actions {
+                margin-top:auto;
+                margin-bottom:4px;
+                gap:4px;
+                padding-top:6px;
+            }
+            .settings-fold-group {
+                gap: 4px;
+            }
+            .settings-fold-group:not(.is-collapsed) {
+                max-height: 66px;
+            }
+            .theme-dock { height:30px; width:38px; padding:2px; }
+            .theme-dock-btn { height:24px; }
+            .side-pill {
+                height:30px;
+                flex-basis:30px;
+                width:38px;
+            }
+            .author-box {
+                height:28px;
+                flex-basis:28px;
+            }
+            .dx-letter {
+                font-size:11px;
+            }
+            .side-pill svg { width:15px; height:15px; }
+            .project-version-badge { width:38px; min-height:16px; font-size:8px; }
+            .update-now-btn.show { width:46px; min-height:22px; font-size:8px; }
+        }
+
+        .studio-modal[hidden] {
+            display:none !important;
+        }
+
+        .studio-modal {
+            position:fixed;
+            inset:0;
+            z-index:500;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:24px;
+            background:rgba(15,23,42,.38);
+            backdrop-filter:blur(10px);
+        }
+
+        .studio-modal-panel {
+            width:min(560px, 100%);
+            max-height:min(760px, calc(100vh - 48px));
+            display:flex;
+            flex-direction:column;
+            overflow:hidden;
+            border-radius:8px;
+            border:1px solid rgba(15,23,42,.1);
+            background:#fff;
+            color:#111827;
+            box-shadow:0 24px 70px rgba(15,23,42,.24);
+        }
+
+        .studio-modal-head {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:16px;
+            padding:20px 20px 14px;
+            border-bottom:1px solid #eef2f7;
+        }
+
+        .studio-modal-kicker {
+            font-size:11px;
+            font-weight:900;
+            letter-spacing:.08em;
+            color:#16a34a;
+            text-transform:uppercase;
+            margin-bottom:6px;
+        }
+
+        .studio-modal-title {
+            font-size:20px;
+            line-height:1.25;
+            font-weight:900;
+            margin:0;
+            letter-spacing:0;
+        }
+
+        .studio-modal-close {
+            width:32px;
+            height:32px;
+            border-radius:8px;
+            border:1px solid #e5e7eb;
+            background:#fff;
+            color:#64748b;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            flex:0 0 auto;
+        }
+
+        .studio-modal-close:hover {
+            color:#111827;
+            border-color:#cbd5e1;
+            background:#f8fafc;
+        }
+
+        .studio-modal-body {
+            padding:18px 20px;
+            overflow:auto;
+        }
+
+        .studio-modal-copy {
+            margin:0 0 14px;
+            color:#475569;
+            font-size:13px;
+            line-height:1.7;
+        }
+
+        .update-modal-summary {
+            display:flex;
+            align-items:flex-start;
+            gap:10px;
+            margin-top:16px;
+            padding:12px;
+            border:1px solid #e5e7eb;
+            border-radius:8px;
+            background:#f8fafc;
+            color:#334155;
+            font-size:12px;
+            line-height:1.55;
+        }
+
+        .update-modal-summary strong {
+            display:block;
+            color:#111827;
+            margin-bottom:2px;
+            font-size:12px;
+        }
+
+        .update-modal-dot {
+            width:9px;
+            height:9px;
+            margin-top:4px;
+            border-radius:99px;
+            background:#94a3b8;
+            flex:0 0 auto;
+        }
+
+        .update-modal-summary.ok .update-modal-dot { background:#22c55e; }
+        .update-modal-summary.warn .update-modal-dot { background:#f59e0b; }
+        .update-modal-summary.fail .update-modal-dot { background:#ef4444; }
+
+        /* 更新弹窗：双卡片需要更宽的面板，避免左右布局被裁剪 */
+        #project-update-modal .studio-modal-panel { width:min(880px, 100%); max-height:min(840px, calc(100vh - 48px)); }
+        .update-notes-box { margin:2px 0 14px; padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#fbfdff; }
+        .update-notes-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+        .update-notes-head strong { font-size:12px; color:#111827; font-weight:950; }
+        .update-notes-version { color:#64748b; font-size:11px; font-weight:800; white-space:nowrap; }
+        .update-notes-list { margin:0; padding:0 0 0 16px; display:grid; gap:6px; color:#334155; font-size:12px; line-height:1.55; }
+        .update-notes-empty { margin:0; color:#94a3b8; font-size:12px; line-height:1.55; }
+        .update-source-list { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; margin-top:14px; align-items:stretch; }
+        @media (max-width: 720px) { .update-source-list { grid-template-columns:1fr; } }
+        .update-source-card { width:100%; min-width:0; border:1px solid #e5e7eb; border-radius:10px; background:#fff; color:#111827; text-align:left; padding:12px; display:flex; flex-direction:column; gap:10px; cursor:pointer; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
+        .update-source-card:hover { transform:translateY(-1px); border-color:#cbd5e1; box-shadow:0 12px 28px rgba(15,23,42,.08); }
+        .update-source-card.active { border-color:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.20); background:#f0fdf4; }
+        .update-source-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+        .update-source-title { min-width:0; display:flex; flex-direction:column; gap:4px; }
+        .update-source-title strong { color:#111827; font-size:13px; line-height:1.2; font-weight:950; }
+        .update-source-title span { color:#64748b; font-size:11px; line-height:1.35; font-weight:700; }
+        .update-source-head-right { flex:0 0 auto; display:flex; align-items:center; gap:8px; }
+        .update-source-check { display:none; flex:0 0 auto; width:22px; height:22px; border-radius:999px; background:#16a34a; color:#fff; align-items:center; justify-content:center; }
+        .update-source-check svg { width:14px; height:14px; }
+        .update-source-card.active .update-source-check { display:flex; }
+        .update-source-badge { flex:0 0 auto; min-width:56px; height:24px; border-radius:999px; background:#f1f5f9; color:#64748b; display:flex; align-items:center; justify-content:center; padding:0 9px; font-size:10px; font-weight:900; }
+        .update-source-badge.ok { background:#16a34a; color:#fff; }
+        .update-source-badge.bad { background:#dc2626; color:#fff; }
+        .lan-source-config { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:10px; align-items:center; padding:10px; border:1px dashed #cbd5e1; border-radius:8px; background:#f8fafc; }
+        .lan-source-config input { width:100%; min-width:0; height:36px; border:1px solid #dbe3ef; border-radius:8px; padding:0 11px; font-size:12px; color:#111827; background:#fff; outline:none; }
+        .lan-source-config input:focus { border-color:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.16); }
+        .lan-source-config button { height:36px; border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#111827; padding:0 13px; font-size:12px; font-weight:900; cursor:pointer; }
+        .lan-source-config button:hover { border-color:#16a34a; color:#15803d; }
+        .lan-publish-note-box { margin-top:14px; display:grid; gap:8px; padding:12px; border:1px solid rgba(34,197,94,.20); border-radius:8px; background:rgba(34,197,94,.06); }
+        .lan-publish-note-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .lan-publish-note-head strong { color:#111827; font-size:12px; font-weight:950; }
+        .lan-publish-note-head span { color:#64748b; font-size:11px; font-weight:800; }
+        .lan-publish-note-box textarea { width:100%; min-height:72px; max-height:150px; resize:vertical; border:1px solid #dbe3ef; border-radius:8px; background:#fff; color:#111827; padding:10px 11px; font-size:12px; line-height:1.55; outline:none; }
+        .lan-publish-note-box textarea:focus { border-color:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.16); }
+        .connectivity-list { display:grid; gap:8px; min-width:0; }
+
+        .connectivity-row {
+            display:grid;
+            grid-template-columns:12px minmax(0, 1fr) auto;
+            align-items:center;
+            gap:10px;
+            min-height:42px;
+            padding:9px 10px;
+            border:1px solid #eef2f7;
+            border-radius:8px;
+            background:#fff;
+        }
+        .connectivity-row > div { min-width:0; }
+
+        .connectivity-indicator {
+            width:9px;
+            height:9px;
+            border-radius:99px;
+            background:#94a3b8;
+        }
+
+        .connectivity-row.ok .connectivity-indicator { background:#22c55e; }
+        .connectivity-row.fail .connectivity-indicator { background:#ef4444; }
+        .connectivity-row.pending .connectivity-indicator {
+            background:#94a3b8;
+            animation: studio-pulse 1s ease-in-out infinite;
+        }
+
+        .connectivity-name {
+            font-size:12px;
+            font-weight:900;
+            color:#111827;
+            line-height:1.25;
+        }
+
+        .connectivity-url {
+            margin-top:3px;
+            max-width:100%;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            font-size:10px;
+            color:#94a3b8;
+        }
+
+        .connectivity-status {
+            justify-self:end;
+            font-size:11px;
+            font-weight:900;
+            color:#64748b;
+            white-space:nowrap;
+        }
+        .connectivity-row.ok .connectivity-status { color:#16a34a; }
+        .connectivity-row.fail .connectivity-status { color:#ef4444; }
+
+        .connectivity-error {
+            grid-column:2 / 4;
+            margin-top:-4px;
+            color:#ef4444;
+            font-size:11px;
+            line-height:1.45;
+            word-break:break-word;
+        }
+
+        .studio-modal-actions {
+            display:flex;
+            justify-content:flex-end;
+            gap:10px;
+            padding:14px 20px 18px;
+            border-top:1px solid #eef2f7;
+            background:#fff;
+        }
+
+        .studio-modal-btn {
+            min-height:36px;
+            padding:0 14px;
+            border-radius:8px;
+            border:1px solid #e5e7eb;
+            background:#fff;
+            color:#334155;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            gap:7px;
+            font-size:12px;
+            font-weight:900;
+            cursor:pointer;
+        }
+
+        .studio-modal-btn svg {
+            width:15px;
+            height:15px;
+            flex:0 0 auto;
+        }
+
+        .studio-modal-btn:hover {
+            background:#f8fafc;
+            border-color:#cbd5e1;
+        }
+
+        #connectivity-test-btn {
+            border-color:rgba(37,99,235,.24);
+            background:#eff6ff;
+            color:#1d4ed8;
+            transition:transform .16s ease, background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+        }
+
+        #connectivity-test-btn:hover {
+            transform:translateY(-1px);
+            border-color:#2563eb;
+            background:#2563eb;
+            color:#fff;
+            box-shadow:0 10px 22px rgba(37,99,235,.20);
+        }
+
+        #connectivity-test-btn:hover svg {
+            transform:rotate(24deg);
+        }
+
+        #connectivity-test-btn:active {
+            transform:translateY(0);
+            box-shadow:0 5px 12px rgba(37,99,235,.16);
+        }
+
+        #connectivity-test-btn svg {
+            transition:transform .18s ease;
+        }
+
+        .studio-modal-btn.primary {
+            background:#111827;
+            border-color:#111827;
+            color:#fff;
+        }
+
+        .studio-modal-btn.primary:hover {
+            background:#16a34a;
+            border-color:#16a34a;
+        }
+
+        .studio-modal-btn[disabled] {
+            opacity:.58;
+            cursor:wait;
+        }
+
+        html.theme-dark .studio-modal,
+        body.theme-dark .studio-modal {
+            background:rgba(2,6,23,.56);
+        }
+
+        html.theme-dark .studio-modal-panel,
+        body.theme-dark .studio-modal-panel,
+        html.theme-dark .studio-modal-close,
+        body.theme-dark .studio-modal-close,
+        html.theme-dark .connectivity-row,
+        body.theme-dark .connectivity-row,
+        html.theme-dark .studio-modal-actions,
+        body.theme-dark .studio-modal-actions,
+        html.theme-dark .studio-modal-btn,
+        body.theme-dark .studio-modal-btn {
+            background:#111216;
+            border-color:#25262b;
+            color:#e8e8ea;
+        }
+
+        html.theme-dark .update-source-card,
+        body.theme-dark .update-source-card {
+            background:#111216;
+            border-color:#25262b;
+            color:#e8e8ea;
+        }
+
+        html.theme-dark .lan-source-config,
+        body.theme-dark .lan-source-config {
+            background:#111216;
+            border-color:#35363d;
+        }
+
+        html.theme-dark .lan-source-config input,
+        body.theme-dark .lan-source-config input,
+        html.theme-dark .lan-source-config button,
+        body.theme-dark .lan-source-config button {
+            background:#16171d;
+            border-color:#35363d;
+            color:#e8e8ea;
+        }
+
+        html.theme-dark .update-source-card.active,
+        body.theme-dark .update-source-card.active {
+            border-color:#22c55e;
+            box-shadow:0 0 0 2px rgba(34,197,94,.35);
+            background:rgba(34,197,94,.12);
+        }
+
+        html.theme-dark .studio-modal-head,
+        body.theme-dark .studio-modal-head,
+        html.theme-dark .studio-modal-actions,
+        body.theme-dark .studio-modal-actions {
+            border-color:#25262b;
+        }
+
+        html.theme-dark .studio-modal-copy,
+        body.theme-dark .studio-modal-copy,
+        html.theme-dark .connectivity-status,
+        body.theme-dark .connectivity-status {
+            color:#8f9aab;
+        }
+
+        html.theme-dark .update-modal-summary,
+        body.theme-dark .update-modal-summary {
+            background:#0c0d10;
+            border-color:#25262b;
+            color:#9aa6b8;
+        }
+
+        html.theme-dark .update-notes-box,
+        body.theme-dark .update-notes-box {
+            background:#0c0d10;
+            border-color:#25262b;
+        }
+
+        html.theme-dark .update-modal-summary strong,
+        body.theme-dark .update-modal-summary strong,
+        html.theme-dark .update-notes-head strong,
+        body.theme-dark .update-notes-head strong,
+        html.theme-dark .update-source-title strong,
+        body.theme-dark .update-source-title strong,
+        html.theme-dark .connectivity-name,
+        body.theme-dark .connectivity-name {
+            color:#e8e8ea;
+        }
+
+        html.theme-dark .update-notes-list,
+        body.theme-dark .update-notes-list {
+            color:#cbd5e1;
+        }
+
+        html.theme-dark .update-notes-version,
+        body.theme-dark .update-notes-version,
+        html.theme-dark .update-notes-empty,
+        body.theme-dark .update-notes-empty,
+        html.theme-dark .update-source-title span,
+        body.theme-dark .update-source-title span {
+            color:#8f9aab;
+        }
+
+        html.theme-dark .studio-modal-btn.primary,
+        body.theme-dark .studio-modal-btn.primary {
+            background:#d8dee9;
+            border-color:#d8dee9;
+            color:#10141d;
+        }
+
+        html.theme-dark #connectivity-test-btn,
+        body.theme-dark #connectivity-test-btn {
+            background:rgba(96,165,250,.12);
+            border-color:rgba(96,165,250,.34);
+            color:#93c5fd;
+        }
+
+        html.theme-dark #connectivity-test-btn:hover,
+        body.theme-dark #connectivity-test-btn:hover {
+            background:#60a5fa;
+            border-color:#60a5fa;
+            color:#07111f;
+            box-shadow:0 10px 24px rgba(96,165,250,.18);
+        }
+
+        html.theme-dark .studio-modal-btn.primary:hover,
+        body.theme-dark .studio-modal-btn.primary:hover {
+            background:#86efac;
+            border-color:#86efac;
+            color:#052e16;
+        }
+
+        html.theme-custom .studio-modal,
+        body.theme-custom .studio-modal {
+            background:rgba(2,6,23,.58);
+        }
+        html.theme-custom .studio-modal-panel,
+        body.theme-custom .studio-modal-panel,
+        html.theme-custom .studio-modal-close,
+        body.theme-custom .studio-modal-close,
+        html.theme-custom .connectivity-row,
+        body.theme-custom .connectivity-row,
+        html.theme-custom .studio-modal-actions,
+        body.theme-custom .studio-modal-actions,
+        html.theme-custom .studio-modal-btn,
+        body.theme-custom .studio-modal-btn,
+        html.theme-custom .update-source-card,
+        body.theme-custom .update-source-card,
+        html.theme-custom .update-notes-box,
+        body.theme-custom .update-notes-box,
+        html.theme-custom .update-modal-summary,
+        body.theme-custom .update-modal-summary {
+            background:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 7%, #111722);
+            border-color:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 28%, #25262b);
+            color:#eef8ff;
+        }
+        html.theme-custom .studio-modal-head,
+        body.theme-custom .studio-modal-head,
+        html.theme-custom .studio-modal-actions,
+        body.theme-custom .studio-modal-actions {
+            border-color:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 24%, #253044);
+        }
+        html.theme-custom .studio-modal-copy,
+        body.theme-custom .studio-modal-copy,
+        html.theme-custom .connectivity-status,
+        body.theme-custom .connectivity-status,
+        html.theme-custom .update-source-title span,
+        body.theme-custom .update-source-title span,
+        html.theme-custom .update-notes-empty,
+        body.theme-custom .update-notes-empty {
+            color:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 22%, #a4adbf);
+        }
+        html.theme-custom .studio-modal-kicker,
+        body.theme-custom .studio-modal-kicker {
+            color:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 78%, #ffffff);
+        }
+        html.theme-custom .studio-modal-title,
+        body.theme-custom .studio-modal-title,
+        html.theme-custom .update-source-title strong,
+        body.theme-custom .update-source-title strong,
+        html.theme-custom .update-notes-head strong,
+        body.theme-custom .update-notes-head strong,
+        html.theme-custom .connectivity-name,
+        body.theme-custom .connectivity-name {
+            color:#eef8ff;
+        }
+        html.theme-custom .update-source-card.active,
+        body.theme-custom .update-source-card.active {
+            border-color:var(--studio-custom-color, #7c5cff);
+            background:color-mix(in srgb, var(--studio-custom-color, #7c5cff) 14%, #111722);
+            box-shadow:0 0 0 2px color-mix(in srgb, var(--studio-custom-color, #7c5cff) 30%, transparent);
+        }
+        html.theme-custom .studio-modal-btn.primary,
+        body.theme-custom .studio-modal-btn.primary,
+        html.theme-custom #connectivity-test-btn,
+        body.theme-custom #connectivity-test-btn,
+        html.theme-custom .update-source-check,
+        body.theme-custom .update-source-check {
+            background:var(--studio-custom-color, #7c5cff);
+            border-color:var(--studio-custom-color, #7c5cff);
+            color:#071018;
+        }
+        html.theme-custom .studio-modal-btn:hover,
+        body.theme-custom .studio-modal-btn:hover {
+            border-color:var(--studio-custom-color, #7c5cff);
+        }
+
+        @media (max-width: 640px) {
+            .studio-modal {
+                align-items:flex-end;
+                padding:12px;
+            }
+            .studio-modal-panel {
+                max-height:calc(100vh - 24px);
+            }
+            .studio-modal-actions {
+                flex-wrap:wrap;
+            }
+            .studio-modal-btn {
+                flex:1 1 130px;
+            }
+        }
+
+        .sidebar.is-pinned {
+            width: 220px;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .logo-ring {
+            transform: rotate(90deg);
+            border-radius: 50%;
+            transition-delay: 0s;
+            background: var(--nav-hover-bg);
+            color: var(--text);
+            box-shadow: 0 0 0 4px rgba(148, 163, 184, .10);
+        }
+        .sidebar.is-pinned #logo-dot {
+            background: var(--text) !important;
+            transform: scale(1.35);
+            box-shadow: 0 0 0 4px rgba(148, 163, 184, .16);
+        }
+        .sidebar.is-pinned .logo-ring:hover,
+        .sidebar.is-pinned .logo-ring:focus-visible {
+            box-shadow: 0 0 0 5px rgba(148, 163, 184, .14);
+        }
+        .sidebar.is-pinned .nav-item,
+        .sidebar.is-pinned .nav-fold-toggle {
+            width: 190px;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .nav-text {
+            opacity: 1;
+            transition-delay: 0.1s;
+        }
+        .sidebar.is-pinned .letter-d {
+            transform: translateX(-120px);
+            opacity: 0;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .letter-x {
+            transform: translateX(120px);
+            opacity: 0;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .author-content-wrap {
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0.2s;
+            pointer-events: auto;
+        }
+        .sidebar.is-pinned .side-pill {
+            width: 170px;
+            gap: 8px;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .side-pill-text {
+            opacity: 1;
+            max-width: 120px;
+            transition-delay: .15s;
+        }
+        .sidebar.is-pinned .project-version-badge,
+        .sidebar.is-pinned .update-now-btn {
+            width: 170px;
+            transition-delay: 0s;
+        }
+        .sidebar.is-pinned .project-version-compact,
+        .sidebar.is-pinned .update-version-compact {
+            display: none;
+        }
+        .sidebar.is-pinned .project-version-full,
+        .sidebar.is-pinned .update-version-full,
+        .sidebar.is-pinned .update-action-prefix {
+            display: inline;
+        }
+        .sidebar.is-pinned .update-now-btn svg {
+            display: block;
+        }
+        .sidebar.is-pinned .update-now-text {
+            max-width: 130px;
+            transition-delay: .15s;
+        }
+
+        .sidebar.is-collapsing:hover {
+            width: 80px;
+        }
+        .sidebar.is-collapsing:hover .logo-ring {
+            transform: none;
+            border-radius: 12px;
+            background: transparent;
+        }
+        .sidebar.is-collapsing:hover .nav-item,
+        .sidebar.is-collapsing:hover .nav-fold-toggle {
+            width: 48px;
+        }
+        .sidebar.is-collapsing:hover .nav-text {
+            opacity: 0;
+        }
+        .sidebar.is-collapsing:hover .letter-d {
+            transform: translateX(-8px);
+            opacity: 1;
+        }
+        .sidebar.is-collapsing:hover .letter-x {
+            transform: translateX(8px);
+            opacity: 1;
+        }
+        .sidebar.is-collapsing:hover .author-content-wrap {
+            opacity: 0;
+            transform: scale(0.9);
+            pointer-events: none;
+        }
+        .sidebar.is-collapsing:hover .side-pill {
+            width: 44px;
+            gap: 0;
+        }
+        .sidebar.is-collapsing:hover .side-pill-text {
+            opacity: 0;
+            max-width: 0;
+        }
+        .sidebar.is-collapsing:hover .project-version-badge {
+            width: 44px;
+        }
+        .sidebar.is-collapsing:hover .project-version-compact,
+        .sidebar.is-collapsing:hover .update-version-compact {
+            display: inline;
+        }
+        .sidebar.is-collapsing:hover .project-version-full,
+        .sidebar.is-collapsing:hover .update-version-full,
+        .sidebar.is-collapsing:hover .update-action-prefix {
+            display: none;
+        }
+        .sidebar.is-collapsing:hover .update-now-btn {
+            width: 56px;
+        }
+        .sidebar.is-collapsing:hover .update-now-btn svg {
+            display: none;
+        }
+        .sidebar.is-collapsing:hover .update-now-text {
+            max-width: 42px;
+        }
+
+        /* GBZ minimal shell cleanup: hide legacy feature blocks marked for removal. */
+        #local-nav-toggle,
+        #local-nav-group,
+        #local-nav-group + div,
+        [onclick*="'online'"],
+        [onclick*='"online"'],
+        .side-actions,
+        #github-entry-btn,
+        #update-now-btn,
+        #project-version-badge,
+        .author-box {
+            display: none !important;
+        }
+
+        .sidebar nav {
+            justify-content: center;
+        }
+
+        .stage {
+            background: #030303;
+        }
+
+        /* GBZ dark shell: keep the whole app black, including the outer rail and canvas frame. */
+        html,
+        body,
+        .app-shell {
+            background: #030303 !important;
+            color: #e9edf5 !important;
+        }
+
+        .sidebar {
+            background: #070a0f !important;
+            border-right: 1px solid rgba(255, 255, 255, .08) !important;
+            box-shadow: none !important;
+        }
+
+        .logo-ring {
+            background: #0d1118 !important;
+            border-color: rgba(255, 255, 255, .18) !important;
+            color: #e9edf5 !important;
+            box-shadow: none !important;
+        }
+
+        #logo-dot {
+            background: #e9edf5 !important;
+        }
+
+        .nav-item,
+        .side-pill,
+        .nav-fold-toggle {
+            color: #8c96a8 !important;
+        }
+
+        .nav-item:hover,
+        .side-pill:hover,
+        .nav-fold-toggle:hover {
+            background: rgba(255, 255, 255, .08) !important;
+            color: #f3f6fb !important;
+        }
+
+        .nav-item.active,
+        .side-pill.active {
+            background: #f4f7fb !important;
+            color: #05070a !important;
+        }
+
+        /* Compact studio rail: icon-only navigation keeps the canvas content unobstructed. */
+        .sidebar,
+        .sidebar:hover,
+        .sidebar.is-pinned,
+        .sidebar.is-collapsing:hover {
+            width: 56px !important;
+            min-width: 56px !important;
+            padding: 28px 0 18px !important;
+            overflow: visible !important;
+            transition: background .3s, border-color .3s !important;
+        }
+
+        .sidebar nav {
+            overflow: visible !important;
+            scrollbar-gutter: auto !important;
+        }
+
+        .sidebar .logo-ring,
+        .sidebar:hover .logo-ring,
+        .sidebar.is-pinned .logo-ring,
+        .sidebar.is-collapsing:hover .logo-ring {
+            position: relative !important;
+            width: 34px !important;
+            height: 34px !important;
+            margin-bottom: 18px !important;
+            transform: none !important;
+            border-radius: 50% !important;
+        }
+
+        .sidebar .nav-item,
+        .sidebar:hover .nav-item,
+        .sidebar.is-pinned .nav-item,
+        .sidebar.is-collapsing:hover .nav-item,
+        .sidebar .nav-fold-toggle,
+        .sidebar:hover .nav-fold-toggle,
+        .sidebar.is-pinned .nav-fold-toggle,
+        .sidebar.is-collapsing:hover .nav-fold-toggle {
+            width: 40px !important;
+            height: 40px !important;
+            flex-basis: 40px !important;
+            margin: 7px 0 !important;
+            padding-left: 0 !important;
+            justify-content: center !important;
+            border-radius: 14px !important;
+            overflow: visible !important;
+            transition: background-color .16s, color .16s, border-color .16s !important;
+        }
+
+        .sidebar .nav-text,
+        .sidebar:hover .nav-text,
+        .sidebar.is-pinned .nav-text,
+        .sidebar.is-collapsing:hover .nav-text,
+        .sidebar .side-pill-text,
+        .sidebar:hover .side-pill-text,
+        .sidebar.is-pinned .side-pill-text,
+        .sidebar.is-collapsing:hover .side-pill-text {
+            display: none !important;
+            opacity: 0 !important;
+            max-width: 0 !important;
+            margin-left: 0 !important;
+        }
+
+        .sidebar .side-pill,
+        .sidebar:hover .side-pill,
+        .sidebar.is-pinned .side-pill,
+        .sidebar.is-collapsing:hover .side-pill {
+            width: 40px !important;
+            height: 36px !important;
+            flex-basis: 36px !important;
+            gap: 0 !important;
+            justify-content: center !important;
+            overflow: visible !important;
+            transition: background-color .16s, color .16s, border-color .16s !important;
+        }
+
+        .sidebar .logo-ring::after,
+        .sidebar .nav-item::after,
+        .sidebar .side-pill::after {
+            content: attr(title);
+            position: absolute;
+            left: calc(100% + 10px);
+            top: 50%;
+            z-index: 200;
+            min-height: 26px;
+            padding: 0 10px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            background: rgba(15, 23, 42, .94);
+            color: #f8fafc;
+            border: 1px solid rgba(148, 163, 184, .22);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, .22);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0;
+            line-height: 1;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transform: translate(0, -50%) scale(.98);
+            transition: opacity .12s ease, transform .12s ease;
+        }
+
+        .sidebar .logo-ring:hover::after,
+        .sidebar .nav-item:hover::after,
+        .sidebar .side-pill:hover::after {
+            opacity: 1;
+            transform: translate(4px, -50%) scale(1);
+        }
+
+        .sidebar .settings-fold-chevron,
+        .sidebar:hover .settings-fold-chevron,
+        .sidebar.is-pinned .settings-fold-chevron {
+            display: none !important;
+        }
+
+        .stage {
+            margin: 10px 10px 10px 0 !important;
+            border-radius: 18px !important;
+            background: #030303 !important;
+            border: 1px solid rgba(255, 255, 255, .08) !important;
+            box-shadow: none !important;
+            overflow: hidden;
+        }
+
+        iframe {
+            background: #030303 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom),
+        html:not(.theme-dark):not(.theme-custom) body,
+        html:not(.theme-dark):not(.theme-custom) .app-shell {
+            background: #f5f7fb !important;
+            color: #1f2329 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .sidebar {
+            background: #ffffff !important;
+            border-right-color: #e5e9f0 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .logo-ring {
+            background: #ffffff !important;
+            border-color: #d8dee8 !important;
+            color: #1f2329 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) #logo-dot {
+            background: #1f2329 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .nav-item,
+        html:not(.theme-dark):not(.theme-custom) .side-pill,
+        html:not(.theme-dark):not(.theme-custom) .nav-fold-toggle {
+            color: #717b8c !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .nav-item:hover,
+        html:not(.theme-dark):not(.theme-custom) .side-pill:hover {
+            background: #eef2f7 !important;
+            color: #1f2329 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .nav-item.active,
+        html:not(.theme-dark):not(.theme-custom) .side-pill.active {
+            background: #111827 !important;
+            color: #ffffff !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .stage {
+            background: #ffffff !important;
+            border-color: #dfe5ee !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) iframe {
+            background: #ffffff !important;
+        }
+
+        html.theme-custom,
+        html.theme-custom body,
+        html.theme-custom .app-shell {
+            background: color-mix(in srgb, var(--studio-custom-color, #7c5cff) 8%, #080b10) !important;
+            color: #eef6ff !important;
+        }
+
+        html.theme-custom .sidebar {
+            background: color-mix(in srgb, var(--studio-custom-color, #7c5cff) 10%, #070a0f) !important;
+            border-right-color: color-mix(in srgb, var(--studio-custom-color, #7c5cff) 34%, transparent) !important;
+        }
+
+        html.theme-custom .logo-ring,
+        html.theme-custom .nav-item.active,
+        html.theme-custom .side-pill.active {
+            background: var(--studio-custom-color, #7c5cff) !important;
+            color: #071018 !important;
+            border-color: transparent !important;
+        }
+
+        html.theme-custom #logo-dot {
+            background: #071018 !important;
+        }
+
+        html.theme-custom .stage {
+            background: color-mix(in srgb, var(--studio-custom-color, #7c5cff) 7%, #030303) !important;
+            border-color: color-mix(in srgb, var(--studio-custom-color, #7c5cff) 28%, rgba(255,255,255,.08)) !important;
+        }
+    
+        /* Brand logo replacement: use the real app logo instead of the generated dot. */
+        .sidebar .logo-ring,
+        .sidebar:hover .logo-ring,
+        .sidebar.is-pinned .logo-ring,
+        .sidebar.is-collapsing:hover .logo-ring {
+            border:0 !important;
+            background:transparent !important;
+            box-shadow:none !important;
+            overflow:hidden !important;
+        }
+
+        #logo-dot,
+        .studio-logo-img {
+            width:34px !important;
+            height:34px !important;
+            display:block !important;
+            object-fit:contain !important;
+            /* 2026-09-20 方形圆角品牌样式（PNG 自带 22.5% 圆角，8px 与之对齐） */
+            border-radius:8px !important;
+            background:transparent !important;
+            box-shadow:none !important;
+            transform:none !important;
+            transition:transform .16s ease, filter .16s ease !important;
+        }
+
+        .logo-ring:hover #logo-dot,
+        .logo-ring:focus-visible #logo-dot,
+        .sidebar:hover .logo-ring #logo-dot,
+        .sidebar.is-pinned .logo-ring #logo-dot {
+            transform:scale(1.04) !important;
+            filter:brightness(1.06) saturate(1.05);
+        }
+
+        /* Global shell cleanup: continuous rail, no framed page boundary, no blue theme accents. */
+        :root,
+        html.theme-dark,
+        body.theme-dark,
+        html.theme-custom,
+        body.theme-custom {
+            --accent:#f4f4f4 !important;
+            --studio-custom-color:#f4f4f4 !important;
+            --bg:#050505 !important;
+            --sidebar-bg:#050505 !important;
+            --stage-bg:#050505 !important;
+            --border:transparent !important;
+            --stage-border:transparent !important;
+            --nav-hover-bg:#181818 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom),
+        html:not(.theme-dark):not(.theme-custom) body {
+            --accent:#111111 !important;
+            --bg:#f7f7f7 !important;
+            --sidebar-bg:#f7f7f7 !important;
+            --stage-bg:#f7f7f7 !important;
+            --border:transparent !important;
+            --stage-border:transparent !important;
+            --nav-hover-bg:#e9e9e9 !important;
+        }
+
+        .app-shell,
+        html.theme-custom .app-shell,
+        html:not(.theme-dark):not(.theme-custom) .app-shell {
+            background:var(--bg) !important;
+            gap:0 !important;
+        }
+
+        .sidebar,
+        .sidebar:hover,
+        .sidebar.is-pinned,
+        .sidebar.is-collapsing:hover,
+        html.theme-custom .sidebar,
+        html:not(.theme-dark):not(.theme-custom) .sidebar {
+            width:56px !important;
+            min-width:56px !important;
+            height:100vh !important;
+            max-height:100vh !important;
+            padding:28px 0 16px !important;
+            background:var(--sidebar-bg) !important;
+            border:0 !important;
+            box-shadow:none !important;
+            overflow:hidden !important;
+            z-index:80 !important;
+        }
+
+        .sidebar nav {
+            overflow:hidden auto !important;
+            scrollbar-width:none !important;
+        }
+
+        .sidebar nav::-webkit-scrollbar,
+        .sidebar::-webkit-scrollbar {
+            width:0 !important;
+            height:0 !important;
+        }
+
+        .stage,
+        body.studio-scale-host .stage,
+        html.theme-custom .stage,
+        html:not(.theme-dark):not(.theme-custom) .stage {
+            margin:0 !important;
+            border:0 !important;
+            border-radius:0 !important;
+            background:var(--stage-bg) !important;
+            box-shadow:none !important;
+        }
+
+        iframe,
+        html.theme-custom iframe,
+        html:not(.theme-dark):not(.theme-custom) iframe {
+            background:var(--stage-bg) !important;
+        }
+
+        .sidebar .nav-fold-toggle,
+        .sidebar:hover .nav-fold-toggle,
+        .sidebar.is-pinned .nav-fold-toggle {
+            display:none !important;
+        }
+
+        .sidebar .nav-fold-group,
+        .sidebar .settings-fold-group,
+        .sidebar .settings-fold-group:not(.is-collapsed) {
+            max-height:none !important;
+            opacity:1 !important;
+            pointer-events:auto !important;
+            gap:7px !important;
+        }
+
+        .sidebar .nav-item,
+        .sidebar:hover .nav-item,
+        .sidebar.is-pinned .nav-item,
+        .sidebar.is-collapsing:hover .nav-item,
+        .sidebar .side-pill,
+        .sidebar:hover .side-pill,
+        .sidebar.is-pinned .side-pill,
+        .sidebar.is-collapsing:hover .side-pill {
+            width:40px !important;
+            height:40px !important;
+            flex:0 0 40px !important;
+            margin:6px 0 !important;
+            padding:0 !important;
+            border:0 !important;
+            border-radius:14px !important;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            background:transparent !important;
+            color:#9a9a9a !important;
+            box-shadow:none !important;
+            overflow:hidden !important;
+        }
+
+        .sidebar .nav-item:hover,
+        .sidebar .side-pill:hover {
+            background:#181818 !important;
+            color:#f4f4f4 !important;
+        }
+
+        .sidebar .nav-item.active,
+        .sidebar .side-pill.active,
+        html.theme-dark body .nav-item.active,
+        body.studio-theme-dark .nav-item.active,
+        html:not(.theme-dark):not(.theme-custom) .nav-item.active,
+        html:not(.theme-dark):not(.theme-custom) .side-pill.active {
+            background:#f4f4f4 !important;
+            color:#080808 !important;
+            border:0 !important;
+            box-shadow:none !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .sidebar .nav-item,
+        html:not(.theme-dark):not(.theme-custom) .sidebar .side-pill {
+            color:#686868 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .sidebar .nav-item:hover,
+        html:not(.theme-dark):not(.theme-custom) .sidebar .side-pill:hover {
+            background:#e9e9e9 !important;
+            color:#111111 !important;
+        }
+
+        .sidebar .logo-ring::after,
+        .sidebar .nav-item::after,
+        .sidebar .side-pill::after,
+        .side-pill.update-available::after {
+            display:none !important;
+        }
+
+        .theme-dock,
+        .sidebar:hover .theme-dock,
+        .sidebar.is-pinned .theme-dock {
+            width:40px !important;
+            height:40px !important;
+            flex:0 0 40px !important;
+            padding:0 !important;
+            margin:6px 0 !important;
+            border:0 !important;
+            border-radius:14px !important;
+            background:transparent !important;
+            gap:0 !important;
+            overflow:hidden !important;
+        }
+
+        .theme-dock-btn,
+        .theme-dock-btn:hover,
+        .theme-dock-btn.active {
+            width:40px !important;
+            height:40px !important;
+            min-width:40px !important;
+            border:0 !important;
+            border-radius:14px !important;
+            background:transparent !important;
+            color:#9a9a9a !important;
+            box-shadow:none !important;
+            padding:0 !important;
+        }
+
+        .theme-dock-btn:hover {
+            background:#181818 !important;
+            color:#f4f4f4 !important;
+        }
+
+        .theme-dock-btn.active {
+            background:#050505 !important;
+            color:#ffffff !important;
+            border:0 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .theme-dock-btn {
+            color:#686868 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .theme-dock-btn:hover {
+            background:#e9e9e9 !important;
+            color:#111111 !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .theme-dock-btn.active {
+            background:#111111 !important;
+            color:#ffffff !important;
+            border:0 !important;
+        }
+
+        .theme-dock-btn span,
+        .sidebar:hover .theme-dock-btn span,
+        .sidebar.is-pinned .theme-dock-btn span,
+        .side-pill-text,
+        .sidebar:hover .side-pill-text,
+        .sidebar.is-pinned .side-pill-text,
+        .nav-text,
+        .sidebar:hover .nav-text,
+        .sidebar.is-pinned .nav-text,
+        .project-version-badge,
+        .update-now-btn {
+            display:none !important;
+        }
+
+        .side-actions {
+            margin-top:auto !important;
+            margin-bottom:0 !important;
+            padding:0 !important;
+            border:0 !important;
+            gap:7px !important;
+        }
+
+        .app-shell {
+            background-color:#050505 !important;
+            background-image:radial-gradient(circle at center, rgba(255,255,255,.08) 0 1px, transparent 1px) !important;
+            background-size:24px 24px !important;
+        }
+
+        .sidebar,
+        html:not(.theme-dark):not(.theme-custom) .sidebar {
+            background:transparent !important;
+        }
+
+        .sidebar nav {
+            position:absolute !important;
+            left:4px !important;
+            top:50% !important;
+            transform:translateY(-50%) !important;
+            flex:0 0 auto !important;
+            width:48px !important;
+            height:auto !important;
+            max-height:calc(100vh - 116px) !important;
+            padding:8px 0 !important;
+            margin:0 !important;
+            border:1px solid #333333 !important;
+            border-radius:999px !important;
+            background:#171717 !important;
+            box-shadow:0 16px 36px rgba(0,0,0,.28) !important;
+            backdrop-filter:blur(10px) !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) .sidebar nav {
+            background:#eeeeee !important;
+            border-color:#d6d6d6 !important;
+        }
+
+        .sidebar nav > div[style*="height:1px"],
+        .sidebar nav > div[style*="height: 1px"] {
+            display:none !important;
+        }
+
+        /* 2026-07-30 rail polish: keep version inside the left rail and make rail icons readable. */
+        .sidebar .nav-item,
+        .sidebar:hover .nav-item,
+        .sidebar.is-pinned .nav-item,
+        .sidebar.is-collapsing:hover .nav-item,
+        .sidebar .side-pill,
+        .sidebar:hover .side-pill,
+        .sidebar.is-pinned .side-pill,
+        .sidebar.is-collapsing:hover .side-pill,
+        .theme-dock,
+        .sidebar:hover .theme-dock,
+        .sidebar.is-pinned .theme-dock,
+        .theme-dock-btn,
+        .theme-dock-btn:hover,
+        .theme-dock-btn.active {
+            width:42px !important;
+            height:42px !important;
+            flex-basis:42px !important;
+            border-radius:15px !important;
+        }
+
+        .sidebar .nav-item > svg,
+        .sidebar .side-pill > svg,
+        .theme-dock-btn svg {
+            width:20px !important;
+            height:20px !important;
+            flex:0 0 20px !important;
+            stroke-width:2.25 !important;
+        }
+
+        .sidebar .theme-dock {
+            margin:6px 0 2px !important;
+        }
+
+        #studioSidebar nav #project-version-badge {
+            display:flex !important;
+            width:42px !important;
+            min-width:42px !important;
+            max-width:42px !important;
+            min-height:28px !important;
+            height:28px !important;
+            margin:3px auto 0 !important;
+            padding:2px 3px !important;
+            border-radius:12px !important;
+            border:1px solid #333333 !important;
+            background:#111111 !important;
+            color:#d8d8d8 !important;
+            font-size:7.6px !important;
+            line-height:1.05 !important;
+            font-weight:900 !important;
+            letter-spacing:0 !important;
+            align-items:center !important;
+            justify-content:center !important;
+            text-align:center !important;
+            overflow:visible !important;
+            white-space:normal !important;
+            box-shadow:none !important;
+        }
+
+        #studioSidebar nav #project-version-badge:hover {
+            background:#202020 !important;
+            border-color:#4a4a4a !important;
+            color:#ffffff !important;
+        }
+
+        /* 2026-09-26 恢复作者署名盒（GBZ minimal shell 清理规则曾整体隐藏 .author-box；
+       旧 wuli大雄 盒已删除，此处只显示 DH）。机制与参考画布一致：
+       平时只显示 D/H 两个字母，悬停侧栏时字母滑出、展开作者名 + GitHub/魔搭链接。 */
+        #studioSidebar nav .author-box {
+            display: flex !important;
+            position: relative;
+            width: 100%;
+            height: 40px;
+            flex: 0 0 40px;
+            align-items: center;
+            justify-content: flex-start; /* 2026-09-26 三个图标后改左对齐，防止 GitHub 顶出屏幕左缘 */
+            padding-left: 2px;
+            overflow: visible; /* 裁剪职责在 .dx-letters-clip */
+        }
+        #studioSidebar nav .author-box .dx-letter {
+            font-size: 13px;
+            font-weight: 800;
+            color: #a6a6a6;
+        }
+        #studioSidebar nav .author-box .author-name-lite {
+            color: #e8eaf0;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+        #studioSidebar nav .author-box .social-row-lite {
+            gap: 4px; /* nav 胶囊固定 48px 宽，3 个图标必须压缩进 46px */
+        }
+        #studioSidebar nav .author-box .social-icon-lite svg {
+            width: 12px;
+            height: 12px;
+        }
+        #studioSidebar nav .author-box .social-icon-lite {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #999999;
+        }
+        #studioSidebar nav .author-box .social-icon-lite:hover {
+            color: #f4f4f5;
+        }
+        /* 2026-09-26 GitHub 单独常驻图标（用户定稿：不进 DH 悬停层，直接显示在 nav 里） */
+        #studioSidebar nav .github-standalone-btn {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 40px;
+            flex: 0 0 40px;
+            color: #a6a6a6;
+            text-decoration: none;
+            transition: color .16s ease;
+        }
+        #studioSidebar nav .github-standalone-btn:hover {
+            color: #f4f4f5;
+        }
+        #studioSidebar nav .github-standalone-btn svg {
+            width: 20px; /* 2026-09-26 与设置等 nav 图标同尺寸（.sidebar .nav-item > svg 为 20px） */
+            height: 20px;
+        }
+
+        /* 版本徽章：常态显示正式版本号，不再显示日期 */
+        #studioSidebar nav #project-version-badge .project-version-full {
+            display:none !important;
+        }
+
+        #studioSidebar nav #project-version-badge .project-version-compact {
+            display:inline-block !important;
+            max-width:100% !important;
+            white-space:nowrap !important;
+            overflow:visible !important;
+        }
+
+        html:not(.theme-dark):not(.theme-custom) #studioSidebar nav #project-version-badge {
+            background:#f0f0f0 !important;
+            border-color:#d6d6d6 !important;
+            color:#555555 !important;
+        }
+
+        /* 2026-09-21 有新版本时徽章绿色高亮（覆盖浅色主题强制样式） */
+        html:not(.theme-dark):not(.theme-custom) #studioSidebar nav #project-version-badge.update-available,
+        #studioSidebar nav #project-version-badge.update-available {
+            background:#16a34a !important;
+            border-color:#16a34a !important;
+            color:#ffffff !important;
+            box-shadow:0 0 0 3px rgba(34,197,94,.22) !important;
+        }
+
+        #studioSidebar nav #project-version-badge.update-available:hover {
+            background:#15803d !important;
+            border-color:#15803d !important;
+            color:#ffffff !important;
+        }
+
+        /* 2026-07-30 final rail/canvas cleanup: full version text, smaller rail icons, no dotted app backdrop. */
+        .app-shell,
+        .stage,
+        iframe {
+            background-image:none !important;
+        }
+
+        #studioSidebar nav #project-version-badge,
+        #studioSidebar nav #project-version-badge span {
+            font-size:10px !important;
+            line-height:1 !important;
+            font-weight:800 !important;
+            letter-spacing:.2px !important;
+            font-variant-numeric:tabular-nums !important;
+        }
+
+        #studioSidebar nav #project-version-badge .project-version-full {
+            display:none !important;
+        }
+
+        #studioSidebar nav #project-version-badge .project-version-compact {
+            display:inline-block !important;
+            width:auto !important;
+            max-width:100% !important;
+            white-space:nowrap !important;
+        }
+
+        #studioSidebar nav .lan-publish-quick-btn {
+            margin:3px auto 0 !important;
+            border-color:rgba(34,197,94,.35) !important;
+            background:rgba(34,197,94,.10) !important;
+            color:#22c55e !important;
+            box-shadow:none !important;
+        }
+
+        #studioSidebar nav .lan-publish-quick-btn:hover {
+            border-color:rgba(34,197,94,.55) !important;
+            background:rgba(34,197,94,.18) !important;
+            color:#dcfce7 !important;
+        }
+
+        /* 2026-09-20 取消发布功能：侧栏发布按钮已移除，更新弹窗内的发布入口一并隐藏 */
+        .lan-publish-quick-btn,
+        .lan-publish-note-box,
+        #lan-publish-version-btn {
+            display:none !important;
+        }
+
+        /* 2026-08-17 canvas rail merge: the canvas fills under the left controls, no standalone black edge. */
+        .app-shell:has(#frame-canvas.active) {
+            --canvas-dot-bg:#141414;
+            --canvas-dot-color:rgba(255,255,255,.055);
+            background-color:var(--canvas-dot-bg) !important;
+            background-image:radial-gradient(circle at center, var(--canvas-dot-color) 0 1px, transparent 1.1px) !important;
+            background-size:24px 24px !important;
+            background-position:0 0 !important;
+        }
+
+        .app-shell:has(#frame-canvas.active) .stage {
+            position:absolute !important;
+            inset:0 !important;
+            width:100% !important;
+            height:100% !important;
+            margin:0 !important;
+            border:0 !important;
+            border-radius:0 !important;
+            background:transparent !important;
+            box-shadow:none !important;
+            overflow:hidden !important;
+        }
+
+        .app-shell:has(#frame-canvas.active) #frame-canvas {
+            /* 2026-09-26 恢复全幅铺底：画布页在被外壳嵌入时已隐藏自己的品牌坞（避免与侧栏重复），
+               侧栏保持全透明，无黑块、无光晕、画布完整显示 */
+            inset:0 !important;
+            width:100% !important;
+            height:100% !important;
+            background-color:var(--canvas-dot-bg) !important;
+        }
+
+        /* 2026-09-26 画布视图侧栏所有状态全透明（含悬停展开，避免出现遮挡块） */
+        .app-shell:has(#frame-canvas.active) .sidebar,
+        .app-shell:has(#frame-canvas.active) .sidebar:hover,
+        .app-shell:has(#frame-canvas.active) .sidebar.is-pinned,
+        .app-shell:has(#frame-canvas.active) .sidebar.is-collapsing:hover {
+            background: transparent !important;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+        /* 2026-09-26 侧栏空白区不响应鼠标：只有导航/操作按钮本身可触发悬停，
+           避免鼠标划过版本号下方的空白区时 DH 意外展开 */
+        .app-shell:has(#frame-canvas.active) .sidebar {
+            pointer-events: none;
+        }
+        .app-shell:has(#frame-canvas.active) .sidebar nav,
+        .app-shell:has(#frame-canvas.active) .sidebar .side-actions {
+            pointer-events: auto;
+        }
+        .app-shell:has(#frame-canvas.active) .sidebar nav {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+    </style>
+    <style id="ms-theme-overrides">
+        /* 2026-09-20 ModelScope 风格配色覆盖（只改颜色）：近黑蓝底 + 紫色主色 */
+        :root,
+        html.theme-dark,
+        body.theme-dark {
+            --accent:#7c5cff;
+            --bg:#0b0d12;
+            --sidebar-bg:#0d0f15;
+            --stage-bg:#0b0d12;
+            --border:#23262f;
+            --stage-border:#1b1e26;
+            --text:#e8eaf0;
+            --muted:#9aa1af;
+            --nav-hover-bg:#1b1e26;
+            --monitor-bg:rgba(21,23,30,.82);
+            --monitor-border:rgba(124,92,255,.14);
+            --monitor-shadow:rgba(0,0,0,.42);
+            --divider:rgba(232,234,240,.1);
+            --scrollbar:#2e323d;
+            --scrollbar-hover:#3a3f4c;
+            --author-name:#e8eaf0;
+            --social-icon:#6f7683;
+            --studio-custom-color:#7c5cff;
+        }
+        body { background:var(--stage-bg); color:var(--text); }
+
+        /* =================================================================
+           2026-09-20 左上角 LOGO 可爱动画（持续循环版）：
+           连续小跳步 + 摇摆 + 果冻挤压拉伸，无静止段；紫色光晕呼吸。
+           用独立 scale 属性替代 transform 缩放，避免与关键帧动画互相覆盖。
+           ================================================================= */
+        #logo-dot {
+            animation: logo-cute-idle 4.2s ease-in-out infinite,
+                       logo-cute-glow 3.4s ease-in-out infinite;
+            transform-origin: 50% 62%;
+        }
+        .logo-ring:hover #logo-dot,
+        .logo-ring:focus-visible #logo-dot {
+            transform: none;
+            scale: 1.8;
+            animation: logo-cute-wave .48s ease-in-out infinite;
+        }
+        .sidebar.is-pinned #logo-dot {
+            transform: none;
+            scale: 1.35;
+        }
+        /* LOGO 保持方形圆角：侧栏悬停/固定时不再旋转、不再裁成圆形 */
+        .logo-ring,
+        .sidebar:hover .logo-ring,
+        .sidebar.is-pinned .logo-ring {
+            border-radius: 8px !important;
+        }
+        .sidebar:hover .logo-ring,
+        .sidebar.is-pinned .logo-ring {
+            transform: none !important;
+        }
+        .sidebar:hover .logo-ring:active {
+            transform: scale(.94) !important;
+        }
+        @keyframes logo-cute-idle {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            12% { transform: translateY(-2.5px) rotate(-7deg); }
+            24% { transform: translateY(0) rotate(0deg); }
+            34% { transform: translateY(-2px) rotate(6deg); }
+            44% { transform: translateY(0) rotate(0deg) scale(1.05, .95); }
+            54% { transform: translateY(-1.5px) rotate(0deg) scale(.96, 1.06); }
+            64% { transform: translateY(0) rotate(0deg) scale(1.02, .99); }
+            76% { transform: translateY(-2px) rotate(-5deg); }
+            88% { transform: translateY(-1px) rotate(4deg); }
+        }
+        @keyframes logo-cute-glow {
+            0%, 100% { filter: drop-shadow(0 0 4px rgba(160,160,160,.25)); }
+            50%      { filter: drop-shadow(0 0 9px rgba(160,160,160,.45)); }
+        }
+        @keyframes logo-cute-wave {
+            0%, 100% { transform: translateY(0) rotate(-9deg); }
+            50%      { transform: translateY(-4px) rotate(9deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #logo-dot { animation: none !important; }
+            #logo-dot .logo-flow { animation: none !important; }
+        }
+        /* 螺旋流动光：沿无限符号持续跑动的高光 */
+        #logo-dot .logo-flow {
+            stroke-dasharray: 12 51;
+            animation: logo-flow-dash 2.2s linear infinite;
+            filter: drop-shadow(0 0 3px rgba(220,220,220,.75));
+        }
+        @keyframes logo-flow-dash {
+            from { stroke-dashoffset: 0; }
+            to   { stroke-dashoffset: -63; }
+        }
+        /* 2026-09-27 切换页面层级时：右眼单眼闭眼（wink）动画 */
+        #logoEyeR {
+            transform-box: view-box;
+            transform-origin: 65.5% 50%;
+        }
+        #logo-dot.wink #logoEyeR { animation: logo-wink .6s ease-in-out; }
+        @keyframes logo-wink {
+            0%   { transform: scaleY(1); }
+            35%  { transform: scaleY(0.06); }
+            70%  { transform: scaleY(1); }
+            100% { transform: scaleY(1); }
+        }
+        /* SVG 自带底色/描边，屏蔽旧主题对 #logo-dot 的背景填充 */
+        #logo-dot,
+        html.theme-custom #logo-dot,
+        html:not(.theme-dark):not(.theme-custom) #logo-dot {
+            background: transparent !important;
+        }
+        /* 2026-09-29 修复：侧栏钉住/悬停态下 DH 字母被移走只剩社交图标 —— DH 始终可见 */
+        #studioSidebar .author-box .letter-d {
+            transform: translateX(-8px) !important;
+            opacity: 1 !important;
+        }
+        #studioSidebar .author-box .letter-x {
+            transform: translateX(8px) !important;
+            opacity: 1 !important;
+        }
+        /* 社交图标层与 DH 同位会重叠，且作者名已删，整层隐藏 */
+        #studioSidebar .author-box .author-content-wrap {
+            display: none !important;
+        }
+
+        /* 2026-10-07 项目页版本号：在窄侧栏内完整显示，不让父级 overflow 裁掉最后一位 */
+        #studioSidebar nav .author-box,
+        #studioSidebar .author-box,
+        #studioSidebar .author-box .dx-letters-clip,
+        #studioSidebar .author-box .dx-letter,
+        #studioSidebar .author-box .letter-d,
+        #studioSidebar .author-box .letter-x,
+        #studioSidebar .author-box .author-content-wrap {
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        #studioSidebar nav #project-version-badge {
+            /* 侧栏收起时 nav 的可视宽度约 48px，按钮必须在这个宽度内。
+               之前使用 width:auto 会撑到 56px，导致 V10-07 的最后一位被裁掉。 */
+            display: flex !important;
+            width: 46px !important;
+            min-width: 46px !important;
+            max-width: 46px !important;
+            height: 24px !important;
+            min-height: 24px !important;
+            margin: 3px auto 0 !important;
+            padding: 0 2px !important;
+            border-radius: 10px !important;
+            overflow: hidden !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+            box-sizing: border-box !important;
+            white-space: nowrap !important;
+        }
+
+        #studioSidebar nav #project-version-badge span,
+        #studioSidebar nav #project-version-badge .project-version-compact {
+            /* 9px 在窄栏里仍清晰，同时为完整版本号预留稳定空间。 */
+            font-size: 9px !important;
+            line-height: 1 !important;
+            font-weight: 800 !important;
+            letter-spacing: 0 !important;
+            transform: none !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+
+        #studioSidebar nav #project-version-badge .project-version-full {
+            display: none !important;
+        }
+
+        #studioSidebar nav #project-version-badge .project-version-compact {
+            display: inline-block !important;
+            width: max-content !important;
+            max-width: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-shell">
+        <aside class="sidebar" id="studioSidebar">
+            <button class="logo-ring mb-12" id="sidebarLogoToggle" type="button" onclick="toggleSidebarPinned(event)" aria-pressed="false" title="导航栏" aria-label="导航栏">
+                <svg id="logo-dot" class="studio-logo-img" viewBox="0 0 68 68" width="34" height="34" aria-hidden="true" focusable="false">
+                    <defs>
+                        <linearGradient id="logoRingGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0" stop-color="#a8a8a8"/>
+                            <stop offset="0.55" stop-color="#8f8f8f"/>
+                            <stop offset="1" stop-color="#6f6f6f"/>
+                        </linearGradient>
+                        <radialGradient id="logoBgGrad" cx="0.5" cy="0.42" r="0.75">
+                            <stop offset="0" stop-color="#181c2a"/>
+                            <stop offset="0.65" stop-color="#11141f"/>
+                            <stop offset="1" stop-color="#0b0d12"/>
+                        </radialGradient>
+                    </defs>
+                    <rect x="1" y="1" width="66" height="66" rx="15" fill="url(#logoBgGrad)" stroke="rgba(255,255,255,.92)" stroke-width="2"/>
+                    <g id="logoEyeL"><path d="M 34,34 A 10.5,9.65 0 0 1 13,34 A 10.5,9.65 0 0 1 34,34 Z" fill="none" stroke="url(#logoRingGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/><path class="logo-flow" d="M 34,34 A 10.5,9.65 0 0 1 13,34 A 10.5,9.65 0 0 1 34,34 Z" fill="none" stroke="#d6d6d6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/></g><g id="logoEyeR"><path d="M 55,34 A 10.5,9.65 0 0 1 34,34 A 10.5,9.65 0 0 1 55,34 Z" fill="none" stroke="url(#logoRingGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/><path class="logo-flow" d="M 55,34 A 10.5,9.65 0 0 1 34,34 A 10.5,9.65 0 0 1 55,34 Z" fill="none" stroke="#d6d6d6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/></g>
+                </svg>
+            </button>
+
+            <nav>
+                <button class="nav-fold-toggle" id="local-nav-toggle" type="button" onclick="toggleLocalNav()" aria-expanded="true" title="折叠本地功能">
+                    <svg class="nav-fold-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.localTools">本地功能</span>
+                </button>
+
+                <div class="nav-fold-group" id="local-nav-group">
+                    <div class="nav-item" onclick="switchUI(this, 'zimage')">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.587-1.587a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                        <span class="nav-text" data-i18n="nav.textToImage">文生图</span>
+                    </div>
+                    <div class="nav-item" onclick="switchUI(this, 'enhance')">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                        <span class="nav-text" data-i18n="nav.enhance">细节增强</span>
+                    </div>
+                    <div class="nav-item" onclick="switchUI(this, 'klein')">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                        <span class="nav-text" data-i18n="nav.imageEdit">图片编辑</span>
+                    </div>
+                    <div class="nav-item" onclick="switchUI(this, 'angle')">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                        </svg>
+                        <span class="nav-text" data-i18n="nav.angle">角度控制</span>
+                    </div>
+                </div>
+
+                <!-- 分隔线 -->
+                <div style="width:32px;height:1px;background:var(--border);margin:8px auto;transition:background 0.3s;"></div>
+
+                <div id="workflow-nav-entry" class="nav-item" onclick="openWorkflowNavigation(this)" title="工作流导航" aria-label="工作流导航">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="4" y="3" width="7" height="6" rx="1.6"></rect>
+                        <rect x="13" y="15" width="7" height="6" rx="1.6"></rect>
+                        <path d="M7.5 9v3.2a2.8 2.8 0 0 0 2.8 2.8H13"></path>
+                        <path d="M11 6h2.8A2.2 2.2 0 0 1 16 8.2V15"></path>
+                        <path d="M5.5 17.5H13"></path>
+                    </svg>
+                    <span class="nav-text">工作流导航</span>
+                </div>
+                <div class="nav-item active" onclick="switchUI(this, 'canvas')" title="无限画布" aria-label="无限画布">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 7.5V5.8A1.8 1.8 0 0 1 5.8 4h1.7"></path>
+                        <path d="M16.5 4h1.7A1.8 1.8 0 0 1 20 5.8v1.7"></path>
+                        <path d="M20 16.5v1.7a1.8 1.8 0 0 1-1.8 1.8h-1.7"></path>
+                        <path d="M7.5 20H5.8A1.8 1.8 0 0 1 4 18.2v-1.7"></path>
+                        <circle cx="12" cy="12" r="2.4"></circle>
+                        <path d="M12 7.5v2.1M12 14.4v2.1M7.5 12h2.1M14.4 12h2.1"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.canvas">无限画布</span>
+                </div>
+                <div class="nav-item" onclick="switchUI(this, 'asset-manager')" title="资产库" aria-label="资产库">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5V6.8A2.8 2.8 0 0 1 6.8 4h10.4A2.8 2.8 0 0 1 20 6.8v12.7"></path>
+                        <path d="M7 8h10"></path>
+                        <path d="M7 12h10"></path>
+                        <path d="M7 16h6"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.assetManager">资产库</span>
+                </div>
+                <div class="nav-item" onclick="switchUI(this, 'settings')" title="设置" aria-label="设置">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
+                    </svg>
+                    <span class="nav-text">设置</span>
+                </div>
+<!-- 主题切换按钮已移除 -->
+<!-- 2026-09-20 发布功能已取消：侧栏“发布版本”按钮已移除 -->
+<!-- 2026-09-26 品牌署名（定稿：GitHub 常驻按钮在上，DH 字母悬停只展开 小红书/抖音 备用链接；版本号最下） -->
+                <a class="github-standalone-btn" role="link" tabindex="0" data-url="https://www.modelscope.cn/studios/hans186/GBZ-Canvas" onclick="window.open(this.dataset.url, '_blank', 'noopener,noreferrer')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" aria-label="ModelScope 开源地址" title="ModelScope 开源地址">
+                    <svg fill="currentColor" viewBox="0 0 16 16" aria-hidden="true" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+                </a>
+                <div class="author-box" aria-label="作者与开源信息">
+                    <div class="dx-letters-clip">
+                        <span class="dx-letter letter-d">D</span>
+                        <span class="dx-letter letter-x">H</span>
+                    </div>
+                    <div class="author-content-wrap">
+                        <!-- 2026-09-26 按需求去掉展开面板里的「DH」名称文字，展开后只显示 小红书/抖音 图标 -->
+                        <div class="social-row-lite">
+                            <a href="javascript:void(0)" class="social-icon-lite" title="小红书（链接待补充）" aria-label="小红书">
+                                <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
+                            </a>
+                            <a href="javascript:void(0)" class="social-icon-lite" title="抖音（链接待补充）" aria-label="抖音">
+                                <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div id="project-version-badge" class="project-version-badge" title="GBZ智能画布 · 点击检测更新" role="button" tabindex="0" onclick="checkForUpdates(true)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();checkForUpdates(true);}">GBZ v-</div>
+            </nav>
+
+            <div class="side-actions">
+                <button class="side-pill" onclick="switchUI(this, 'api-settings')" type="button" title="API 设置">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 7h3a5 5 0 0 1 0 10h-3"></path>
+                        <path d="M9 17H6A5 5 0 0 1 6 7h3"></path>
+                        <line x1="8" y1="12" x2="16" y2="12"></line>
+                    </svg>
+                    <span class="side-pill-text" data-i18n="common.apiSettings">API 设置</span>
+                </button>
+                <button class="side-pill settings-fold-toggle" id="settings-fold-toggle" onclick="toggleSidebarSettings()" type="button" title="更多设置" aria-expanded="false">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
+                    </svg>
+                    <span class="side-pill-text" data-i18n="common.moreSettings">更多设置</span>
+                    <svg class="settings-fold-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </button>
+                <div class="settings-fold-group is-collapsed" id="settings-fold-group">
+                    <button class="side-pill" onclick="toggleLanguage()" id="lang-toggle-btn" type="button" title="Language">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M2 12h20"></path>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        <span class="side-pill-text" data-i18n="common.language">中文</span>
+                    </button>
+                    <button class="side-pill" onclick="switchUI(this, 'comfyui-settings')" type="button" title="工作流设置">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                            <path d="M14 14h7v7h-7z"></path>
+                            <line x1="10" y1="6.5" x2="14" y2="6.5"></line>
+                            <line x1="6.5" y1="10" x2="6.5" y2="14"></line>
+                        </svg>
+                        <span class="side-pill-text" data-i18n="common.comfyuiSettings">工作流设置</span>
+                    </button>
+                </div>
+                <button id="github-entry-btn" class="side-pill" onclick="openProjectPage()" type="button" title="GitHub">
+                    <svg fill="currentColor" stroke="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.05c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.74.08-.74 1.21.09 1.85 1.25 1.85 1.25 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.45 11.45 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5Z"></path>
+                    </svg>
+                    <span class="side-pill-text" data-i18n="common.project">项目主页</span>
+                </button>
+                <button id="update-now-btn" class="update-now-btn" onclick="runProjectUpdate()" type="button" title="一键更新">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                        <path d="M21 3v6h-6"></path>
+                    </svg>
+                    <span id="update-now-text" class="update-now-text" data-i18n="update.oneClick">一键更新</span>
+                </button>
+            </div>
+
+            <!-- 2026-09-26 原 wuli大雄 作者盒（DX 字母 + B站/小红书/YouTube/X 链接）已删除，
+                 品牌署名改为 DH 版本，位于上方 nav 内版本徽章之后 -->
+        </aside>
+        <script>
+            /* 在侧栏 DOM 解析完后立即把 active 类移到当前页对应的入口，避免首屏先在文生图上闪一下 */
+            (function(){
+                try {
+                    var pageId = localStorage.getItem('studio_active_page');
+                    if(pageId && pageId !== 'zimage') {
+                        document.querySelectorAll('.nav-item.active, .side-pill.active').forEach(function(n){
+                            n.classList.remove('active');
+                        });
+                        var target = document.querySelector('[onclick*="\'' + pageId + '\'"]');
+                        if(target) target.classList.add('active');
+                    }
+                } catch(e) {}
+            })();
+        </script>
+
+        <main class="stage">
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-settings" data-src="/static/settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V10-09.1791809497" class="active" scrolling="yes"></iframe>
+
+        </main>
+    </div>
+
+    <div id="project-update-modal" class="studio-modal" hidden role="dialog" aria-modal="true" aria-labelledby="project-update-title">
+        <div class="studio-modal-panel">
+            <div class="studio-modal-head">
+                <div>
+                    <div class="studio-modal-kicker" data-i18n="update.available">发现更新</div>
+                    <h2 id="project-update-title" class="studio-modal-title">一键更新</h2>
+                </div>
+                <button class="studio-modal-close" type="button" onclick="closeProjectUpdateModal()" title="关闭" aria-label="关闭">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="studio-modal-body">
+                <p id="project-update-copy" class="studio-modal-copy"></p>
+                <div id="project-update-notes" class="update-notes-box" hidden>
+                    <div class="update-notes-head">
+                        <strong id="project-update-notes-title">本次更新内容</strong>
+                        <span id="project-update-notes-version" class="update-notes-version"></span>
+                    </div>
+                    <ol id="project-update-notes-list" class="update-notes-list"></ol>
+                    <p id="project-update-notes-empty" class="update-notes-empty" hidden>暂未获取到更新说明。</p>
+                </div>
+                <div id="update-source-list" class="update-source-list">
+                    <button id="update-source-modelscope" class="update-source-card" type="button" data-update-source="modelscope" onclick="setUpdateSource('modelscope')">
+                        <div class="update-source-head">
+                            <div class="update-source-title">
+                                <strong>魔搭社区（推荐）</strong>
+                                <span>国内直连速度快，从作者 ModelScope 仓库读取更新。</span>
+                            </div>
+                            <div class="update-source-head-right">
+                                <span class="update-source-check" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </span>
+                                <span class="update-source-badge">待测试</span>
+                            </div>
+                        </div>
+                        <div class="connectivity-list" data-connectivity-source="modelscope"></div>
+                    </button>
+                    <button id="update-source-github" class="update-source-card" type="button" data-update-source="github" onclick="setUpdateSource('github')">
+                        <div class="update-source-head">
+                            <div class="update-source-title">
+                                <strong>GitHub</strong>
+                                <span>国际源，从作者 GitHub 仓库读取更新，网络不畅时可能较慢。</span>
+                            </div>
+                            <div class="update-source-head-right">
+                                <span class="update-source-check" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </span>
+                                <span class="update-source-badge">待测试</span>
+                            </div>
+                        </div>
+                        <div class="connectivity-list" data-connectivity-source="github"></div>
+                    </button>
+                </div>
+                <div id="project-update-summary" class="update-modal-summary warn">
+                    <span class="update-modal-dot" aria-hidden="true"></span>
+                    <div>
+                        <strong id="project-update-summary-title">建议先测试连通性</strong>
+                        <span id="project-update-summary-text"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="studio-modal-actions">
+                <button id="connectivity-test-btn" class="studio-modal-btn" type="button" onclick="runUpdateConnectivityTest()">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                        <path d="M21 3v6h-6"></path>
+                    </svg>
+                    <span id="connectivity-test-text">测试连通性</span>
+                </button>
+                <button class="studio-modal-btn" type="button" onclick="closeProjectUpdateModal()">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+                    <span id="project-update-cancel-text">返回</span>
+                </button>
+                <button id="project-update-confirm-btn" class="studio-modal-btn primary" type="button" onclick="confirmProjectUpdate()">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                        <path d="M21 3v6h-6"></path>
+                    </svg>
+                    <span id="project-update-confirm-text">开始更新</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function generateUUID() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                try { return crypto.randomUUID(); } catch (e) { }
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        const CID = localStorage.getItem("client_id") || generateUUID();
+        localStorage.setItem("client_id", CID);
+        const ACTIVE_PAGE_KEY = 'studio_active_page';
+        const LOCAL_NAV_COLLAPSED_KEY = 'studio_local_nav_collapsed';
+        const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
+        const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
+        const DEFAULT_PAGE_ID = 'canvas';
+        const PAGE_IDS = ['zimage','enhance','klein','angle','canvas','asset-manager','settings','api-settings','comfyui-settings','language-settings'];
+        const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
+        const PROJECT_URL = 'https://www.modelscope.cn/studios/hans186/GBZ-Canvas';
+        const MODELSCOPE_URL = 'https://www.modelscope.cn/studios/hans186/GBZ-Canvas';
+        let appInfo = { version:'', repo_url:PROJECT_URL, modelscope_repo_url:MODELSCOPE_URL, sources:{ modelscope:{ configured:true }, github:{ configured:true } } };
+        let updateConnectivityResult = null;
+        let projectUpdateRunning = false;
+        let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
+        let updateSource = 'modelscope';
+        let projectUpdateNotes = null;
+
+        function setSidebarPinned(pinned, options = {}) {
+            const sidebar = document.getElementById('studioSidebar');
+            const logo = document.getElementById('sidebarLogoToggle');
+            if(!sidebar) return;
+            pauseScaleInFrames();
+            sidebar.classList.toggle('is-pinned', pinned);
+            if(!pinned) {
+                sidebar.classList.add('is-collapsing');
+                window.setTimeout(() => sidebar.classList.remove('is-collapsing'), 360);
+            } else {
+                sidebar.classList.remove('is-collapsing');
+            }
+            if(logo) {
+                logo.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+                logo.title = pinned ? '收起导航栏' : '固定导航栏';
+            }
+            if(!options.skipRemember) localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? '1' : '0');
+        }
+
+        function toggleSidebarPinned(event) {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            const sidebar = document.getElementById('studioSidebar');
+            setSidebarPinned(!sidebar?.classList.contains('is-pinned'));
+        }
+
+        function restoreSidebarPinned() {
+            setSidebarPinned(localStorage.getItem(SIDEBAR_PINNED_KEY) === '1', { skipRemember:true });
+        }
+
+        function setLocalNavCollapsed(collapsed, options = {}) {
+            const group = document.getElementById('local-nav-group');
+            const toggle = document.getElementById('local-nav-toggle');
+            if(group) group.classList.toggle('is-collapsed', collapsed);
+            if(toggle) {
+                toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                toggle.title = collapsed ? '展开本地功能' : '折叠本地功能';
+            }
+            if(!options.skipRemember) localStorage.setItem(LOCAL_NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
+        }
+
+        function toggleLocalNav() {
+            const group = document.getElementById('local-nav-group');
+            setLocalNavCollapsed(!group?.classList.contains('is-collapsed'));
+        }
+
+        function restoreLocalNav(id) {
+            const savedCollapsed = localStorage.getItem(LOCAL_NAV_COLLAPSED_KEY) === '1';
+            setLocalNavCollapsed(savedCollapsed && !LOCAL_PAGE_IDS.includes(id), { skipRemember:true });
+        }
+
+        function setSidebarSettingsCollapsed(collapsed, options = {}) {
+            const group = document.getElementById('settings-fold-group');
+            const toggle = document.getElementById('settings-fold-toggle');
+            if(group) group.classList.toggle('is-collapsed', collapsed);
+            if(toggle) {
+                toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                toggle.title = collapsed ? '展开更多设置' : '收起更多设置';
+            }
+            if(!options.skipRemember) localStorage.setItem(SIDEBAR_SETTINGS_COLLAPSED_KEY, collapsed ? '1' : '0');
+        }
+
+        function toggleSidebarSettings() {
+            const group = document.getElementById('settings-fold-group');
+            setSidebarSettingsCollapsed(!group?.classList.contains('is-collapsed'));
+        }
+
+        function restoreSidebarSettings(id) {
+            const savedCollapsed = localStorage.getItem(SIDEBAR_SETTINGS_COLLAPSED_KEY) !== '0';
+            setSidebarSettingsCollapsed(savedCollapsed && id !== 'comfyui-settings', { skipRemember:true });
+        }
+
+        function resetStudioRootScroll() {
+            try {
+                window.scrollTo(0, 0);
+                document.documentElement.scrollTop = 0;
+                document.body.scrollTop = 0;
+            } catch(e) {}
+        }
+
+        function triggerLogoWink() {
+            const logo = document.getElementById('logo-dot');
+            if(!logo) return;
+            logo.classList.remove('wink');
+            void logo.getBoundingClientRect();
+            logo.classList.add('wink');
+            clearTimeout(triggerLogoWink._t);
+            triggerLogoWink._t = setTimeout(() => logo.classList.remove('wink'), 750);
+        }
+
+        function switchUI(el, id, options = {}) {
+            resetStudioRootScroll();
+            try { triggerLogoWink(); } catch(e) {}
+            if(!PAGE_IDS.includes(id)) id = DEFAULT_PAGE_ID;
+            document.querySelectorAll('.nav-item,.side-pill').forEach(n => n.classList.remove('active'));
+            if(el) el.classList.add('active');
+            document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
+            const target = document.getElementById('frame-' + id);
+            target.classList.add('active');
+            if (!target.src) target.src = target.dataset.src;
+            if(!options.skipRemember) localStorage.setItem(ACTIVE_PAGE_KEY, id);
+            // sync theme to newly activated iframe
+            syncThemeToFrame(target);
+            syncLanguageToFrame(target);
+            syncScaleToFrame(target);
+            syncFrameOpacityToFrame(target);
+            if(LOCAL_PAGE_IDS.includes(id)) {
+                setLocalNavCollapsed(false, { skipRemember:true });
+            } else {
+                setLocalNavCollapsed(localStorage.getItem(LOCAL_NAV_COLLAPSED_KEY) === '1', { skipRemember:true });
+            }
+            if(id === 'comfyui-settings') {
+                setSidebarSettingsCollapsed(false, { skipRemember:true });
+            }
+            // 切换到画布时通知刷新工作流列表（防止在 comfyui-settings 修改后画布未及时更新）
+            if (id === 'canvas' && target.src) {
+                try { target.contentWindow?.postMessage({ type: 'canvas-focus' }, '*'); } catch(e) {}
+                if(!options.keepWorkflowNav) {
+                    try { target.contentWindow?.postMessage({ type: 'studio-close-workflow-nav' }, '*'); } catch(e) {}
+                }
+            }
+            resetStudioRootScroll();
+        }
+
+        function setStudioNavActive(kind) {
+            document.querySelectorAll('.nav-item,.side-pill').forEach(n => n.classList.remove('active'));
+            const selector = kind === 'workflow'
+                ? '#workflow-nav-entry'
+                : '[onclick*="\'canvas\'"],[onclick*="&quot;canvas&quot;"]';
+            document.querySelector(selector)?.classList.add('active');
+        }
+
+        function canvasListFrameUrl(options = {}) {
+            const params = new URLSearchParams();
+            params.set('v', '2026.07.13.theme-back');
+            try {
+                const project = options.project || localStorage.getItem('canvasListCurrentProjectId') || '';
+                if(project) params.set('project', project);
+            } catch(e) {}
+            if(options.openWorkflowNav) params.set('openWorkflowNav', '1');
+            params.set('v', '2026.07.16.pure-dark');
+            return `/static/canvas-list.html?${params.toString()}`;
+        }
+
+        function isCanvasListFrame(frame) {
+            if(!frame || !frame.src) return false;
+            try {
+                return new URL(frame.src, location.href).pathname.endsWith('/static/canvas-list.html');
+            } catch(e) {
+                return String(frame.src || '').includes('/static/canvas-list.html');
+            }
+        }
+
+        function openWorkflowNavigation(el, options = {}) {
+            const frame = document.getElementById('frame-canvas');
+            const shouldLoadCanvasList = !frame?.src || !isCanvasListFrame(frame);
+            const canvasEntry = document.querySelector('[onclick*="\'canvas\'"],[onclick*="&quot;canvas&quot;"]');
+            switchUI(canvasEntry || el, 'canvas', { keepWorkflowNav:true });
+            setStudioNavActive('workflow');
+            if(frame) frame.dataset.src = canvasListFrameUrl({ project:options.project });
+            const openPanel = () => {
+                try { frame?.contentWindow?.postMessage({ type:'studio-open-workflow-nav' }, '*'); } catch(e) {}
+            };
+            if(frame && shouldLoadCanvasList) {
+                frame.addEventListener('load', openPanel, { once:true });
+                frame.src = canvasListFrameUrl({ openWorkflowNav:true, project:options.project });
+            } else if(frame && frame.src) {
+                openPanel();
+                setTimeout(openPanel, 180);
+            } else if(frame) {
+                frame.addEventListener('load', openPanel, { once:true });
+                frame.src = canvasListFrameUrl({ openWorkflowNav:true, project:options.project });
+            }
+        }
+
+        function forwardStudioApiChange(data) {
+            if(!data || !['providers-changed','workflows-changed','comfy-instances-changed'].includes(data.type)) return;
+            document.querySelectorAll('iframe').forEach(iframe => {
+                try {
+                    if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(data, '*');
+                } catch(e) {}
+            });
+        }
+
+        window.addEventListener('message', event => {
+            if (event.origin && event.origin !== location.origin) return;
+            if(event.data?.type === 'studio-switch-page') {
+                const page = event.data.page;
+                if(PAGE_IDS.includes(page)) {
+                    const settingsChild = page === 'api-settings' || page === 'comfyui-settings' || page === 'language-settings';
+                    const trigger = settingsChild
+                        ? document.querySelector(`[onclick*="'settings'"],[onclick*='"settings"']`)
+                        : document.querySelector(`[onclick*="'${page}'"],[onclick*='"${page}"']`);
+                    switchUI(trigger, page);
+                    if(page === 'canvas' && event.data.openTrash) {
+                        const frame = document.getElementById('frame-canvas');
+                        const openTrash = () => {
+                            try { frame?.contentWindow?.postMessage({ type:'studio-open-trash' }, '*'); } catch(e) {}
+                        };
+                        if(frame && !isCanvasListFrame(frame)) {
+                            frame.addEventListener('load', openTrash, { once:true });
+                            frame.src = canvasListFrameUrl();
+                        } else {
+                            setTimeout(openTrash, 80);
+                            setTimeout(openTrash, 240);
+                        }
+                    }
+                }
+                return;
+            }
+            if(event.data?.type === 'studio-set-theme') {
+                const theme = event.data.theme === 'dark' ? 'dark' : 'light';
+                broadcastTheme(theme, { color:event.data.color });
+                return;
+            }
+            if(event.data?.type === 'studio-set-frame-opacity') {
+                broadcastFrameOpacity(event.data.opacity);
+                return;
+            }
+            if(event.data?.type === 'studio-set-language') {
+                if(window.StudioI18n) {
+                    window.StudioI18n.set(event.data.lang === 'en' ? 'en' : 'zh');
+                    document.querySelectorAll('iframe').forEach(frame => syncLanguageToFrame(frame));
+                    updateProjectUpdateTitle();
+                    refreshUpdateButtonText();
+                    refreshProjectUpdateModalText();
+                }
+                return;
+            }
+            if(event.data?.type === 'studio-settings-action') {
+                if(event.data.action === 'toggle-theme') toggleTheme();
+                if(event.data.action === 'toggle-language') toggleLanguage();
+                return;
+            }
+            if(event.data?.type === 'studio-workflow-nav-closed') {
+                setStudioNavActive('canvas');
+                return;
+            }
+            if(event.data?.type === 'studio-workflow-nav-opened') {
+                setStudioNavActive('workflow');
+                return;
+            }
+            if(event.data?.type === 'studio-request-open-workflow-nav') {
+                openWorkflowNavigation(document.getElementById('workflow-nav-entry'), { project:event.data.project });
+                return;
+            }
+            forwardStudioApiChange(event.data);
+        });
+
+        try {
+            const studioApiChannel = new BroadcastChannel('studio-api');
+            studioApiChannel.onmessage = event => forwardStudioApiChange(event.data);
+        } catch(e) {}
+
+        function restoreActivePage() {
+            restoreSidebarPinned();
+            const stored = localStorage.getItem(ACTIVE_PAGE_KEY);
+            const id = PAGE_IDS.includes(stored) ? stored : DEFAULT_PAGE_ID;
+            restoreLocalNav(id);
+            restoreSidebarSettings(id);
+            const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
+            switchUI(trigger, id, { skipRemember:true });
+            document.documentElement.classList.remove('studio-route-booting');
+        }
+        document.addEventListener('DOMContentLoaded', restoreActivePage, { once:true });
+
+        async function syncStatus() {
+            try {
+                const res = await fetch(`/api/queue_status?client_id=${CID}`);
+                const data = await res.json();
+                const monitor = document.getElementById('nano-monitor');
+                const queueVal = document.getElementById('queue-val');
+                const logoDot = document.getElementById('logo-dot');
+                const total = data.total || 0;
+                const pos = data.position || 0;
+                if (pos > 0) {
+                    monitor?.classList.add('is-busy');
+                    if (queueVal) queueVal.innerText = `${pos}/${total}`;
+                    if (logoDot) logoDot.style.backgroundColor = '#3b82f6';
+                } else {
+                    monitor?.classList.remove('is-busy');
+                    if (queueVal) queueVal.innerText = total > 0 ? total : '0';
+                    if (logoDot) logoDot.style.backgroundColor = 'var(--text)';
+                }
+            } catch (e) { }
+        }
+
+        const host = window.location.host;
+        if (host) {
+            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(`${protocol}://${host}/ws/stats?client_id=${CID}`);
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'stats') {
+                    const ov = document.getElementById('online-val');
+                    if (ov) ov.innerText = data.online_count;
+                } else if (data.type === 'cloud_status') {
+                    const iframe = document.querySelector('iframe.active');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage(data, '*');
+                    }
+                } else if (data.type === 'canvas_updated') {
+                    const iframe = document.querySelector('iframe.active');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage(data, '*');
+                    }
+                } else if (data.type === 'asset_library_updated') {
+                    document.querySelectorAll('iframe').forEach(iframe => {
+                        if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(data, '*');
+                    });
+                }
+            };
+            setInterval(syncStatus, 2000);
+        }
+
+        // --- 夜间模式 ---
+
+        function syncThemeToFrame(iframe) {
+            const theme = (window.StudioTheme || {get: () => 'light'}).get();
+            const color = (window.StudioTheme || {color: () => '#f4f4f4'}).color();
+            try {
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'studio-theme', theme, color }, '*');
+                }
+            } catch (e) {}
+        }
+
+        function syncScaleToFrame(iframe) {
+            const mode = (window.StudioScale || {getMode: () => 'auto'}).getMode();
+            const cssScale = Number(getComputedStyle(document.documentElement).getPropertyValue('--studio-ui-scale'));
+            const scale = Number.isFinite(cssScale) && cssScale > 0 ? cssScale : ((window.StudioScale || {getScale: () => 1}).getScale());
+            try {
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'studio-ui-scale', mode, scale }, '*');
+                }
+            } catch (e) {}
+        }
+
+        function normalizedFrameOpacity(value) {
+            if(value === null || value === undefined || value === '') return 0.56;
+            const next = Number(value);
+            const safe = Number.isFinite(next) ? next : 0.56;
+            return Math.round(Math.max(0, Math.min(0.85, safe)) * 100) / 100;
+        }
+
+        function currentFrameOpacity() {
+            try {
+                const stored = localStorage.getItem('smart_canvas_frame_opacity');
+                return stored === null ? 0.56 : normalizedFrameOpacity(stored);
+            } catch(e) {
+                return 0.56;
+            }
+        }
+
+        function syncFrameOpacityToFrame(iframe) {
+            try {
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'studio-frame-opacity', opacity: currentFrameOpacity() }, '*');
+                }
+            } catch (e) {}
+        }
+
+        function pauseScaleInFrame(frame, duration = 650) {
+            try {
+                frame?.contentWindow?.postMessage({ type:'studio-ui-scale-pause', duration }, '*');
+            } catch(e) {}
+        }
+
+        function pauseScaleInFrames(duration = 650) {
+            document.querySelectorAll('iframe').forEach(frame => pauseScaleInFrame(frame, duration));
+        }
+
+        function broadcastScaleToFrames() {
+            document.querySelectorAll('iframe').forEach(frame => syncScaleToFrame(frame));
+        }
+
+        function broadcastFrameOpacity(opacity) {
+            const next = normalizedFrameOpacity(opacity);
+            try { localStorage.setItem('smart_canvas_frame_opacity', String(next)); } catch(e) {}
+            document.querySelectorAll('iframe').forEach(frame => syncFrameOpacityToFrame(frame));
+        }
+
+        function broadcastTheme(theme, options = {}) {
+            const next = theme === 'dark' ? 'dark' : 'light';
+            if (window.StudioTheme) {
+                window.StudioTheme.set(next, options);
+            }
+            document.querySelectorAll('iframe').forEach(f => syncThemeToFrame(f));
+            updateThemeDock(next);
+        }
+
+        function updateThemeDock(theme) {
+            const next = theme === 'dark' ? 'dark' : 'light';
+            const btn = document.getElementById('theme-toggle-btn');
+            if(!btn) return;
+            btn.classList.add('active');
+            btn.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false');
+            btn.setAttribute('title', next === 'dark' ? '当前深色，点击切换浅色' : '当前浅色，点击切换深色');
+            btn.setAttribute('aria-label', next === 'dark' ? '当前深色，点击切换浅色' : '当前浅色，点击切换深色');
+            btn.querySelectorAll('[data-theme-icon]').forEach(icon => {
+                icon.style.display = icon.dataset.themeIcon === next ? 'block' : 'none';
+            });
+            const label = btn.querySelector('[data-theme-label]');
+            if(label) label.textContent = next === 'dark' ? '深色' : '浅色';
+        }
+
+        function setThemeMode(theme) {
+            broadcastTheme(theme === 'dark' ? 'dark' : 'light');
+        }
+
+        function toggleTheme() {
+            const current = window.StudioTheme ? window.StudioTheme.get() : 'light';
+            broadcastTheme(current === 'dark' ? 'light' : 'dark');
+        }
+
+        function toggleLanguage() {
+            if(!window.StudioI18n) return;
+            window.StudioI18n.toggle();
+            document.querySelectorAll('iframe').forEach(frame => syncLanguageToFrame(frame));
+            updateProjectUpdateTitle();
+            refreshUpdateButtonText();
+            refreshProjectUpdateModalText();
+        }
+
+        function syncLanguageToFrame(frame) {
+            if(!window.StudioI18n) return;
+            try {
+                frame.contentWindow?.postMessage({ type:'studio-lang', lang:window.StudioI18n.lang() }, '*');
+            } catch(e) {}
+        }
+
+        function broadcastLanguage() {
+            document.querySelectorAll('iframe').forEach(frame => {
+                try {
+                    frame.contentWindow?.postMessage({ type:'studio-lang', lang:window.StudioI18n.lang() }, '*');
+                } catch(e) {}
+            });
+        }
+
+        // listen for theme changes triggered by theme.js
+        window.addEventListener('studio-theme-change', (e) => {
+            updateThemeDock(e.detail.theme);
+        });
+
+        window.addEventListener('studio-ui-scale-change', () => {
+            broadcastScaleToFrames();
+        });
+
+        // init icon state on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const theme = window.StudioTheme ? window.StudioTheme.get() : 'light';
+            updateThemeDock(theme);
+            if(window.StudioI18n) window.StudioI18n.apply();
+            broadcastLanguage();
+            const sidebar = document.getElementById('studioSidebar');
+            if(sidebar) {
+                sidebar.addEventListener('mouseenter', () => pauseScaleInFrames());
+                sidebar.addEventListener('mouseleave', () => pauseScaleInFrames());
+            }
+            checkForUpdates();
+            window.setInterval(() => checkForUpdates(false), 60000);
+        });
+
+        // sync theme when iframe loads
+        document.querySelectorAll('iframe').forEach(f => {
+            f.addEventListener('load', () => {
+                syncThemeToFrame(f);
+                syncLanguageToFrame(f);
+                syncScaleToFrame(f);
+                syncFrameOpacityToFrame(f);
+            });
+        });
+
+        function openProjectPage() {
+            window.open(appInfo.repo_url || PROJECT_URL, '_blank', 'noopener');
+        }
+
+        function versionParts(value) {
+            return String(value || '').match(/\d+/g)?.map(Number) || [];
+        }
+
+        function compareVersions(a, b) {
+            const aa = versionParts(a);
+            const bb = versionParts(b);
+            const len = Math.max(aa.length, bb.length);
+            for(let i = 0; i < len; i++){
+                const diff = (aa[i] || 0) - (bb[i] || 0);
+                if(diff) return diff;
+            }
+            return String(a || '').trim() === String(b || '').trim() ? 0 : 1;
+        }
+
+        function compactVersion(value) {
+            const text = String(value || '').trim();
+            const parts = text.match(/\d+/g) || [];
+            if(/^V/i.test(text)) return text.toUpperCase();
+            if(parts.length >= 3 && /^20\d{2}[._-]\d{1,2}[._-]\d{1,2}/.test(text)) return `${parts[0]}.${String(parts[1]).padStart(2,'0')}.${String(parts[2]).padStart(2,'0')}`;
+            return text.replace(/^v/i, '') || '-';
+        }
+
+        function versionLabel(value, mode = 'full') {
+            const text = String(value || '').trim();
+            if(!text) return 'V-';
+            if(/^V/i.test(text)) return text.toUpperCase();
+            return mode === 'compact' ? `V${compactVersion(text)}` : `V${text.replace(/^v/i, '')}`;
+        }
+
+        function setProjectVersionBadge(version) {
+            const badge = document.getElementById('project-version-badge');
+            if(!badge) return;
+            const updatePending = badge.classList.contains('update-available') && badge.dataset.remoteVersion;
+            // 有新版本时徽章显示「GBZ + 新版本号」，平时显示当前版本
+            const showVersion = updatePending ? badge.dataset.remoteVersion : version;
+            const full = versionLabel(showVersion);
+            badge.replaceChildren();
+            // const brandSpan = document.createElement('span');
+            // brandSpan.className = 'project-version-brand';
+            // brandSpan.textContent = '';
+            // badge.append(brandSpan);
+            if(showVersion) {
+                const compactSpan = document.createElement('span');
+                compactSpan.className = 'project-version-compact';
+                compactSpan.textContent = versionLabel(showVersion, 'compact');
+                const fullSpan = document.createElement('span');
+                fullSpan.className = 'project-version-full';
+                fullSpan.textContent = updatePending ? `智能画布 ${full}·可更新` : `智能画布 ${full}`;
+                badge.append(compactSpan, fullSpan);
+            } else {
+                badge.textContent = 'V-';
+            }
+            badge.title = updatePending
+                ? (window.StudioI18n?.lang?.() === 'en'
+                    ? `GBZ Canvas · new version ${versionLabel(showVersion)} available · click to update`
+                    : `GBZ智能画布 · 发现新版本 ${versionLabel(showVersion)} · 点击更新`)
+                : (window.StudioI18n?.lang?.() === 'en'
+                    ? `GBZ Canvas · current version: ${full} · click to check for updates`
+                    : `GBZ智能画布 · 当前版本：${full} · 点击检测更新`);
+        }
+
+        function refreshUpdateButtonText() {
+            const btn = document.getElementById('update-now-btn');
+            const text = document.getElementById('update-now-text');
+            if(!btn || !text || !btn.classList.contains('show')) return;
+            const remoteVersion = document.getElementById('github-entry-btn')?.dataset.remoteVersion || '';
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            text.removeAttribute('data-i18n');
+            if(remoteVersion) {
+                const prefix = isEn ? 'Update to' : '更新到';
+                text.replaceChildren();
+                const prefixSpan = document.createElement('span');
+                prefixSpan.className = 'update-action-prefix';
+                prefixSpan.textContent = `${prefix} `;
+                const compactSpan = document.createElement('span');
+                compactSpan.className = 'update-version-compact';
+                compactSpan.textContent = versionLabel(remoteVersion, 'compact');
+                const fullSpan = document.createElement('span');
+                fullSpan.className = 'update-version-full';
+                fullSpan.textContent = versionLabel(remoteVersion);
+                text.append(prefixSpan, compactSpan, fullSpan);
+                btn.setAttribute('aria-label', `${prefix} ${versionLabel(remoteVersion)}`);
+            } else {
+                text.textContent = isEn ? 'Update' : '一键更新';
+                btn.setAttribute('aria-label', text.textContent);
+            }
+        }
+
+        function updateProjectUpdateTitle() {
+            const gitBtn = document.getElementById('github-entry-btn');
+            setProjectVersionBadge(appInfo.version || gitBtn?.dataset.localVersion || '');
+            if(!gitBtn?.classList.contains('update-available')) return;
+            const remoteVersion = gitBtn.dataset.remoteVersion || '';
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            gitBtn.title = isEn
+                ? `Current ${versionLabel(gitBtn.dataset.localVersion || appInfo.version)} · latest ${versionLabel(remoteVersion)}`
+                : `当前 ${versionLabel(gitBtn.dataset.localVersion || appInfo.version)} · 最新 ${versionLabel(remoteVersion)}`;
+            const updateBtn = document.getElementById('update-now-btn');
+            if(updateBtn) updateBtn.title = remoteVersion
+                ? (isEn ? `Update to ${versionLabel(remoteVersion)}` : `更新到 ${versionLabel(remoteVersion)}`)
+                : (isEn ? 'Update main.py and static files from GitHub' : '从 GitHub 更新 main.py 和 static 文件');
+            refreshUpdateButtonText();
+        }
+
+        function showUpdateNotice(localVersion, remoteVersion) {
+            const gitBtn = document.getElementById('github-entry-btn');
+            if(!gitBtn) return;
+            gitBtn.classList.add('update-available');
+            gitBtn.dataset.localVersion = localVersion || '';
+            gitBtn.dataset.remoteVersion = remoteVersion || '';
+            // 2026-09-21 GBZ 更新入口：左侧版本徽章变绿并显示新版本号
+            const badge = document.getElementById('project-version-badge');
+            if(badge) {
+                badge.classList.add('update-available');
+                badge.dataset.localVersion = localVersion || '';
+                badge.dataset.remoteVersion = remoteVersion || '';
+                setProjectVersionBadge(localVersion);
+            }
+            document.getElementById('update-now-btn')?.classList.add('show');
+            updateProjectUpdateTitle();
+        }
+
+        function clearUpdateNotice() {
+            const gitBtn = document.getElementById('github-entry-btn');
+            if(gitBtn) {
+                gitBtn.classList.remove('update-available');
+                delete gitBtn.dataset.remoteVersion;
+            }
+            const badge = document.getElementById('project-version-badge');
+            if(badge) {
+                badge.classList.remove('update-available');
+                delete badge.dataset.remoteVersion;
+            }
+            document.getElementById('update-now-btn')?.classList.remove('show');
+        }
+
+        function setProjectUpdateNotes(notes) {
+            projectUpdateNotes = notes && typeof notes === 'object' ? notes : null;
+            renderProjectUpdateNotes();
+        }
+
+        function renderProjectUpdateNotes() {
+            const box = document.getElementById('project-update-notes');
+            if(!box) return;
+            const titleEl = document.getElementById('project-update-notes-title');
+            const versionEl = document.getElementById('project-update-notes-version');
+            const list = document.getElementById('project-update-notes-list');
+            const empty = document.getElementById('project-update-notes-empty');
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const notes = projectUpdateNotes || {};
+            const items = Array.isArray(notes.items) ? notes.items.filter(Boolean) : [];
+            if(titleEl) titleEl.textContent = isEn ? 'What changed' : '本次更新内容';
+            if(versionEl) versionEl.textContent = notes.version ? versionLabel(notes.version) : '';
+            if(list) {
+                list.replaceChildren();
+                items.slice(0, 8).forEach(item => {
+                    const text = typeof item === 'string' ? item : item.text;
+                    if(!text) return;
+                    const li = document.createElement('li');
+                    li.textContent = String(text);
+                    list.append(li);
+                });
+            }
+            const hasItems = !!(list && list.children.length);
+            if(empty) {
+                empty.hidden = hasItems;
+                empty.textContent = isEn ? 'No update notes were found for this version.' : '暂未获取到这个版本的更新说明。';
+            }
+            box.hidden = !(notes.version || hasItems);
+        }
+
+        function describeNetworkError(err, isEn){
+            const msg = String(err?.message || err || '');
+            const isNetwork = (err instanceof TypeError) || /Failed to fetch|NetworkError|ERR_|timed? ?out|超时|无法连接|GitHub|HTTP 4|HTTP 5/i.test(msg);
+            if(isNetwork){
+                return isEn
+                    ? 'Cannot reach the selected update source. Check your network, proxy, or DNS, then try again.'
+                    : '无法连接当前选择的更新源。请检查网络、代理或 DNS 后重试。';
+            }
+            return msg || (isEn ? 'Update failed' : '更新失败');
+        }
+
+        function updateUiText(zh, en) {
+            return window.StudioI18n?.lang?.() === 'en' ? en : zh;
+        }
+
+        function updateSourceLabel(source = updateSource) {
+            if(source === 'github') return 'GitHub';
+            return '魔搭社区';
+        }
+
+        function setUpdateSource(source) {
+            updateSource = (source === 'github') ? 'github' : 'modelscope';
+            localStorage.setItem('studio_update_source', updateSource);
+            refreshProjectUpdateModalText();
+        }
+
+        async function refreshAppInfo() {
+            const info = await fetch('/api/app-info', { cache:'no-store' }).then(r => r.json()).catch(() => ({}));
+            appInfo = {...appInfo, ...info};
+            return appInfo;
+        }
+
+        function sourceConnectivityStats(source, results = []) {
+            const sourceItems = (results || []).filter(item => item.source === source);
+            const required = sourceItems.filter(item => item.required);
+            const okRequired = required.length ? required.every(item => item.ok) : false;
+            const okItems = sourceItems.filter(item => item.ok);
+            const avg = okItems.length
+                ? Math.round(okItems.reduce((sum, item) => sum + Number(item.elapsed_ms || 0), 0) / okItems.length)
+                : 999999;
+            return {source, ok:okRequired, avg, okItems:okItems.length, total:sourceItems.length};
+        }
+
+        function bestUpdateSourceFromConnectivity(data) {
+            const results = data?.results || [];
+            // 优先魔搭（国内快），其次 GitHub；两个都不可用则保持当前选择
+            if(sourceConnectivityStats('modelscope', results).ok) return 'modelscope';
+            if(sourceConnectivityStats('github', results).ok) return 'github';
+            return updateSource;
+        }
+
+        function updateTargetLabel(name) {
+            const labels = {
+                '魔搭版本文件': ['魔搭版本文件', 'ModelScope version file'],
+                'GitHub 版本文件': ['GitHub 版本文件', 'GitHub version file'],
+            };
+            const item = labels[name] || [name, name];
+            return window.StudioI18n?.lang?.() === 'en' ? item[1] : item[0];
+        }
+
+        function updateStatusLabel(item) {
+            if(item.pending) return updateUiText('检测中...', 'Testing...');
+            if(item.ok) return `${updateUiText('正常', 'OK')} · ${item.elapsed_ms || 0}ms`;
+            if(item.timed_out) return updateUiText('失败 · 超时', 'Failed · timeout');
+            if(item.status) return `HTTP ${item.status}`;
+            return updateUiText('失败', 'Failed');
+        }
+
+        function setUpdateSummary(kind, title, text) {
+            const box = document.getElementById('project-update-summary');
+            const titleEl = document.getElementById('project-update-summary-title');
+            const textEl = document.getElementById('project-update-summary-text');
+            if(box) {
+                box.classList.remove('ok', 'warn', 'fail');
+                box.classList.add(kind || 'warn');
+            }
+            if(titleEl) titleEl.textContent = title;
+            if(textEl) textEl.textContent = text;
+        }
+
+        function updateConnectivityTargets() {
+            const sources = appInfo.sources || {};
+            const ms = sources.modelscope || {};
+            const gh = sources.github || {};
+            return [
+                { name:'魔搭版本文件', url:ms.version_url || '', source:'modelscope', required:true },
+                { name:'GitHub 版本文件', url:gh.version_url || '', source:'github', required:false },
+            ];
+        }
+
+        function renderConnectivityList(results = []) {
+            const allItems = results.length ? results : updateConnectivityTargets().map(item => ({...item, pending:false, untouched:true}));
+            const renderInto = (list, source) => {
+                if(!list) return;
+                list.replaceChildren();
+                const items = allItems.filter(item => item.source === source || (source === 'github' && item.source === 'reference'));
+                items.forEach(item => {
+                const row = document.createElement('div');
+                row.className = `connectivity-row ${item.pending ? 'pending' : item.untouched ? '' : item.ok ? 'ok' : 'fail'}`;
+                const indicator = document.createElement('span');
+                indicator.className = 'connectivity-indicator';
+                const meta = document.createElement('div');
+                const name = document.createElement('div');
+                name.className = 'connectivity-name';
+                name.textContent = updateTargetLabel(item.name);
+                const url = document.createElement('div');
+                url.className = 'connectivity-url';
+                url.textContent = item.url || '';
+                meta.append(name, url);
+                const status = document.createElement('div');
+                status.className = 'connectivity-status';
+                status.textContent = item.untouched ? updateUiText('待测试', 'Not tested') : updateStatusLabel(item);
+                row.append(indicator, meta, status);
+                if(item.error && !item.timed_out) {
+                    const error = document.createElement('div');
+                    error.className = 'connectivity-error';
+                    error.textContent = String(item.error).slice(0, 220);
+                    row.append(error);
+                }
+                list.append(row);
+            });
+            };
+            renderInto(document.querySelector('[data-connectivity-source="modelscope"]'), 'modelscope');
+            renderInto(document.querySelector('[data-connectivity-source="github"]'), 'github');
+        }
+
+        function refreshProjectUpdateModalText() {
+            const gitBtn = document.getElementById('github-entry-btn');
+            const remoteVersion = gitBtn?.dataset.remoteVersion || '';
+            const localVersion = gitBtn?.dataset.localVersion || appInfo.version || '';
+            const sourceName = updateSourceLabel();
+            const title = remoteVersion
+                ? updateUiText(`更新到 ${versionLabel(remoteVersion)}`, `Update to ${versionLabel(remoteVersion)}`)
+                : updateUiText('一键更新', 'One-click update');
+            const titleEl = document.getElementById('project-update-title');
+            const copyEl = document.getElementById('project-update-copy');
+            const testText = document.getElementById('connectivity-test-text');
+            const cancelText = document.getElementById('project-update-cancel-text');
+            const confirmText = document.getElementById('project-update-confirm-text');
+            const closeBtn = document.querySelector('#project-update-modal .studio-modal-close');
+            if(titleEl) titleEl.textContent = title;
+            renderProjectUpdateNotes();
+            document.querySelectorAll('[data-update-source]').forEach(card => {
+                const source = card.dataset.updateSource || 'modelscope';
+                const active = source === updateSource;
+                card.classList.toggle('active', active);
+                card.setAttribute('aria-pressed', active ? 'true' : 'false');
+                const badge = card.querySelector('.update-source-badge');
+                if(badge) {
+                    if(!updateConnectivityResult) {
+                        setSourceBadge(badge, '', updateUiText('待测试', 'Not tested'));
+                    } else {
+                        const stats = sourceConnectivityStats(source, updateConnectivityResult.results || []);
+                        setSourceBadge(badge, stats.ok ? 'ok' : 'bad',
+                            stats.ok ? updateUiText('可用', 'Available') : updateUiText('不可用', 'Unavailable'));
+                    }
+                }
+            });
+            if(copyEl) copyEl.textContent = updateUiText(
+                `将从 ${sourceName} 更新 main.py、VERSION 和 static 文件。更新前会自动备份，更新完成后后端会自动重启。当前 ${versionLabel(localVersion)}，最新 ${versionLabel(remoteVersion || localVersion)}。`,
+                `This updates main.py, VERSION, and static files from ${sourceName}. A backup is created first, then the backend restarts automatically. Current ${versionLabel(localVersion)}, latest ${versionLabel(remoteVersion || localVersion)}.`
+            );
+            if(testText) testText.textContent = updateConnectivityResult ? updateUiText('重新测试', 'Retest') : updateUiText('测试连通性', 'Test connectivity');
+            if(cancelText) cancelText.textContent = updateUiText('返回', 'Back');
+            if(confirmText && !projectUpdateRunning) confirmText.textContent = updateUiText('开始更新', 'Start update');
+            if(closeBtn) {
+                closeBtn.title = updateUiText('关闭', 'Close');
+                closeBtn.setAttribute('aria-label', closeBtn.title);
+            }
+            if(!updateConnectivityResult) {
+                setUpdateSummary(
+                    'warn',
+                    updateUiText('建议先测试连通性', 'Connectivity test recommended'),
+                    updateUiText(
+                        '测试会检查作者发布源（魔搭社区 / GitHub）的版本文件。',
+                        'The test checks the author\'s update sources (ModelScope / GitHub) version file.'
+                    )
+                );
+            } else if(updateConnectivityResult.backend_missing) {
+                setUpdateSummary(
+                    'fail',
+                    updateUiText('需要重启后端', 'Backend restart required'),
+                    updateUiText(
+                        '当前页面已经更新，但后端仍是旧版本，所以找不到连通性测试接口。请重启服务后再试。',
+                        'The page is updated, but the backend is still the old version and cannot find the connectivity-test API. Restart the service and try again.'
+                    )
+                );
+            } else if((updateConnectivityResult.sources || {})[updateSource]?.ok) {
+                const sourceResults = (updateConnectivityResult.results || []).filter(item => item.source === updateSource);
+                const fastest = sourceResults.filter(item => item.ok).sort((a, b) => (a.elapsed_ms || 999999) - (b.elapsed_ms || 999999))[0];
+                setUpdateSummary(
+                    'ok',
+                    updateUiText(`${sourceName} 下载源可用`, `${sourceName} source reachable`),
+                    fastest
+                        ? updateUiText(`${sourceName} 可访问，最快节点约 ${fastest.elapsed_ms || 0}ms，可以开始更新。`, `${sourceName} is reachable; fastest endpoint is about ${fastest.elapsed_ms || 0}ms.`)
+                        : updateUiText(`${sourceName} 更新节点可用，可以开始更新。`, `${sourceName} update endpoints are reachable.`)
+                );
+            } else {
+                setUpdateSummary(
+                    'fail',
+                    updateUiText(`${sourceName} 下载源不可用`, `${sourceName} source unreachable`),
+                    updateUiText(
+                        `当前网络无法访问 ${sourceName}。可切换另一个下载源后重试。`,
+                        `This network cannot reach ${sourceName}. Try switching to the other update source.`
+                    )
+                );
+            }
+            renderConnectivityList(updateConnectivityResult?.results || []);
+        }
+
+        function openProjectUpdateModal() {
+            const modal = document.getElementById('project-update-modal');
+            if(!modal) return;
+            updateConnectivityResult = null;
+            refreshProjectUpdateModalText();
+            modal.hidden = false;
+            document.getElementById('connectivity-test-btn')?.focus?.();
+        }
+
+        function closeProjectUpdateModal() {
+            // 更新进行中允许关闭：中止在途请求并恢复 UI，避免「卡在更新中、无法关闭」
+            if(projectUpdateRunning) {
+                try { projectUpdateAbort?.abort(); } catch(e) {}
+            }
+            const modal = document.getElementById('project-update-modal');
+            if(modal) modal.hidden = true;
+        }
+
+        document.getElementById('project-update-modal')?.addEventListener('click', event => {
+            if(event.target?.id === 'project-update-modal') closeProjectUpdateModal();
+        });
+
+        window.addEventListener('keydown', event => {
+            if(event.key === 'Escape') closeProjectUpdateModal();
+        });
+
+        async function runProjectUpdate() {
+            openProjectUpdateModal();
+        }
+
+        function computeConnectivitySources(results) {
+            const out = {};
+            for(const source of ['modelscope', 'github']) {
+                const reqAll = (results || []).filter(it => it.source === source && it.required);
+                out[source] = {
+                    ok: reqAll.length > 0 && reqAll.every(it => it.ok),
+                    required: reqAll.map(it => it.name),
+                };
+            }
+            return out;
+        }
+
+        function setSourceBadge(badge, state, text) {
+            if(!badge) return;
+            badge.classList.remove('ok', 'bad');
+            if(state) badge.classList.add(state);
+            badge.textContent = text;
+        }
+
+        function renderSourceBadgesLive(results) {
+            document.querySelectorAll('[data-update-source]').forEach(card => {
+                const source = card.dataset.updateSource || 'modelscope';
+                const badge = card.querySelector('.update-source-badge');
+                if(!badge) return;
+                const items = (results || []).filter(it => it.source === source);
+                if(!items.length) return;
+                const done = items.filter(it => !it.pending && !it.untouched);
+                if(done.length < items.length) {
+                    setSourceBadge(badge, '', updateUiText(`检测中 ${done.length}/${items.length}`, `${done.length}/${items.length}`));
+                    return;
+                }
+                const stats = sourceConnectivityStats(source, results);
+                setSourceBadge(badge, stats.ok ? 'ok' : 'bad',
+                    stats.ok ? updateUiText('可用', 'Available') : updateUiText('不可用', 'Unavailable'));
+            });
+        }
+
+        let connectivityTesting = false;
+        async function runUpdateConnectivityTest() {
+            if(connectivityTesting) return; // 防止重复点击导致状态错乱
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const btn = document.getElementById('connectivity-test-btn');
+            const text = document.getElementById('connectivity-test-text');
+            connectivityTesting = true;
+            if(btn) btn.disabled = true;
+            if(text) text.textContent = isEn ? 'Testing...' : '检测中...';
+            updateConnectivityResult = null;
+
+            const targets = updateConnectivityTargets();
+            // 实时状态数组：先全部置为「检测中」，每条探测完成立即刷新对应行
+            const live = targets.map(item => ({...item, pending:true, untouched:false}));
+            let backendMissing = false;
+            const applyResult = (name, patch) => {
+                const i = live.findIndex(x => x.name === name);
+                if(i < 0) return;
+                live[i] = {...live[i], pending:false, untouched:false, ...patch};
+                renderConnectivityList(live);
+                renderSourceBadgesLive(live);
+            };
+
+            const probeOne = async (t) => {
+                // 客户端兜底超时：5s 探测 + 1s 网络余量，超时即报「超时」，不会永远卡在「检测中」
+                const ac = new AbortController();
+                const killer = setTimeout(() => ac.abort(), 6000);
+                try {
+                    const res = await fetch(`/api/update-connectivity/probe?name=${encodeURIComponent(t.name)}`, { cache:'no-store', signal:ac.signal });
+                    const data = await res.json().catch(() => ({}));
+                    // 旧后端没有单条探测接口 → 404 Not Found，标记后回退到整体接口
+                    if(res.status === 404 && (data.detail === 'Not Found' || data.detail === undefined)) {
+                        backendMissing = true;
+                        return;
+                    }
+                    if(res.ok) {
+                        applyResult(t.name, { ok:!!data.ok, status:data.status || 0, elapsed_ms:data.elapsed_ms || 0, error:data.error || '', timed_out:!!data.timed_out });
+                    } else {
+                        applyResult(t.name, { ok:false, error:data.detail || (isEn ? 'Failed' : '失败') });
+                    }
+                } catch(e) {
+                    if(e && e.name === 'AbortError') {
+                        applyResult(t.name, { ok:false, timed_out:true, error:isEn ? 'Timed out (over 5s)' : '连接超时（超过 5s）' });
+                    } else {
+                        applyResult(t.name, { ok:false, error:describeNetworkError(e, isEn) });
+                    }
+                } finally {
+                    clearTimeout(killer);
+                }
+            };
+
+            try {
+                setUpdateSummary('warn', isEn ? 'Testing connectivity' : '正在测试连通性', isEn ? 'Probing each endpoint — results stream in live.' : '正在逐条检测各节点，结果实时显示。');
+                renderConnectivityList(live);
+                renderSourceBadgesLive(live);
+                await Promise.all(targets.map(probeOne));
+
+                if(backendMissing) {
+                    // 兜底：尝试旧的整体接口
+                    try {
+                        const res = await fetch('/api/update-connectivity', { cache:'no-store' });
+                        const data = await res.json().catch(() => ({}));
+                        if(res.ok && Array.isArray(data.results)) {
+                            updateConnectivityResult = data;
+                            setUpdateSource(bestUpdateSourceFromConnectivity(data));
+                            return;
+                        }
+                    } catch(e) {}
+                    const message = isEn
+                        ? 'The backend has not loaded the new connectivity-test API yet. Restart the backend service, then test again.'
+                        : '后端还没有加载新的连通性测试接口。请重启服务后再测试。';
+                    updateConnectivityResult = {
+                        ok:false,
+                        backend_missing:true,
+                        results:targets.map(item => ({...item, ok:false, elapsed_ms:0, error:message })),
+                    };
+                    return;
+                }
+
+                const results = live.map(({pending, untouched, ...rest}) => rest);
+                const sources = computeConnectivitySources(results);
+                updateConnectivityResult = { results, sources, ok:sources.modelscope.ok || sources.github.ok };
+                setUpdateSource(bestUpdateSourceFromConnectivity(updateConnectivityResult));
+            } finally {
+                connectivityTesting = false;
+                if(btn) btn.disabled = false;
+                refreshProjectUpdateModalText();
+            }
+        }
+
+        async function confirmProjectUpdate() {
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const btn = document.getElementById('update-now-btn');
+            const text = document.getElementById('update-now-text');
+            const confirmBtn = document.getElementById('project-update-confirm-btn');
+            const confirmText = document.getElementById('project-update-confirm-text');
+            const testBtn = document.getElementById('connectivity-test-btn');
+            const oldText = text?.textContent || '';
+            projectUpdateRunning = true;
+            if(btn) btn.disabled = true;
+            if(confirmBtn) confirmBtn.disabled = true;
+            if(testBtn) testBtn.disabled = true;
+            if(text) text.textContent = isEn ? 'Updating...' : '更新中...';
+            if(confirmText) confirmText.textContent = isEn ? 'Updating...' : '更新中...';
+            const sourceName = updateSourceLabel();
+            setUpdateSummary('warn', isEn ? 'Updating' : '正在更新', isEn ? `Downloading files from ${sourceName} and creating a local backup.` : `正在从 ${sourceName} 下载文件，并创建本地备份。`);
+            // 客户端兜底超时：即使后端异常挂起，UI 也能恢复，不会永远停在「更新中」
+            const ac = new AbortController();
+            const killer = setTimeout(() => ac.abort(), 300000);
+            try {
+                const res = await fetch('/api/update-from-github', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ auto_restart:true, restart_delay:3, source:updateSource, fallback:true }),
+                    signal:ac.signal
+                });
+                const data = await res.json().catch(() => ({}));
+                if(!res.ok) throw new Error(data.detail || (isEn ? 'Update failed' : '更新失败'));
+                if(data.update_notes) setProjectUpdateNotes(data.update_notes);
+                const restarting = data.restart_scheduled;
+                const fallbackNote = '';
+                setUpdateSummary(
+                    'ok',
+                    isEn ? 'Update complete' : '更新完成',
+                    (restarting
+                        ? (isEn
+                            ? `Updated ${data.count || 0} files. The backend will restart in about 3 seconds; this page will reload when it returns.`
+                            : `已更新 ${data.count || 0} 个文件。后端将在约 3 秒后自动重启，本页面会在恢复后自动刷新。`)
+                        : (isEn
+                            ? `Updated ${data.count || 0} files. Please restart the backend, then refresh this page.`
+                            : `已更新 ${data.count || 0} 个文件。请重启后端，然后刷新页面。`)) + fallbackNote
+                );
+                document.getElementById('github-entry-btn')?.classList.remove('update-available');
+                clearUpdateNotice();
+                btn?.classList.remove('show');
+                setProjectVersionBadge(data.version || document.getElementById('github-entry-btn')?.dataset.remoteVersion || appInfo.version);
+                if(restarting) waitForBackendAndReload();
+            } catch(e) {
+                const msg = (e && e.name === 'AbortError')
+                    ? (isEn ? 'Update timed out. Switch source or check your network, then retry.' : '更新超时。请切换下载源或检查网络后重试。')
+                    : describeNetworkError(e, isEn);
+                setUpdateSummary('fail', isEn ? 'Update failed' : '更新失败', msg);
+            } finally {
+                clearTimeout(killer);
+                projectUpdateRunning = false;
+                if(btn) btn.disabled = false;
+                if(confirmBtn) confirmBtn.disabled = false;
+                if(testBtn) testBtn.disabled = false;
+                if(text) text.textContent = oldText || (isEn ? 'Update' : '一键更新');
+                if(confirmText) confirmText.textContent = isEn ? 'Start update' : '开始更新';
+                refreshUpdateButtonText();
+            }
+        }
+        async function waitForBackendAndReload() {
+            const deadline = Date.now() + 90 * 1000;
+            await new Promise(r => setTimeout(r, 4000));
+            while(Date.now() < deadline) {
+                try {
+                    const r = await fetch('/api/app-info', { cache:'no-store' });
+                    if(r.ok) { location.reload(); return; }
+                } catch {}
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+        async function rollbackProjectUpdate() {
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            try {
+                const list = await fetch('/api/update-backups').then(r => r.json());
+                const backups = list.backups || [];
+                if(!backups.length){ alert(isEn ? 'No backups available.' : '没有可用的备份'); return; }
+                const lines = backups.slice(0, 8).map((b, i) => {
+                    const d = new Date((b.created_at || 0) * 1000);
+                    const ts = d.toLocaleString();
+                    return `${i + 1}. ${b.name}  (${b.file_count} files, ${ts})`;
+                });
+                const promptMsg = (isEn
+                    ? 'Select a backup to restore (enter the number):\n'
+                    : '选择要还原的备份（输入序号）：\n') + lines.join('\n');
+                const answer = prompt(promptMsg, '1');
+                const idx = Number(answer) - 1;
+                if(!(idx >= 0 && idx < backups.length)) return;
+                const target = backups[idx];
+                if(!confirm(isEn ? `Restore "${target.name}"? Backend will restart.` : `要还原 "${target.name}" 吗？后端会自动重启。`)) return;
+                const res = await fetch('/api/update-rollback', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ name:target.name, auto_restart:true, restart_delay:3 })
+                });
+                const data = await res.json().catch(() => ({}));
+                if(!res.ok) throw new Error(data.detail || (isEn ? 'Rollback failed' : '回滚失败'));
+                alert(isEn
+                    ? `Restored ${data.count || 0} files. Backend is restarting.`
+                    : `已还原 ${data.count || 0} 个文件。后端正在重启。`);
+                if(data.restart_scheduled) waitForBackendAndReload();
+            } catch(e) {
+                alert((isEn ? 'Rollback failed: ' : '回滚失败：') + describeNetworkError(e, isEn));
+            }
+        }
+        window.rollbackProjectUpdate = rollbackProjectUpdate;
+
+        async function checkForUpdates(manual = false) {
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const badge = document.getElementById('project-version-badge');
+            if(manual && badge) badge.classList.add('checking');
+            try {
+                await refreshAppInfo();
+                let current = String(appInfo.version || '').trim();
+                setProjectVersionBadge(current);
+                let best = null;
+                let reachable = false;
+                let serverChecked = false;
+                // 优先走后端检测：同时探测魔搭社区与 GitHub 两个远程发布源
+                try {
+                    const r = await fetch('/api/check-update', { cache:'no-store' });
+                    if(r.ok) {
+                        const d = await r.json();
+                        serverChecked = true;
+                        reachable = !!d.reachable;
+                        if(d.current) { current = String(d.current).trim(); setProjectVersionBadge(current); }
+                        if(d.latest?.version) best = {source:d.latest.source, version:d.latest.version, update_notes:d.latest.update_notes || d.update_notes || null};
+                    }
+                } catch(e) {}
+                // 兜底：旧后端无 /api/check-update 时，浏览器直接拉取 GitHub 上的 VERSION
+                if(!serverChecked) {
+                    const sources = appInfo.sources || {};
+                    const candidates = [
+                        {source:'github', url:sources.github?.version_url || 'https://raw.githubusercontent.com/denghang6688/GBZ-Canvas/main/VERSION'},
+                    ].filter(item => item.url);
+                    for(const item of candidates) {
+                        try {
+                            const remoteText = await fetch(`${item.url}${item.url.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache:'no-store' }).then(r => r.ok ? r.text() : '');
+                            const remote = String(remoteText || '').trim().split(/\r?\n/)[0].trim();
+                            if(remote && !remote.includes('<') && !remote.includes('{')){ reachable = true; if(!best || compareVersions(remote, best.version) > 0) best = {source:item.source, version:remote}; }
+                        } catch(e) {}
+                    }
+                }
+                const hasUpdate = !!(current && best?.version && compareVersions(best.version, current) > 0);
+                if(hasUpdate) {
+                    if(best.source) setUpdateSource(best.source);
+                    setProjectUpdateNotes(best.update_notes || null);
+                    showUpdateNotice(current, best.version);
+                } else if(manual) {
+                    clearUpdateNotice();
+                    setProjectVersionBadge(current);
+                }
+                if(manual) {
+                    if(hasUpdate) {
+                        openProjectUpdateModal();
+                    } else if(reachable) {
+                        alert(isEn ? `You are on the latest version (${versionLabel(current)}).` : `已是最新版本（${versionLabel(current)}）。`);
+                    } else {
+                        alert(isEn ? 'Could not reach the update sources (ModelScope / GitHub). Check your network or proxy, then try again.' : '无法连接更新源（魔搭社区 / GitHub）。请检查网络或代理后重试。');
+                    }
+                }
+            } catch(e) {
+                // 离线包里没有网络时保持安静，不影响本地使用。
+                if(manual) alert(isEn ? 'Update check failed.' : '检测更新失败。');
+            } finally {
+                if(badge) badge.classList.remove('checking');
+            }
+        }
+    </script>
+</body>
+
+</html>

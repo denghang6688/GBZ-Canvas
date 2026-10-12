@@ -1,0 +1,2334 @@
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    color-scheme: dark;
+    background: #050505 !important;
+    color: #f1f1f1 !important;
+}
+
+/* Pure black-gray dark theme. */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom {
+    --page:#050505;
+    --bg:#050505;
+    --panel:#141414;
+    --panel-solid:#161616;
+    --card:#1f1f1f;
+    --soft:#242424;
+    --soft-2:#2b2b2b;
+    --line:#313131;
+    --line-2:#474747;
+    --line-strong:#5f5f5f;
+    --text:#f2f2f2;
+    --muted:#d5d5d5;
+    --faint:#a6a6a6;
+    --strong:#f4f4f4;
+    --strong-text:#080808;
+    --shadow:rgba(0,0,0,.46);
+}
+
+/* Absolute final monochrome override. This must stay at the end of theme.css. */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    --studio-custom-color:#f4f4f4 !important;
+    --accent:#f4f4f4 !important;
+    --page:#050505 !important;
+    --bg:#050505 !important;
+    --bg-base:#050505 !important;
+    --panel:#141414 !important;
+    --panel-solid:#161616 !important;
+    --card:#1f1f1f !important;
+    --soft:#242424 !important;
+    --soft-2:#2b2b2b !important;
+    --line:#333333 !important;
+    --line-2:#525252 !important;
+    --line-strong:#666666 !important;
+    --text:#f4f4f4 !important;
+    --text-main:#f4f4f4 !important;
+    --muted:#cfcfcf !important;
+    --faint:#999999 !important;
+    --strong:#f4f4f4 !important;
+    --strong-text:#080808 !important;
+}
+
+html.theme-custom,
+html.theme-custom body,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    background:#050505 !important;
+    color:#f4f4f4 !important;
+}
+
+html.studio-theme-dark body input,
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input,
+body.studio-theme-dark textarea,
+body.studio-theme-dark select,
+html.theme-custom body input,
+html.theme-custom body textarea,
+html.theme-custom body select,
+body.theme-custom input,
+body.theme-custom textarea,
+body.theme-custom select {
+    background-color:#1f1f1f !important;
+    border-color:#333333 !important;
+    color:#f4f4f4 !important;
+}
+
+.workflow-nav-search input,
+.asset-search-wrap input,
+.asset-search,
+.search-pill input,
+#prompt,
+#messageInput {
+    background:transparent !important;
+    background-color:transparent !important;
+    box-shadow:none !important;
+}
+
+.workflow-nav-search,
+.asset-search-wrap,
+.search-pill,
+.composer-body,
+.nano-input {
+    background:#181818 !important;
+    background-color:#181818 !important;
+    border-color:#333333 !important;
+    box-shadow:none !important;
+}
+
+html.theme-custom body .primary,
+html.theme-custom body .primary-btn,
+html.theme-custom body .save-btn,
+html.theme-custom body .run-btn,
+html.theme-custom body .send-button,
+body.theme-custom .primary,
+body.theme-custom .primary-btn,
+body.theme-custom .save-btn,
+body.theme-custom .run-btn,
+body.theme-custom .send-button {
+    background:#f4f4f4 !important;
+    border-color:#f4f4f4 !important;
+    color:#080808 !important;
+}
+
+/* Final global monochrome layer. Keep every framed page black/white/gray and remove outer page seams. */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom {
+    --studio-custom-color:#f4f4f4 !important;
+    --accent:#f4f4f4 !important;
+    --page:#050505 !important;
+    --bg:#050505 !important;
+    --bg-base:#050505 !important;
+    --panel:#141414 !important;
+    --panel-solid:#161616 !important;
+    --card:#1f1f1f !important;
+    --soft:#242424 !important;
+    --soft-2:#2b2b2b !important;
+    --line:#313131 !important;
+    --line-2:#474747 !important;
+    --line-strong:#5f5f5f !important;
+    --text:#f2f2f2 !important;
+    --text-main:#f2f2f2 !important;
+    --muted:#d4d4d4 !important;
+    --faint:#a6a6a6 !important;
+    --strong:#f4f4f4 !important;
+    --strong-text:#080808 !important;
+    --shadow:rgba(0,0,0,.46) !important;
+    color-scheme:dark;
+}
+
+html:not(.theme-dark):not(.theme-custom),
+html:not(.theme-dark):not(.theme-custom) body {
+    --studio-custom-color:#111111 !important;
+    --accent:#111111 !important;
+    --page:#f7f7f7 !important;
+    --bg:#f7f7f7 !important;
+    --bg-base:#f7f7f7 !important;
+    --panel:#ffffff !important;
+    --panel-solid:#ffffff !important;
+    --card:#ffffff !important;
+    --soft:#eeeeee !important;
+    --soft-2:#e2e2e2 !important;
+    --line:#d6d6d6 !important;
+    --line-2:#c8c8c8 !important;
+    --line-strong:#9a9a9a !important;
+    --text:#111111 !important;
+    --text-main:#111111 !important;
+    --muted:#555555 !important;
+    --faint:#777777 !important;
+    --strong:#111111 !important;
+    --strong-text:#ffffff !important;
+    --shadow:rgba(0,0,0,.12) !important;
+    color-scheme:light;
+}
+
+html,
+body {
+    background:var(--bg, #050505) !important;
+}
+
+.page,
+.asset-page,
+.shell,
+.settings-page,
+.canvas-list-page,
+.canvas-page,
+.studio-page,
+.smart-canvas-shell {
+    background:var(--bg, #050505) !important;
+    border-color:transparent !important;
+    box-shadow:none !important;
+}
+
+.topbar,
+.page-topbar,
+.page-header,
+.asset-head,
+.asset-toolbar,
+.settings-head,
+.studio-header,
+.canvas-list-header {
+    border-color:transparent !important;
+    box-shadow:none !important;
+}
+
+.primary,
+.primary-btn,
+.save-btn,
+.run-btn,
+.send-button,
+.page-back-btn,
+.studio-page-back,
+button[class*="primary"],
+button[class*="active"],
+.tab.active,
+.pill.active,
+.mode.active,
+.lang.active {
+    border-color:var(--strong, #f4f4f4) !important;
+    box-shadow:none !important;
+}
+
+.primary,
+.primary-btn,
+.save-btn,
+.run-btn,
+.send-button,
+button[class*="primary"] {
+    background:var(--strong, #f4f4f4) !important;
+    color:var(--strong-text, #080808) !important;
+}
+
+input,
+textarea,
+select {
+    accent-color:var(--strong, #f4f4f4) !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+button:focus-visible,
+[tabindex]:focus-visible {
+    outline:2px solid var(--strong, #f4f4f4) !important;
+    outline-offset:2px !important;
+    box-shadow:none !important;
+}
+
+*[style*="#989898"],
+*[style*="#9b9b9b"],
+*[style*="#8f8f8f"],
+*[style*="#999999"],
+*[style*="rgb(152,152,152)"] {
+    border-color:var(--line, #313131) !important;
+    color:var(--text, #f2f2f2) !important;
+}
+
+.workflow-nav-search input,
+.asset-search-wrap input,
+.asset-search,
+.search-pill input {
+    background:transparent !important;
+    background-color:transparent !important;
+    box-shadow:none !important;
+}
+
+.workflow-nav-search,
+.asset-search-wrap,
+.search-pill {
+    background:#181818 !important;
+    border-color:#333333 !important;
+    box-shadow:none !important;
+}
+
+html,
+body {
+    overscroll-behavior: auto;
+}
+
+* {
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(166,166,166, .72) transparent !important;
+}
+
+*::-webkit-scrollbar {
+    width: 10px !important;
+    height: 10px !important;
+    background: transparent !important;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+*::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    background-color: rgba(166,166,166, .72) !important;
+    border: 3px solid transparent !important;
+    border-right-width: 3px !important;
+    background-clip: padding-box !important;
+    border-radius: 999px !important;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 116, 139, .86) !important;
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent !important;
+}
+
+body.studio-theme-dark {
+    --accent: #e8e8ea;
+    --bg: #0a0a0a;
+    --bg-base: #0a0a0a;
+    --card: #111216;
+    --text-main: #e8e8ea;
+}
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage {
+    background: #0a0a0a !important;
+    border-color: #25262b !important;
+}
+
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .stage {
+    box-shadow: inset 0 0 42px rgba(255,255,255,.015);
+}
+
+html.studio-theme-dark body .nav-item,
+body.studio-theme-dark .nav-item {
+    color: #8f9aab;
+}
+
+html.studio-theme-dark body .nav-item:hover,
+body.studio-theme-dark .nav-item:hover {
+    background: #111216 !important;
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .nav-item.active,
+body.studio-theme-dark .nav-item.active {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+    box-shadow: 0 12px 24px rgba(0,0,0,.28);
+}
+
+html.studio-theme-dark body .logo-ring,
+body.studio-theme-dark .logo-ring {
+    border-color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body #logo-dot,
+body.studio-theme-dark #logo-dot {
+    background: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .nano-monitor,
+body.studio-theme-dark .nano-monitor {
+    background: rgba(17,18,22,.88) !important;
+    color: #e1e1e1;
+    border-color: rgba(255,255,255,.10) !important;
+    box-shadow: 0 12px 34px rgba(0,0,0,.24);
+}
+
+html.studio-theme-dark body .divider,
+body.studio-theme-dark .divider {
+    background: rgba(225,225,225,.14) !important;
+}
+
+html.studio-theme-dark body .theme-dock-btn,
+body.studio-theme-dark .theme-dock-btn {
+    background: #111216;
+    border-color: #25262b;
+    color: #9aa6b8;
+}
+
+html.studio-theme-dark body .theme-dock-btn:hover,
+html.studio-theme-dark body .theme-dock-btn.active,
+body.studio-theme-dark .theme-dock-btn:hover,
+body.studio-theme-dark .theme-dock-btn.active {
+    background: #e1e1e1;
+    border-color: #e1e1e1;
+    color: #161616;
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .work-panel,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .topbar,
+html.studio-theme-dark body .composer,
+html.studio-theme-dark body .composer-body,
+html.studio-theme-dark body .bubble.assistant,
+html.studio-theme-dark body .history-popover,
+html.studio-theme-dark body .thread-item,
+html.studio-theme-dark body .lightbox-card,
+html.studio-theme-dark body #lightboxCard,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-slate-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-\[\#fdfdfd\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .work-panel,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .topbar,
+body.studio-theme-dark .composer,
+body.studio-theme-dark .composer-body,
+body.studio-theme-dark .bubble.assistant,
+body.studio-theme-dark .history-popover,
+body.studio-theme-dark .thread-item,
+body.studio-theme-dark .lightbox-card,
+body.studio-theme-dark #lightboxCard,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-slate-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-\[\#fdfdfd\] {
+    background-color: #111216 !important;
+    border-color: #25262b !important;
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-slate-100,
+html.studio-theme-dark body .select-shell,
+html.studio-theme-dark body .model-pill,
+html.studio-theme-dark body .ratio-grid,
+html.studio-theme-dark body .resolution-toggle,
+html.studio-theme-dark body .mode-switch,
+html.studio-theme-dark body .mini-ratio,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-slate-100,
+body.studio-theme-dark .select-shell,
+body.studio-theme-dark .model-pill,
+body.studio-theme-dark .ratio-grid,
+body.studio-theme-dark .resolution-toggle,
+body.studio-theme-dark .mode-switch,
+body.studio-theme-dark .mini-ratio {
+    background-color: #0c0d10 !important;
+    border-color: #25262b !important;
+}
+
+html.studio-theme-dark body input,
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input,
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body input::placeholder,
+html.studio-theme-dark body textarea::placeholder,
+body.studio-theme-dark input::placeholder,
+body.studio-theme-dark textarea::placeholder {
+    color: #657286 !important;
+}
+
+html.studio-theme-dark body .text-black,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-slate-700,
+html.studio-theme-dark body .setting-title,
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+body.studio-theme-dark .text-black,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-slate-700,
+body.studio-theme-dark .setting-title,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3 {
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-slate-400,
+html.studio-theme-dark body .text-slate-500,
+html.studio-theme-dark body .setting-meta,
+html.studio-theme-dark body .label-nano,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-slate-400,
+body.studio-theme-dark .text-slate-500,
+body.studio-theme-dark .setting-meta,
+body.studio-theme-dark .label-nano {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-300,
+html.studio-theme-dark body .border-slate-100,
+html.studio-theme-dark body .border-slate-200,
+html.studio-theme-dark body .border-black,
+html.studio-theme-dark body .border-white,
+html.studio-theme-dark body .border-\[\#f5f5f5\],
+html.studio-theme-dark body .border-\[\#f3f3f3\],
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-300,
+body.studio-theme-dark .border-slate-100,
+body.studio-theme-dark .border-slate-200,
+body.studio-theme-dark .border-black,
+body.studio-theme-dark .border-white,
+body.studio-theme-dark .border-\[\#f5f5f5\],
+body.studio-theme-dark .border-\[\#f3f3f3\] {
+    border-color: #373737 !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-action-dark,
+html.studio-theme-dark body .send-btn,
+html.studio-theme-dark body .gen-btn,
+html.studio-theme-dark body .comfy-run,
+html.studio-theme-dark body .llm-run,
+html.studio-theme-dark body .primary-btn,
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-action-dark,
+body.studio-theme-dark .send-btn,
+body.studio-theme-dark .gen-btn,
+body.studio-theme-dark .comfy-run,
+body.studio-theme-dark .llm-run,
+body.studio-theme-dark .primary-btn,
+body.studio-theme-dark .bg-black {
+    background-color: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .glass-btn:hover,
+html.studio-theme-dark body .btn-action-dark:hover,
+html.studio-theme-dark body .bg-black:hover,
+body.studio-theme-dark .glass-btn:hover,
+body.studio-theme-dark .btn-action-dark:hover,
+body.studio-theme-dark .bg-black:hover {
+    background-color: #d2d2d2 !important;
+}
+
+html.studio-theme-dark body .gallery-lightbox,
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark .gallery-lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(22,22,22,.78) !important;
+    backdrop-filter: blur(22px) saturate(1.05);
+}
+
+html.studio-theme-dark body .masonry-item:hover,
+html.studio-theme-dark body .console-card:focus-within,
+html.studio-theme-dark body .select-shell:focus-within,
+body.studio-theme-dark .masonry-item:hover,
+body.studio-theme-dark .console-card:focus-within,
+body.studio-theme-dark .select-shell:focus-within {
+    border-color: #566174 !important;
+    box-shadow: 0 20px 44px rgba(0,0,0,.28) !important;
+}
+
+html.studio-theme-dark body .console-card textarea,
+html.studio-theme-dark body #prompt,
+html.studio-theme-dark body #promptInput,
+body.studio-theme-dark .console-card textarea,
+body.studio-theme-dark #prompt,
+body.studio-theme-dark #promptInput {
+    color: #ebebeb !important;
+    caret-color: #e1e1e1;
+}
+
+html.studio-theme-dark body .size-btn,
+html.studio-theme-dark body .model-option,
+html.studio-theme-dark body .ratio-option,
+html.studio-theme-dark body .resolution-option,
+html.studio-theme-dark body .mini-ratio button,
+html.studio-theme-dark body .mode-switch button,
+body.studio-theme-dark .size-btn,
+body.studio-theme-dark .model-option,
+body.studio-theme-dark .ratio-option,
+body.studio-theme-dark .resolution-option,
+body.studio-theme-dark .mini-ratio button,
+body.studio-theme-dark .mode-switch button {
+    background: #1a1a1a !important;
+    border-color: #373737 !important;
+    color: #9aa6b8 !important;
+}
+
+html.studio-theme-dark body .size-btn:hover,
+html.studio-theme-dark body .model-option:hover,
+html.studio-theme-dark body .ratio-option:hover,
+html.studio-theme-dark body .resolution-option:hover,
+body.studio-theme-dark .size-btn:hover,
+body.studio-theme-dark .model-option:hover,
+body.studio-theme-dark .ratio-option:hover,
+body.studio-theme-dark .resolution-option:hover {
+    border-color: #566174 !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .size-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .mini-ratio button.active,
+html.studio-theme-dark body .mode-switch button.active,
+body.studio-theme-dark .size-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .mini-ratio button.active,
+body.studio-theme-dark .mode-switch button.active {
+    background: #e1e1e1 !important;
+    border-color: #e1e1e1 !important;
+    color: #161616 !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,.2) !important;
+}
+
+html.studio-theme-dark body .ios-slider,
+body.studio-theme-dark .ios-slider {
+    background: #373737 !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider {
+    background: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .ios-slider:before,
+body.studio-theme-dark .ios-slider:before {
+    background: #1a1a1a !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.38) !important;
+}
+
+html.studio-theme-dark body .composer-wrap,
+body.studio-theme-dark .composer-wrap {
+    background: linear-gradient(to top,#161616 82%,rgba(22,22,22,0)) !important;
+}
+
+html.studio-theme-dark body .canvas-gate,
+body.studio-theme-dark .canvas-gate {
+    background-color: #161616 !important;
+    background-image: radial-gradient(rgba(166,166,166,.18) 1px, transparent 1px) !important;
+}
+
+html.studio-theme-dark body .gate-panel,
+html.studio-theme-dark body .canvas-item,
+html.studio-theme-dark body .canvas-open,
+body.studio-theme-dark .gate-panel,
+body.studio-theme-dark .canvas-item,
+body.studio-theme-dark .canvas-open {
+    background: #202020 !important;
+    border-color: #373737 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .canvas-item:hover,
+body.studio-theme-dark .canvas-item:hover {
+    background: #2c2c2c !important;
+}
+
+html.studio-theme-dark body .canvas-item.active,
+body.studio-theme-dark .canvas-item.active {
+    background: #373737 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .canvas-card-title,
+html.studio-theme-dark body .gate-title,
+html.studio-theme-dark body .gate-name-input,
+body.studio-theme-dark .canvas-card-title,
+body.studio-theme-dark .gate-title,
+body.studio-theme-dark .gate-name-input {
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .canvas-card-time,
+html.studio-theme-dark body .gate-subtitle,
+body.studio-theme-dark .canvas-card-time {
+    color: #8f9aab !important;
+}
+
+body.studio-theme-dark .gate-subtitle {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .canvas-preview-mark,
+html.studio-theme-dark body .canvas-delete,
+html.studio-theme-dark body .secondary-btn,
+html.studio-theme-dark body .gate-back,
+html.studio-theme-dark body .gate-trash-entry,
+html.studio-theme-dark body .create-cancel,
+html.studio-theme-dark body .gate-create-row,
+html.studio-theme-dark body .gate-actions,
+html.studio-theme-dark body .trash-note,
+html.studio-theme-dark body .emoji-picker,
+html.studio-theme-dark body .create-menu,
+html.studio-theme-dark body .selection-hub,
+html.studio-theme-dark body .output-preview,
+body.studio-theme-dark .canvas-preview-mark,
+body.studio-theme-dark .canvas-delete,
+body.studio-theme-dark .secondary-btn,
+body.studio-theme-dark .gate-back,
+body.studio-theme-dark .gate-trash-entry,
+body.studio-theme-dark .create-cancel,
+body.studio-theme-dark .gate-create-row,
+body.studio-theme-dark .gate-actions,
+body.studio-theme-dark .trash-note,
+body.studio-theme-dark .emoji-picker,
+body.studio-theme-dark .create-menu,
+body.studio-theme-dark .selection-hub,
+body.studio-theme-dark .output-preview {
+    background: #1a1a1a !important;
+    border-color: #373737 !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .gate-trash-badge,
+body.studio-theme-dark .gate-trash-badge {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+    border-color: #1a1a1a !important;
+}
+
+html.studio-theme-dark body .secondary-btn.active,
+body.studio-theme-dark .secondary-btn.active {
+    background: #e1e1e1 !important;
+    border-color: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .canvas-delete:hover,
+html.studio-theme-dark body .create-cancel:hover,
+body.studio-theme-dark .canvas-delete:hover,
+body.studio-theme-dark .create-cancel:hover {
+    background: rgba(248,113,113,.14) !important;
+    border-color: rgba(248,113,113,.32) !important;
+    color: #fca5a5 !important;
+}
+
+html.studio-theme-dark body .canvas-restore:hover,
+body.studio-theme-dark .canvas-restore:hover {
+    background: rgba(16,185,129,.14) !important;
+    border-color: rgba(16,185,129,.32) !important;
+    color: #6ee7b7 !important;
+}
+
+html.studio-theme-dark body .canvas-delete-box,
+body.studio-theme-dark .canvas-delete-box {
+    background: #2c2c2c !important;
+    border: 1px solid #373737;
+}
+
+html.studio-theme-dark body .canvas-confirm-btn,
+html.studio-theme-dark body .create-confirm,
+body.studio-theme-dark .canvas-confirm-btn,
+body.studio-theme-dark .create-confirm {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .output-resolution,
+body.studio-theme-dark .output-resolution {
+    background: rgba(26,26,26,.86) !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .shell .topbar,
+body.studio-theme-dark .shell .topbar {
+    background: transparent !important;
+    border-color: transparent !important;
+    backdrop-filter: none !important;
+}
+
+html.studio-theme-dark body .shell,
+html.studio-theme-dark body .shell .board,
+body.studio-theme-dark .shell,
+body.studio-theme-dark .shell .board {
+    background-color: #161616 !important;
+    background-image: radial-gradient(rgba(166,166,166,.18) 1px, transparent 1px) !important;
+}
+
+html.studio-theme-dark body .shell.theme-dark,
+body.studio-theme-dark .shell.theme-dark {
+    --page: #161616;
+    --grid: rgba(166,166,166,.18);
+    --panel: rgba(26,26,26,.88);
+    --card: #202020;
+    --card-solid: #202020;
+    --soft: #1a1a1a;
+    --soft-2: #2c2c2c;
+    --line: rgba(166,166,166,.16);
+    --line-2: rgba(166,166,166,.22);
+    --text: #ebebeb;
+    --muted: #9aa6b8;
+    --faint: #78869a;
+    --shadow: rgba(0,0,0,.2);
+    --strong: #e1e1e1;
+    --strong-text: #161616;
+}
+
+html.studio-theme-dark body .shell .panel,
+body.studio-theme-dark .shell .panel {
+    background: rgba(26,26,26,.86) !important;
+    border: 1px solid rgba(166,166,166,.16) !important;
+    box-shadow: 0 14px 36px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .shell .node,
+body.studio-theme-dark .shell .node {
+    background: #202020 !important;
+    border-color: rgba(166,166,166,.16) !important;
+    box-shadow: 0 16px 42px rgba(0,0,0,.22) !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .shell .node-head,
+body.studio-theme-dark .shell .node-head {
+    background: #202020 !important;
+    border-bottom-color: rgba(166,166,166,.14) !important;
+}
+
+html.studio-theme-dark body .shell .node-title,
+body.studio-theme-dark .shell .node-title {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .shell .node.selected,
+body.studio-theme-dark .shell .node.selected {
+    outline-color: rgba(225,225,225,.72) !important;
+}
+
+html.studio-theme-dark body .shell .toolbar,
+body.studio-theme-dark .shell .toolbar {
+    gap: 8px;
+}
+
+html.studio-theme-dark body .shell .tool-btn,
+html.studio-theme-dark body .shell .select-lite,
+html.studio-theme-dark body .shell .gen-count-row,
+html.studio-theme-dark body .shell .seg,
+html.studio-theme-dark body .shell .llm-mode,
+html.studio-theme-dark body .shell .mode-tabs,
+body.studio-theme-dark .shell .tool-btn,
+body.studio-theme-dark .shell .select-lite,
+body.studio-theme-dark .shell .gen-count-row,
+body.studio-theme-dark .shell .seg,
+body.studio-theme-dark .shell .llm-mode,
+body.studio-theme-dark .shell .mode-tabs {
+    background: #1a1a1a !important;
+    border: 1px solid rgba(166,166,166,.16) !important;
+    box-shadow: none !important;
+    color: #9aa6b8 !important;
+}
+
+html.studio-theme-dark body .shell .gen-settings,
+html.studio-theme-dark body .shell .setting-row,
+html.studio-theme-dark body .shell .comfy-settings,
+body.studio-theme-dark .shell .gen-settings,
+body.studio-theme-dark .shell .setting-row,
+body.studio-theme-dark .shell .comfy-settings {
+    background: #1a1a1a !important;
+    border: 1px solid rgba(166,166,166,.16) !important;
+    box-shadow: none !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .shell .setting-title,
+body.studio-theme-dark .shell .setting-title {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .shell .setting-input,
+html.studio-theme-dark body .shell .setting-check,
+html.studio-theme-dark body .shell .gen-count-input,
+body.studio-theme-dark .shell .setting-input,
+body.studio-theme-dark .shell .setting-check,
+body.studio-theme-dark .shell .gen-count-input {
+    background: #202020 !important;
+    border-color: rgba(166,166,166,.16) !important;
+    color: #ebebeb !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .shell .gen-step-btn,
+body.studio-theme-dark .shell .gen-step-btn {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .shell .gen-step-btn:hover,
+body.studio-theme-dark .shell .gen-step-btn:hover {
+    background: #2c2c2c !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .shell .tool-btn:hover,
+html.studio-theme-dark body .shell .select-lite:hover,
+body.studio-theme-dark .shell .tool-btn:hover,
+body.studio-theme-dark .shell .select-lite:hover {
+    background: #202020 !important;
+    border-color: #566174 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .shell .llm-mode button,
+html.studio-theme-dark body .shell .seg button,
+html.studio-theme-dark body .shell .mode-tabs button,
+body.studio-theme-dark .shell .llm-mode button,
+body.studio-theme-dark .shell .seg button,
+body.studio-theme-dark .shell .mode-tabs button {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: #9aa6b8 !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .shell .llm-mode button.active,
+html.studio-theme-dark body .shell .seg button.active,
+html.studio-theme-dark body .shell .mode-tabs button.active,
+body.studio-theme-dark .shell .llm-mode button.active,
+body.studio-theme-dark .shell .seg button.active,
+body.studio-theme-dark .shell .mode-tabs button.active {
+    background: #e1e1e1 !important;
+    border-color: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .shell .llm-system,
+html.studio-theme-dark body .shell .llm-chat-input,
+html.studio-theme-dark body .shell .llm-chat-log,
+html.studio-theme-dark body .shell .llm-output,
+html.studio-theme-dark body .shell .llm-chat-pane,
+body.studio-theme-dark .shell .llm-system,
+body.studio-theme-dark .shell .llm-chat-input,
+body.studio-theme-dark .shell .llm-chat-log,
+body.studio-theme-dark .shell .llm-output,
+body.studio-theme-dark .shell .llm-chat-pane {
+    background: #1a1a1a !important;
+    border-color: #373737 !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .shell .llm-pane-resizer::before,
+body.studio-theme-dark .shell .llm-pane-resizer::before {
+    background: #585858 !important;
+}
+
+html.studio-theme-dark body .shell .llm-bubble.assistant,
+body.studio-theme-dark .shell .llm-bubble.assistant {
+    background: #2c2c2c !important;
+    border-color: #373737 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .shell .llm-bubble.user,
+body.studio-theme-dark .shell .llm-bubble.user {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .shell .image-node img,
+html.studio-theme-dark body .shell .output-grid img,
+html.studio-theme-dark body .shell .output-preview img,
+html.studio-theme-dark body .shell .blank-image,
+html.studio-theme-dark body .shell .input-item,
+html.studio-theme-dark body .shell .prompt-node textarea,
+html.studio-theme-dark body .shell .llm-system,
+html.studio-theme-dark body .shell .llm-chat-input,
+html.studio-theme-dark body .shell .model-input,
+body.studio-theme-dark .shell .image-node img,
+body.studio-theme-dark .shell .output-grid img,
+body.studio-theme-dark .shell .output-preview img,
+body.studio-theme-dark .shell .blank-image,
+body.studio-theme-dark .shell .input-item,
+body.studio-theme-dark .shell .prompt-node textarea,
+body.studio-theme-dark .shell .llm-system,
+body.studio-theme-dark .shell .llm-chat-input,
+body.studio-theme-dark .shell .model-input {
+    background: #161616 !important;
+    border-color: rgba(166,166,166,.16) !important;
+}
+
+html.studio-theme-dark body .shell .blank-image,
+body.studio-theme-dark .shell .blank-image {
+    color: #8f9aab !important;
+    border-style: dashed !important;
+}
+
+html.studio-theme-dark body .shell .blank-image:hover,
+html.studio-theme-dark body .shell .blank-image.drag-over,
+body.studio-theme-dark .shell .blank-image:hover,
+body.studio-theme-dark .shell .blank-image.drag-over {
+    background: #1e1e1e !important;
+    border-color: rgba(225,225,225,.42) !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .shell .image-caption,
+body.studio-theme-dark .shell .image-caption {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .shell .input-label,
+body.studio-theme-dark .shell .input-label {
+    background: rgba(22,22,22,.78) !important;
+    color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .shell .prompt-list .bg-slate-50,
+html.studio-theme-dark body .shell .prompt-list .border-slate-100,
+body.studio-theme-dark .shell .prompt-list .bg-slate-50,
+body.studio-theme-dark .shell .prompt-list .border-slate-100 {
+    background: #1a1a1a !important;
+    border-color: rgba(166,166,166,.16) !important;
+    color: #d2d2d2 !important;
+}
+
+html.studio-theme-dark body .shell .input-index,
+body.studio-theme-dark .shell .input-index {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .shell .port::after,
+body.studio-theme-dark .shell .port::after {
+    background: #e1e1e1 !important;
+    border-color: #1a1a1a !important;
+    box-shadow: 0 0 0 1px rgba(166,166,166,.32) !important;
+}
+
+html.studio-theme-dark body .shell .drop-overlay,
+body.studio-theme-dark .shell .drop-overlay {
+    background: rgba(22,22,22,.44) !important;
+    color: #d2d2d2 !important;
+    backdrop-filter: blur(2px) !important;
+}
+
+html.studio-theme-dark body .output-drag-preview,
+body.studio-theme-dark .output-drag-preview,
+.output-drag-preview {
+    position: fixed;
+    left: -10000px;
+    top: -10000px;
+    width: 150px;
+    height: 150px;
+    padding: 8px;
+    border-radius: 18px;
+    background: #161616;
+    border: 1px solid rgba(166,166,166,.18);
+    box-shadow: 0 16px 40px rgba(0,0,0,.28);
+    pointer-events: none;
+    z-index: -1;
+}
+
+.output-drag-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 12px;
+    background: #161616;
+}
+
+html.studio-theme-dark body .shell .resize-handle,
+body.studio-theme-dark .shell .resize-handle {
+    background: rgba(26,26,26,.86) !important;
+    border-color: rgba(166,166,166,.18) !important;
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .shell .resize-handle:hover,
+body.studio-theme-dark .shell .resize-handle:hover {
+    background: #202020 !important;
+    border-color: rgba(225,225,225,.36) !important;
+    color: #e1e1e1 !important;
+}
+
+/* Standalone studio pages: zimage / enhance / klein / angle */
+html.studio-theme-dark body .layout-container,
+body.studio-theme-dark .layout-container,
+html.studio-theme-dark body .container-box,
+body.studio-theme-dark .container-box {
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .gallery-lightbox,
+html.studio-theme-dark body #lightbox,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #compareContainerKlein,
+html.studio-theme-dark body #lightboxImg,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .gallery-lightbox,
+body.studio-theme-dark #lightbox,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #compareContainerKlein,
+body.studio-theme-dark #lightboxImg {
+    background-color: #1a1a1a !important;
+    border-color: rgba(166,166,166,.16) !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .ios-slider:before,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .ios-slider:before {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active {
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+html.studio-theme-dark body .engine-btn,
+html.studio-theme-dark body .cloud-status,
+body.studio-theme-dark .mode-btn,
+body.studio-theme-dark .engine-btn,
+body.studio-theme-dark .cloud-status {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .engine-btn:not(.active):hover,
+body.studio-theme-dark .engine-btn:not(.active):hover {
+    background: rgba(225,225,225,.08) !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .upload-item:hover,
+html.studio-theme-dark body .upload-item.drag-over,
+body.studio-theme-dark .upload-item:hover,
+body.studio-theme-dark .upload-item.drag-over {
+    background: #202020 !important;
+    border-color: rgba(225,225,225,.42) !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body #downloadBtn,
+html.studio-theme-dark body #lightboxDownload,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark #downloadBtn,
+body.studio-theme-dark #lightboxDownload {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+    border-color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .glass-btn:hover,
+html.studio-theme-dark body .btn-render:hover,
+body.studio-theme-dark .glass-btn:hover,
+body.studio-theme-dark .btn-render:hover {
+    background: #f5f5f5 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-runnable-track,
+body.studio-theme-dark input[type=range]::-webkit-slider-runnable-track {
+    background: #373737 !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-thumb,
+body.studio-theme-dark input[type=range]::-webkit-slider-thumb {
+    background: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .masonry-item img,
+html.studio-theme-dark body .result-frame img,
+body.studio-theme-dark .masonry-item img,
+body.studio-theme-dark .result-frame img {
+    background-color: #1a1a1a !important;
+}
+
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .bg-black {
+    background-color: #e1e1e1 !important;
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .hover\:text-black:hover,
+body.studio-theme-dark .hover\:text-black:hover {
+    color: #ebebeb !important;
+}
+
+/* Final neutral dark pass: remove blue-tinted surfaces from tool pages. */
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background: #0a0a0a !important;
+    color: #e8e8ea !important;
+}
+
+body.studio-theme-dark {
+    --bg: #0a0a0a;
+    --bg-base: #0a0a0a;
+    --page: #0a0a0a;
+    --card: #111216;
+    --card-solid: #111216;
+    --soft: #0c0d10;
+    --soft-2: #16171b;
+    --panel: rgba(17,18,22,.92);
+    --text: #e8e8ea;
+    --text-main: #e8e8ea;
+    --accent: #e8e8ea;
+    --line: #25262b;
+    --line-2: #32343a;
+}
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage,
+body.studio-theme-dark .shell {
+    background: #0a0a0a !important;
+    border-color: #25262b !important;
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .provider-switch,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #lightboxImg,
+html.studio-theme-dark body #lightbox .bg-white,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-white\/95,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-gray-200,
+html.studio-theme-dark body .bg-\[\#f8f8f9\],
+html.studio-theme-dark body .bg-\[\#fafafa\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .provider-switch,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #lightboxImg,
+body.studio-theme-dark #lightbox .bg-white,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-white\/95,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-gray-200,
+body.studio-theme-dark .bg-\[\#f8f8f9\],
+body.studio-theme-dark .bg-\[\#fafafa\] {
+    background-color: #111216 !important;
+    border-color: #25262b !important;
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(10,10,10,.96) !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+html.studio-theme-dark body #cloud-progress-bar,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark #cloud-progress-bar {
+    background: #e8e8ea !important;
+    color: #0a0a0a !important;
+    border-color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .text-black,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .text-black {
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .mode-glider + .mode-btn.active,
+body.studio-theme-dark .mode-glider + .mode-btn.active {
+    color: #0a0a0a !important;
+}
+
+html.studio-theme-dark body input,
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input,
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    background-color: #0c0d10 !important;
+    border-color: #32343a !important;
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-200\/50,
+html.studio-theme-dark body .border-black,
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-200\/50,
+body.studio-theme-dark .border-black {
+    border-color: #25262b !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-gray-600,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-gray-800,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-gray-600,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-gray-800 {
+    color: #a7a7ad !important;
+}
+
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+html.studio-theme-dark body label,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3,
+body.studio-theme-dark label {
+    color: #e8e8ea !important;
+}
+
+html.studio-theme-dark body .mode-switcher .mode-btn.active,
+html.studio-theme-dark body .engine-switch .engine-btn.active,
+body.studio-theme-dark .mode-switcher .mode-btn.active,
+body.studio-theme-dark .engine-switch .engine-btn.active {
+    color: #0a0a0a !important;
+}
+
+/* Online-generation dark pass: soft blue-gray instead of heavy black. */
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background: #161616 !important;
+    color: #ebebeb !important;
+}
+
+body.studio-theme-dark {
+    --bg: #161616;
+    --bg-base: #161616;
+    --page: #161616;
+    --card: #202020;
+    --card-solid: #202020;
+    --soft: #1a1a1a;
+    --soft-2: #282828;
+    --panel: rgba(32,32,32,.92);
+    --text: #ebebeb;
+    --text-main: #ebebeb;
+    --accent: #ebebeb;
+    --line: #373737;
+    --line-2: #444444;
+}
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage,
+body.studio-theme-dark .shell {
+    background: #161616 !important;
+    border-color: #373737 !important;
+}
+
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .stage {
+    background: #1a1a1a !important;
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #lightboxImg,
+html.studio-theme-dark body #lightbox .bg-white,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-white\/95,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-gray-200,
+html.studio-theme-dark body .bg-\[\#f8f8f9\],
+html.studio-theme-dark body .bg-\[\#fafafa\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #lightboxImg,
+body.studio-theme-dark #lightbox .bg-white,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-white\/95,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-gray-200,
+body.studio-theme-dark .bg-\[\#f8f8f9\],
+body.studio-theme-dark .bg-\[\#fafafa\] {
+    background-color: #202020 !important;
+    border-color: #373737 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .model-pill,
+html.studio-theme-dark body .ratio-grid,
+html.studio-theme-dark body .resolution-toggle,
+html.studio-theme-dark body .select-shell,
+html.studio-theme-dark body .mode-switch,
+html.studio-theme-dark body .mini-ratio,
+html.studio-theme-dark body input,
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark .model-pill,
+body.studio-theme-dark .ratio-grid,
+body.studio-theme-dark .resolution-toggle,
+body.studio-theme-dark .select-shell,
+body.studio-theme-dark .mode-switch,
+body.studio-theme-dark .mini-ratio,
+body.studio-theme-dark input,
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    background-color: #1a1a1a !important;
+    border-color: #444444 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .size-select,
+html.studio-theme-dark body .size-custom,
+body.studio-theme-dark .size-select,
+body.studio-theme-dark .size-custom {
+    background-color: #1a1a1a !important;
+    border-color: #444444 !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(22,22,22,.9) !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .provider-btn.active,
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+html.studio-theme-dark body #cloud-progress-bar,
+html.studio-theme-dark body #downloadBtn,
+html.studio-theme-dark body #lightboxDownload,
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .provider-btn.active,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark #cloud-progress-bar,
+body.studio-theme-dark #downloadBtn,
+body.studio-theme-dark #lightboxDownload,
+body.studio-theme-dark .bg-black {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+    border-color: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+html.studio-theme-dark body .engine-btn,
+html.studio-theme-dark body .model-option,
+html.studio-theme-dark body .ratio-option,
+html.studio-theme-dark body .resolution-option,
+html.studio-theme-dark body .provider-btn,
+body.studio-theme-dark .mode-btn,
+body.studio-theme-dark .engine-btn,
+body.studio-theme-dark .model-option,
+body.studio-theme-dark .ratio-option,
+body.studio-theme-dark .resolution-option {
+    color: #8f9aab !important;
+}
+
+body.studio-theme-dark .provider-btn {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .provider-switch button,
+body.studio-theme-dark .provider-switch button {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .mode-btn:hover,
+html.studio-theme-dark body .engine-btn:hover,
+html.studio-theme-dark body .model-option:hover,
+html.studio-theme-dark body .ratio-option:hover,
+html.studio-theme-dark body .resolution-option:hover,
+html.studio-theme-dark body .provider-btn:hover,
+body.studio-theme-dark .mode-btn:hover,
+body.studio-theme-dark .engine-btn:hover,
+body.studio-theme-dark .model-option:hover,
+body.studio-theme-dark .ratio-option:hover,
+body.studio-theme-dark .resolution-option:hover,
+body.studio-theme-dark .provider-btn:hover {
+    background: rgba(225,225,225,.08) !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .provider-switch button:hover,
+body.studio-theme-dark .provider-switch button:hover {
+    background: rgba(225,225,225,.08) !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .provider-btn.active,
+html.studio-theme-dark body .mode-switcher .mode-btn.active,
+html.studio-theme-dark body .engine-switch .engine-btn.active,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .provider-btn.active,
+body.studio-theme-dark .mode-switcher .mode-btn.active,
+body.studio-theme-dark .engine-switch .engine-btn.active {
+    color: #161616 !important;
+}
+
+html.studio-theme-dark body .provider-switch button.active,
+body.studio-theme-dark .provider-switch button.active {
+    background: #e1e1e1 !important;
+    color: #161616 !important;
+    border-color: #e1e1e1 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .mode-switcher,
+body.studio-theme-dark .mode-switcher,
+html.studio-theme-dark body .provider-switch,
+body.studio-theme-dark .provider-switch,
+html.studio-theme-dark body .engine-switch,
+body.studio-theme-dark .engine-switch {
+    background: #1a1a1a !important;
+    border: 1px solid #444444 !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .mode-glider,
+body.studio-theme-dark .mode-glider {
+    background: #e1e1e1 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+body.studio-theme-dark .mode-btn,
+html.studio-theme-dark body .engine-btn,
+body.studio-theme-dark .engine-btn,
+html.studio-theme-dark body .provider-btn,
+body.studio-theme-dark .provider-btn {
+    border-radius: 999px !important;
+    letter-spacing: .02em !important;
+}
+
+html.studio-theme-dark body .provider-switch button,
+body.studio-theme-dark .provider-switch button {
+    border-radius: 999px !important;
+    min-height: 30px !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-200\/50,
+html.studio-theme-dark body .border-black,
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-200\/50,
+body.studio-theme-dark .border-black {
+    border-color: #373737 !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-gray-600,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-gray-800,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-gray-600,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-gray-800 {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+html.studio-theme-dark body label,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3,
+body.studio-theme-dark label {
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-runnable-track,
+body.studio-theme-dark input[type=range]::-webkit-slider-runnable-track {
+    background: #373737 !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-thumb,
+body.studio-theme-dark input[type=range]::-webkit-slider-thumb {
+    background: #e1e1e1 !important;
+    border-color: #161616 !important;
+}
+
+html.studio-theme-dark body ::placeholder,
+body.studio-theme-dark ::placeholder {
+    color: #64748b !important;
+}
+
+/* Z-image console polish: keep the prompt field open and make ModelScope readable. */
+html.studio-theme-dark body #prompt,
+body.studio-theme-dark #prompt {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: #ebebeb !important;
+}
+
+html.studio-theme-dark body .console-card > .bg-gray-50\/50,
+body.studio-theme-dark .console-card > .bg-gray-50\/50 {
+    background: transparent !important;
+}
+
+html.studio-theme-dark body #prompt::placeholder,
+body.studio-theme-dark #prompt::placeholder {
+    color: #6f7b8f !important;
+}
+
+/* GPT chat dark polish: avoid harsh black bars around text areas. */
+html.studio-theme-dark body .chat-shell,
+body.studio-theme-dark .chat-shell,
+html.studio-theme-dark body .messages,
+body.studio-theme-dark .messages {
+    background: #0f0f0f !important;
+}
+
+html.studio-theme-dark body .topbar,
+body.studio-theme-dark .topbar {
+    background: rgba(16,16,16,.92) !important;
+    border-bottom-color: #2f2f2f !important;
+}
+
+html.studio-theme-dark body .composer-wrap,
+body.studio-theme-dark .composer-wrap {
+    background: linear-gradient(to top,#0f0f0f 82%,rgba(16,16,16,0)) !important;
+}
+
+html.studio-theme-dark body .composer,
+body.studio-theme-dark .composer,
+html.studio-theme-dark body .history-popover,
+body.studio-theme-dark .history-popover {
+    background: #202020 !important;
+    border-color: #363636 !important;
+    color: #eeeeee !important;
+    box-shadow: 0 18px 44px rgba(0,0,0,.24) !important;
+}
+
+html.studio-theme-dark body .composer-body,
+body.studio-theme-dark .composer-body {
+    background: #202020 !important;
+    border-color: #363636 !important;
+}
+
+html.studio-theme-dark body #messageInput,
+body.studio-theme-dark #messageInput {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: #eeeeee !important;
+}
+
+html.studio-theme-dark body #messageInput::placeholder,
+body.studio-theme-dark #messageInput::placeholder {
+    color: #8a8a8a !important;
+}
+
+html.studio-theme-dark body .title-block h1,
+body.studio-theme-dark .title-block h1 {
+    color: #eeeeee !important;
+}
+
+html.studio-theme-dark body .title-block p,
+body.studio-theme-dark .title-block p {
+    color: #8f9aab !important;
+}
+
+html.studio-theme-dark body .action-btn,
+body.studio-theme-dark .action-btn,
+html.studio-theme-dark body .thread-item,
+body.studio-theme-dark .thread-item {
+    background: #202020 !important;
+    border-color: #363636 !important;
+    color: #d8d8d8 !important;
+}
+
+html.studio-theme-dark body .action-btn:hover,
+body.studio-theme-dark .action-btn:hover,
+html.studio-theme-dark body .thread-item:hover,
+body.studio-theme-dark .thread-item:hover {
+    background: #2a2a2a !important;
+    color: #ffffff !important;
+}
+
+html.studio-theme-dark body .bubble.user,
+body.studio-theme-dark .bubble.user {
+    background: #414141 !important;
+    color: #f5f5f5 !important;
+    border: 1px solid #565656 !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .bubble.assistant,
+body.studio-theme-dark .bubble.assistant {
+    background: #202020 !important;
+    color: #ebebeb !important;
+    border-color: #373737 !important;
+    box-shadow: 0 8px 20px rgba(0,0,0,.14) !important;
+}
+
+html.studio-theme-dark body .bubble.assistant.streaming::after,
+body.studio-theme-dark .bubble.assistant.streaming::after {
+    background: #e1e1e1 !important;
+}
+
+html.studio-theme-dark body .bubble img.generated,
+body.studio-theme-dark .bubble img.generated {
+    border-color: #444444 !important;
+}
+
+/* Dark-card clipping: keep inner fills from poking through rounded top corners. */
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .composer,
+html.studio-theme-dark body .history-popover,
+html.studio-theme-dark body .model-panel,
+html.studio-theme-dark body .gate-panel,
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .composer,
+body.studio-theme-dark .history-popover,
+body.studio-theme-dark .model-panel,
+body.studio-theme-dark .gate-panel {
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+}
+
+html.studio-theme-dark body .shell .node,
+body.studio-theme-dark .shell .node {
+    background-clip: padding-box !important;
+}
+
+html.studio-theme-dark body .shell .node-head,
+body.studio-theme-dark .shell .node-head {
+    border-radius: 21px 21px 0 0 !important;
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+}
+
+/* Switch contrast: keep iOS toggles visible on blue-gray panels. */
+html.studio-theme-dark body .ios-switch .ios-slider,
+body.studio-theme-dark .ios-switch .ios-slider {
+    background: #353535 !important;
+    border: 1px solid #595959 !important;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.28), 0 0 0 1px rgba(225,225,225,.05) !important;
+}
+
+html.studio-theme-dark body .ios-switch .ios-slider:before,
+body.studio-theme-dark .ios-switch .ios-slider:before {
+    background: #fafafa !important;
+    box-shadow: 0 3px 9px rgba(0,0,0,.32) !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider {
+    background: #e1e1e1 !important;
+    border-color: #e1e1e1 !important;
+    box-shadow: 0 0 0 3px rgba(225,225,225,.12) !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider:before,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider:before {
+    background: #161616 !important;
+    box-shadow: 0 2px 7px rgba(22,22,22,.22) !important;
+}
+
+html.studio-theme-dark body .shell .comfy-random-btn.active,
+body.studio-theme-dark .shell .comfy-random-btn.active {
+    background: #fafafa !important;
+    background-color: #fafafa !important;
+    color: #1c1c1c !important;
+    border-color: #fafafa !important;
+}
+
+html.studio-theme-dark body .shell .comfy-random-btn.active svg,
+body.studio-theme-dark .shell .comfy-random-btn.active svg {
+    fill: none !important;
+    stroke: #1c1c1c !important;
+}
+
+/* Fixed cyan custom theme shared by legacy pages that do not define their own custom palette. */
+html.studio-theme-custom,
+html.studio-theme-custom body,
+body.studio-theme-custom,
+html.theme-custom,
+html.theme-custom body,
+body.theme-custom {
+    --accent: var(--studio-custom-color, #8f8f8f);
+    --bg: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 8%, #0c0c0c);
+    --card: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 7%, #1a1a1a);
+    --text-main: #f7f7f7;
+    color-scheme: dark;
+    background: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 8%, #0c0c0c) !important;
+    color: #f7f7f7 !important;
+}
+
+html.theme-custom body .app-shell,
+html.theme-custom body .sidebar,
+html.theme-custom body .stage,
+body.theme-custom .app-shell,
+body.theme-custom .sidebar,
+body.theme-custom .stage {
+    background: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 8%, #0b0b0b) !important;
+    border-color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 34%, rgba(255,255,255,.08)) !important;
+}
+
+html.theme-custom body .nav-item,
+html.theme-custom body .side-pill,
+body.theme-custom .nav-item,
+body.theme-custom .side-pill {
+    color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 24%, #9aa6b8) !important;
+}
+
+html.theme-custom body .nav-item:hover,
+html.theme-custom body .side-pill:hover,
+body.theme-custom .nav-item:hover,
+body.theme-custom .side-pill:hover {
+    background: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 14%, #1a1a1a) !important;
+    color: #f7f7f7 !important;
+}
+
+html.theme-custom body .nav-item.active,
+html.theme-custom body .side-pill.active,
+html.theme-custom body .theme-dock-btn.active,
+body.theme-custom .nav-item.active,
+body.theme-custom .side-pill.active,
+body.theme-custom .theme-dock-btn.active {
+    background: var(--studio-custom-color, #8f8f8f) !important;
+    border-color: var(--studio-custom-color, #8f8f8f) !important;
+    color: #101010 !important;
+}
+
+html.theme-custom body .console-card,
+html.theme-custom body .nano-input,
+html.theme-custom body .upload-item,
+html.theme-custom body .result-frame,
+html.theme-custom body .masonry-item,
+html.theme-custom body .work-panel,
+html.theme-custom body .setting-row,
+html.theme-custom body .tool-panel,
+html.theme-custom body .control-panel,
+html.theme-custom body .topbar,
+html.theme-custom body .composer,
+html.theme-custom body .composer-body,
+html.theme-custom body .bubble.assistant,
+html.theme-custom body .history-popover,
+html.theme-custom body .thread-item,
+html.theme-custom body .lightbox-card,
+html.theme-custom body #lightboxCard,
+html.theme-custom body .bg-white,
+html.theme-custom body .bg-gray-50,
+html.theme-custom body .bg-slate-50,
+html.theme-custom body .bg-gray-50\/50,
+html.theme-custom body .bg-white\/90,
+body.theme-custom .console-card,
+body.theme-custom .nano-input,
+body.theme-custom .upload-item,
+body.theme-custom .result-frame,
+body.theme-custom .masonry-item,
+body.theme-custom .work-panel,
+body.theme-custom .setting-row,
+body.theme-custom .tool-panel,
+body.theme-custom .control-panel,
+body.theme-custom .topbar,
+body.theme-custom .composer,
+body.theme-custom .composer-body,
+body.theme-custom .bubble.assistant,
+body.theme-custom .history-popover,
+body.theme-custom .thread-item,
+body.theme-custom .lightbox-card,
+body.theme-custom #lightboxCard,
+body.theme-custom .bg-white,
+body.theme-custom .bg-gray-50,
+body.theme-custom .bg-slate-50,
+body.theme-custom .bg-gray-50\/50,
+body.theme-custom .bg-white\/90 {
+    background-color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 7%, #1a1a1a) !important;
+    border-color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 28%, #25262b) !important;
+    color: #f7f7f7 !important;
+}
+
+html.theme-custom body input,
+html.theme-custom body textarea,
+html.theme-custom body select,
+body.theme-custom input,
+body.theme-custom textarea,
+body.theme-custom select {
+    background-color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 6%, #121212) !important;
+    border-color: color-mix(in srgb, var(--studio-custom-color, #8f8f8f) 25%, #25262b) !important;
+    color: #f7f7f7 !important;
+}
+
+html.theme-custom body .primary,
+html.theme-custom body .primary-btn,
+html.theme-custom body .save-btn,
+html.theme-custom body .run-btn,
+html.theme-custom body .send-button,
+body.theme-custom .primary,
+body.theme-custom .primary-btn,
+body.theme-custom .save-btn,
+body.theme-custom .run-btn,
+body.theme-custom .send-button {
+    background: var(--studio-custom-color, #8f8f8f) !important;
+    border-color: var(--studio-custom-color, #8f8f8f) !important;
+    color: #101010 !important;
+}
+
+/* Global unified blue-gray palette. */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom {
+    --page:#050505;
+    --bg:#050505;
+    --panel:#141414;
+    --panel-solid:#141414;
+    --card:#1f1f1f;
+    --soft:#242424;
+    --soft-2:#2b2b2b;
+    --line:#313131;
+    --line-2:#474747;
+    --line-strong:#5f5f5f;
+    --text:#f2f2f2;
+    --muted:#d4d4d4;
+    --faint:#a6a6a6;
+    --strong:#f4f4f4;
+    --strong-text:#080808;
+    --shadow:rgba(0,0,0,.46);
+}
+
+/* Absolute final monochrome override. This must stay at the real end of theme.css. */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    --studio-custom-color:#f4f4f4 !important;
+    --accent:#f4f4f4 !important;
+    --page:#050505 !important;
+    --bg:#050505 !important;
+    --bg-base:#050505 !important;
+    --panel:#141414 !important;
+    --panel-solid:#161616 !important;
+    --card:#1f1f1f !important;
+    --soft:#242424 !important;
+    --soft-2:#2b2b2b !important;
+    --line:#333333 !important;
+    --line-2:#525252 !important;
+    --line-strong:#666666 !important;
+    --text:#f4f4f4 !important;
+    --text-main:#f4f4f4 !important;
+    --muted:#cfcfcf !important;
+    --faint:#999999 !important;
+    --strong:#f4f4f4 !important;
+    --strong-text:#080808 !important;
+}
+
+html.theme-custom,
+html.theme-custom body,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    background:#050505 !important;
+    color:#f4f4f4 !important;
+}
+
+html.studio-theme-dark body input,
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input,
+body.studio-theme-dark textarea,
+body.studio-theme-dark select,
+html.theme-custom body input,
+html.theme-custom body textarea,
+html.theme-custom body select,
+body.theme-custom input,
+body.theme-custom textarea,
+body.theme-custom select {
+    background-color:#1f1f1f !important;
+    border-color:#333333 !important;
+    color:#f4f4f4 !important;
+}
+
+.workflow-nav-search input,
+.asset-search-wrap input,
+.asset-search,
+.search-pill input,
+#prompt,
+#messageInput {
+    background:transparent !important;
+    background-color:transparent !important;
+    box-shadow:none !important;
+}
+
+.workflow-nav-search,
+.asset-search-wrap,
+.search-pill,
+.composer-body,
+.nano-input {
+    background:#181818 !important;
+    background-color:#181818 !important;
+    border-color:#333333 !important;
+    box-shadow:none !important;
+}
+
+html.theme-custom body .primary,
+html.theme-custom body .primary-btn,
+html.theme-custom body .save-btn,
+html.theme-custom body .run-btn,
+html.theme-custom body .send-button,
+body.theme-custom .primary,
+body.theme-custom .primary-btn,
+body.theme-custom .save-btn,
+body.theme-custom .run-btn,
+body.theme-custom .send-button {
+    background:#f4f4f4 !important;
+    border-color:#f4f4f4 !important;
+    color:#080808 !important;
+}
+
+/* =====================================================================
+   2026-09-20 ModelScope 风格配色覆盖（只改颜色，不动布局）
+   参考 modelscope.cn 模型库深色版面：近黑蓝底 #0b0d12、卡片 #15171e、
+   细边框 #23262f、紫色主色 #22c55e、蓝紫渐变点缀。
+   本块位于文件最末，同特异性 !important 规则以后写者为准。
+   ===================================================================== */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    --studio-custom-color:#22c55e !important;
+    --accent:#22c55e !important;
+    --page:#0b0d12 !important;
+    --bg:#0b0d12 !important;
+    --bg-base:#0b0d12 !important;
+    --panel:#101218 !important;
+    --panel-solid:#12141b !important;
+    --card:#15171e !important;
+    --card-solid:#15171e !important;
+    --soft:#1b1e26 !important;
+    --soft-2:#22252f !important;
+    --line:#23262f !important;
+    --line-2:#2e323d !important;
+    --line-strong:#3a3f4c !important;
+    --text:#e8eaf0 !important;
+    --text-main:#e8eaf0 !important;
+    --muted:#9aa1af !important;
+    --faint:#6f7683 !important;
+    --strong:#e8eaf0 !important;
+    --strong-text:#0b0d12 !important;
+    --shadow:rgba(0,0,0,.5) !important;
+}
+
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background:#0b0d12 !important;
+    color:#e8eaf0 !important;
+}
+
+html.theme-custom,
+html.theme-custom body,
+body.theme-custom,
+html.studio-theme-custom,
+body.studio-theme-custom {
+    background:#0b0d12 !important;
+    color:#e8eaf0 !important;
+}
+
+/* 主按钮：ModelScope 紫色实心 */
+html.theme-dark body .primary,
+html.theme-dark body .primary-btn,
+html.theme-dark body .save-btn,
+html.theme-dark body .run-btn,
+html.theme-dark body .send-button,
+html.theme-custom body .primary,
+html.theme-custom body .primary-btn,
+html.theme-custom body .save-btn,
+html.theme-custom body .run-btn,
+html.theme-custom body .send-button,
+body.theme-dark .primary,
+body.theme-dark .primary-btn,
+body.theme-dark .save-btn,
+body.theme-dark .run-btn,
+body.theme-dark .send-button,
+body.theme-custom .primary,
+body.theme-custom .primary-btn,
+body.theme-custom .save-btn,
+body.theme-custom .run-btn,
+body.theme-custom .send-button {
+    background:#22c55e !important;
+    background-color:#22c55e !important;
+    border-color:#22c55e !important;
+    color:#ffffff !important;
+}
+html.theme-dark body .primary:hover,
+html.theme-dark body .primary-btn:hover,
+html.theme-dark body .save-btn:hover,
+html.theme-dark body .run-btn:hover,
+html.theme-dark body .send-button:hover,
+html.theme-custom body .primary:hover,
+html.theme-custom body .primary-btn:hover,
+html.theme-custom body .save-btn:hover,
+html.theme-custom body .run-btn:hover,
+html.theme-custom body .send-button:hover,
+body.theme-dark .primary:hover,
+body.theme-dark .primary-btn:hover,
+body.theme-dark .save-btn:hover,
+body.theme-dark .run-btn:hover,
+body.theme-dark .send-button:hover,
+body.theme-custom .primary:hover,
+body.theme-custom .primary-btn:hover,
+body.theme-custom .save-btn:hover,
+body.theme-custom .run-btn:hover,
+body.theme-custom .send-button:hover {
+    background:#4ade80 !important;
+    background-color:#4ade80 !important;
+    border-color:#4ade80 !important;
+}
+
+/* 搜索框 / 输入区 / 组合器底：深蓝灰面板 */
+html.studio-theme-dark .workflow-nav-search,
+html.studio-theme-dark .asset-search-wrap,
+html.studio-theme-dark .search-pill,
+html.studio-theme-dark .composer-body,
+html.studio-theme-dark .nano-input,
+html.theme-dark .workflow-nav-search,
+html.theme-dark .asset-search-wrap,
+html.theme-dark .search-pill,
+html.theme-dark .composer-body,
+html.theme-dark .nano-input,
+html.theme-custom .workflow-nav-search,
+html.theme-custom .asset-search-wrap,
+html.theme-custom .search-pill,
+html.theme-custom .composer-body,
+html.theme-custom .nano-input,
+body.studio-theme-dark .workflow-nav-search,
+body.studio-theme-dark .asset-search-wrap,
+body.studio-theme-dark .search-pill,
+body.studio-theme-dark .composer-body,
+body.studio-theme-dark .nano-input,
+body.theme-dark .workflow-nav-search,
+body.theme-dark .asset-search-wrap,
+body.theme-dark .search-pill,
+body.theme-dark .composer-body,
+body.theme-dark .nano-input,
+body.theme-custom .workflow-nav-search,
+body.theme-custom .asset-search-wrap,
+body.theme-custom .search-pill,
+body.theme-custom .composer-body,
+body.theme-custom .nano-input {
+    background:#14161c !important;
+    background-color:#14161c !important;
+    border-color:#2a2e38 !important;
+}
+
+/* 链接与可交互高亮统一蓝紫 */
+html.studio-theme-dark a,
+html.theme-dark a,
+html.theme-custom a,
+body.studio-theme-dark a,
+body.theme-dark a,
+body.theme-custom a {
+    color:#6ee7b7 !important;
+}
+
+/* =====================================================================
+   2026-09-20 全局文字清晰度优化：中文字体回退 + 抗锯齿 + 整数渲染
+   ===================================================================== */
+html, body {
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Segoe UI',sans-serif !important;
+    -webkit-font-smoothing:antialiased !important;
+    -moz-osx-font-smoothing:grayscale !important;
+    text-rendering:optimizeLegibility !important;
+}

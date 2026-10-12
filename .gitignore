@@ -1,0 +1,112 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local Python distribution (Windows embedded)
+python/
+!python/.gitkeep
+
+# Logs and runtime artifacts
+logs/
+*.log
+_codex_server_stderr.log
+_codex_server_stdout.log
+_self_restart.log
+
+# Application state / user data (do not commit)
+data/canvases/
+data/conversations/
+data/media_previews/
+data/update_backups/
+data/update_staging/
+data/api_providers.json
+data/api_provider_deleted_defaults.json
+data/asset_library.json
+data/asset_library.json.bak-*
+data/projects.json
+data/prompt_libraries.json
+data/update_source.json
+assets/input/
+assets/output/
+assets/uploads/
+assets/library/
+
+# Top-level history (regenerated at runtime)
+history.json
+history.*.json
+history.backup_*.json
+output/
+
+# Backup / scratch copies left by the auto-updater
+main.py.bak-*
+mac-启动服务.command.bak
+publish-release.bat
+*.bak
+# 形如 smart-canvas.css.bak-20260917-h3 / smart-canvas.js.bak-20260828-ratio 的带时间戳备份
+*.bak-*
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+API/.env
+!API/.env.example
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# OS
+$RECYCLE.BIN/
+.Trash-*/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache/
+
+# Build artifacts
+*.pyc
+*.spec
+
+# Temporary / scratch
+tmp/
+temp/
+*.tmp
+
+# Project-version metadata auto-written by the app
+VERSION.bak
