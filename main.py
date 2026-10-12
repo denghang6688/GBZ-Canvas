@@ -354,11 +354,26 @@ GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认�
 GITHUB_REPO_NAME = "GBZ-Canvas"
 MODELSCOPE_ACCOUNT = "hans186"       # 作者魔搭账号（2026-09-22 确认）
 MODELSCOPE_REPO_NAME = "GBZ-Canvas"
+GITHUB_BRANCH = "main"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}"
-GITHUB_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/main/VERSION"
-GITHUB_TREE_URL = f"https://api.github.com/repos/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = f"https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/main"
+GITHUB_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}/VERSION"
+GITHUB_TREE_URL = f"https://api.github.com/repos/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/git/trees/{GITHUB_BRANCH}?recursive=1"
+GITHUB_RAW_ROOT = f"https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
+# GitHub 在部分网络（尤其国内）会被阻断 → 直连之外再挂国内可用镜像，运行时并发探测、自动择优
+GITHUB_RAW_BASE_CANDIDATES = [
+    GITHUB_RAW_ROOT,  # 直连（网络允许时首选，内容最新且信任度最高）
+    f"https://gh-proxy.com/https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}",
+    f"https://ghproxy.net/https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}",
+    f"https://ghfast.top/https://raw.githubusercontent.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}",
+    f"https://raw.gitmirror.com/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}/{GITHUB_BRANCH}",
+    f"https://cdn.jsdelivr.net/gh/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}@{GITHUB_BRANCH}",  # CDN 缓存较久，放最后
+]
+GITHUB_JSDELIVR_LIST_URL = (
+    f"https://data.jsdelivr.com/v1/packages/gh/{GITHUB_ACCOUNT}/{GITHUB_REPO_NAME}@{GITHUB_BRANCH}?structure=flat"
+)
+# 运行时择优结果缓存（进程级）
+GITHUB_ENDPOINT_CACHE: Dict[str, Any] = {"raw_base": "", "checked_at": 0.0, "probe": None}
 MODELSCOPE_SPACE_NAME = MODELSCOPE_REPO_NAME
 MODELSCOPE_SPACE_URL = f"https://modelscope.cn/studios/{MODELSCOPE_ACCOUNT}/{MODELSCOPE_SPACE_NAME}"
 # 更新源使用魔搭「创空间」仓库文件 API：读取的是仓库实时内容，推送后立即生效
@@ -2122,6 +2137,8 @@ def update_connectivity_targets() -> List[Tuple[str, str, str, bool]]:
 @app.get("/api/update-connectivity/probe")
 def update_connectivity_probe(name: str):
     """实时检测：只探测单个目标，前端可并发调用并逐条刷新。"""
+    if name == "GitHub 版本文件":
+        return github_connectivity_item()
     for t_name, url, source, required in update_connectivity_targets():
         if t_name == name:
             item = connectivity_probe(t_name, url)
@@ -2135,7 +2152,10 @@ def update_connectivity():
     targets = update_connectivity_targets()
     results = []
     for name, url, source, required in targets:
-        item = connectivity_probe(name, url)
+        if source == "github":
+            item = github_connectivity_item()
+        else:
+            item = connectivity_probe(name, url)
         item["source"] = source
         item["required"] = required
         results.append(item)
@@ -2183,6 +2203,161 @@ def fetch_remote_version(url: str, timeout: float = 5.0) -> Dict[str, Any]:
         info["error"] = str(exc)
     return info
 
+def github_endpoint_label(base: str) -> str:
+    if base.startswith("https://raw.githubusercontent.com"):
+        return "GitHub 直连"
+    if "gh-proxy.com" in base:
+        return "gh-proxy 镜像"
+    if "ghproxy.net" in base:
+        return "ghproxy 镜像"
+    if "ghfast.top" in base:
+        return "ghfast 镜像"
+    if "gitmirror.com" in base:
+        return "gitmirror 镜像"
+    if "cdn.jsdelivr.net" in base:
+        return "jsDelivr CDN"
+    return "镜像"
+
+def _probe_github_raw_base(base: str, timeout: float = 3.5) -> Dict[str, Any]:
+    started = time.time()
+    item: Dict[str, Any] = {
+        "base": base,
+        "ok": False,
+        "status": 0,
+        "elapsed_ms": 0,
+        "error": "",
+        "version": "",
+    }
+    try:
+        resp = requests.get(
+            f"{base}/VERSION",
+            headers={"User-Agent": "GBZ-Canvas-Updater"},
+            timeout=timeout,
+            proxies=urllib.request.getproxies() or None,
+        )
+        item["status"] = resp.status_code
+        if 200 <= resp.status_code < 400:
+            text = resp.content.decode("utf-8", errors="replace").strip()
+            if text and "<" not in text and "{" not in text and re.search(r"\d", text):
+                item["ok"] = True
+                item["version"] = text.splitlines()[0].strip()
+            else:
+                item["error"] = "版本文件格式异常"
+        else:
+            item["error"] = f"HTTP {resp.status_code}"
+    except requests.Timeout:
+        item["error"] = f"连接超时（超过 {timeout:g}s）"
+    except requests.RequestException as exc:
+        item["error"] = str(exc)
+    item["elapsed_ms"] = int((time.time() - started) * 1000)
+    return item
+
+def probe_github_endpoints(timeout: float = 3.5) -> List[Dict[str, Any]]:
+    """并发探测 GitHub 直连与各国内镜像，按候选优先级返回结果列表。"""
+    slots: List[Optional[Dict[str, Any]]] = [None] * len(GITHUB_RAW_BASE_CANDIDATES)
+
+    def _run(index: int, base: str):
+        slots[index] = _probe_github_raw_base(base, timeout=timeout)
+
+    threads = [
+        Thread(target=_run, args=(i, base), daemon=True)
+        for i, base in enumerate(GITHUB_RAW_BASE_CANDIDATES)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=timeout + 1.0)
+    out: List[Dict[str, Any]] = []
+    for i, base in enumerate(GITHUB_RAW_BASE_CANDIDATES):
+        out.append(slots[i] or {
+            "base": base, "ok": False, "status": 0, "elapsed_ms": 0,
+            "error": "探测超时", "version": "",
+        })
+    return out
+
+def resolve_github_raw_base(force: bool = False, timeout: float = 3.5) -> str:
+    """返回当前网络可用的 GitHub 文件根地址（直连不可用时自动落到国内镜像）。"""
+    cache = GITHUB_ENDPOINT_CACHE
+    ttl = 600 if cache.get("raw_base") else 60
+    if not force and cache.get("checked_at") and time.time() - cache["checked_at"] < ttl:
+        return cache.get("raw_base") or ""
+    probes = probe_github_endpoints(timeout=timeout)
+    best = next((p for p in probes if p["ok"]), None)
+    cache["probe"] = probes
+    cache["checked_at"] = time.time()
+    cache["raw_base"] = best["base"] if best else ""
+    if best:
+        print(f"[update] GitHub 端点选用 {github_endpoint_label(best['base'])}：{best['base']}（{best['elapsed_ms']}ms）")
+    else:
+        print("[update] GitHub 直连与全部镜像均不可达")
+    return cache["raw_base"]
+
+def fetch_github_version(timeout: float = 4.0) -> Dict[str, Any]:
+    """探测 GitHub（含镜像）版本文件，返回统一格式的结果。"""
+    probes = probe_github_endpoints(timeout=timeout)
+    GITHUB_ENDPOINT_CACHE["probe"] = probes
+    GITHUB_ENDPOINT_CACHE["checked_at"] = time.time()
+    best = next((p for p in probes if p["ok"]), None)
+    if best:
+        GITHUB_ENDPOINT_CACHE["raw_base"] = best["base"]
+        return {
+            "version": best["version"],
+            "ok": True,
+            "error": "",
+            "url": f"{best['base']}/VERSION",
+            "source": "github",
+            "mirror": github_endpoint_label(best["base"]),
+        }
+    GITHUB_ENDPOINT_CACHE["raw_base"] = ""
+    first_error = ""
+    for p in probes:
+        if p.get("error"):
+            first_error = p["error"]
+            break
+    return {
+        "version": "",
+        "ok": False,
+        "error": f"已尝试 {len(probes)} 个端点（直连 + 国内镜像）均不可达" + (f"：{first_error}" if first_error else ""),
+        "url": GITHUB_VERSION_URL,
+        "source": "github",
+        "mirror": "",
+    }
+
+def github_connectivity_item() -> Dict[str, Any]:
+    """GitHub 源连通性检测：逐端点探测，可用时返回实际选中的镜像。"""
+    probes = probe_github_endpoints(timeout=4.0)
+    GITHUB_ENDPOINT_CACHE["probe"] = probes
+    GITHUB_ENDPOINT_CACHE["checked_at"] = time.time()
+    best = next((p for p in probes if p["ok"]), None)
+    GITHUB_ENDPOINT_CACHE["raw_base"] = best["base"] if best else ""
+    head = best or probes[0]
+    return {
+        "name": "GitHub 版本文件",
+        "url": f"{best['base']}/VERSION" if best else GITHUB_VERSION_URL,
+        "ok": bool(best),
+        "status": head.get("status", 0),
+        "elapsed_ms": head.get("elapsed_ms", 0),
+        "error": "" if best else f"已尝试 {len(probes)} 个端点（直连 + 国内镜像）均不可达",
+        "timed_out": False,
+        "source": "github",
+        "required": False,
+        "mirror": github_endpoint_label(best["base"]) if best else "",
+        "tried": [
+            {
+                "base": p["base"],
+                "label": github_endpoint_label(p["base"]),
+                "ok": p["ok"],
+                "elapsed_ms": p["elapsed_ms"],
+                "error": p["error"],
+            }
+            for p in probes
+        ],
+    }
+
+def github_notes_url() -> str:
+    base = resolve_github_raw_base()
+    return (base or GITHUB_RAW_ROOT) + "/static/update-notes.json"
+
 def version_tuple(value: str) -> List[int]:
     return [int(x) for x in re.findall(r"\d+", str(value or ""))]
 
@@ -2204,9 +2379,12 @@ def check_update(source: str = ""):
         item["source"] = key
         holder[key] = item
 
+    def _probe_github():
+        holder["github"] = fetch_github_version(timeout=4.0)
+
     threads = [
         Thread(target=_probe, args=("modelscope", MODELSCOPE_VERSION_URL), daemon=True),
-        Thread(target=_probe, args=("github", GITHUB_VERSION_URL), daemon=True),
+        Thread(target=_probe_github, daemon=True),
     ]
     for t in threads:
         t.start()
@@ -2222,7 +2400,7 @@ def check_update(source: str = ""):
     update_available = bool(best and version_gt(best["version"], current))
     notes_by_source: Dict[str, Any] = {}
     if best and best.get("version"):
-        notes_url = MODELSCOPE_UPDATE_NOTES_URL if best["source"] == "modelscope" else GITHUB_UPDATE_NOTES_URL
+        notes_url = MODELSCOPE_UPDATE_NOTES_URL if best["source"] == "modelscope" else github_notes_url()
         best_notes = fetch_remote_update_notes(notes_url, best["version"], timeout=3.0)
         notes_by_source = {best["source"]: best_notes}
         best["update_notes"] = best_notes if best_notes.get("ok") else {"version": best["version"], "items": []}
@@ -2296,9 +2474,13 @@ def github_bytes(url: str) -> bytes:
 
 def download_github_update_files(files: List[str], staging_root: str) -> None:
     staging_root_abs = os.path.abspath(staging_root)
+    raw_base = resolve_github_raw_base()
+    if not raw_base:
+        raise RuntimeError("GitHub 直连与国内镜像均不可达，无法下载更新")
+    print(f"[update] 从 {github_endpoint_label(raw_base)} 下载 {len(files)} 个文件：{raw_base}")
     for rel in files:
         safe_update_target(rel)
-        raw_url = f"{GITHUB_RAW_ROOT}/{urllib.parse.quote(rel, safe='/')}"
+        raw_url = f"{raw_base}/{urllib.parse.quote(rel, safe='/')}"
         data = github_bytes(raw_url)
         stage_path = os.path.abspath(os.path.join(staging_root_abs, *rel.split("/")))
         if os.path.commonpath([staging_root_abs, stage_path]) != staging_root_abs:
@@ -2465,28 +2647,66 @@ class UpdateRequest(BaseModel):
     source: str = "modelscope"
     fallback: bool = False
 
-def github_update_file_list() -> Tuple[List[str], List[str], List[str]]:
+def github_tree_file_list() -> List[str]:
+    """GitHub 官方 Tree API 列文件（api.github.com，部分网络不可达）。"""
     tree_data = github_json(GITHUB_TREE_URL, use_etag_cache=True)
     entries = tree_data.get("tree") or []
-    static_files = []
-    root_files = []
+    files = []
     for entry in entries:
         path = str(entry.get("path") or "").replace("\\", "/")
         if entry.get("type") == "blob" and update_allowed_file(path):
-            if path.startswith("static/"):
-                static_files.append(path)
-            else:
-                root_files.append(path)
+            files.append(path)
+    return sorted(set(files))
+
+def github_jsdelivr_file_list() -> List[str]:
+    """jsDelivr 数据接口列文件（国内通常可达），作为 API 不可用时的兜底。"""
+    resp = github_get(
+        GITHUB_JSDELIVR_LIST_URL,
+        headers={"User-Agent": "GBZ-Canvas-Updater"},
+        timeout=25,
+    )
+    payload = json.loads(resp.content.decode("utf-8", errors="replace"))
+    entries = payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise RuntimeError("jsDelivr 文件列表格式不正确")
+    files = []
+    for entry in entries:
+        name = ""
+        if isinstance(entry, dict):
+            name = str(entry.get("name") or "")
+        elif isinstance(entry, str):
+            name = entry
+        path = name.replace("\\", "/").lstrip("/")
+        if update_allowed_file(path):
+            files.append(path)
+    return sorted(set(files))
+
+def github_update_file_list() -> Tuple[List[str], List[str], List[str]]:
+    errors: List[str] = []
+    files: List[str] = []
+    for name, lister in (("api.github.com", github_tree_file_list), ("jsDelivr", github_jsdelivr_file_list)):
+        try:
+            files = lister()
+            if files and any(f.startswith("static/") for f in files):
+                break
+            errors.append(f"{name} 未返回 static 文件")
+            files = []
+        except Exception as exc:
+            errors.append(f"{name} 失败：{exc}")
+            files = []
+    if not files:
+        raise RuntimeError("GitHub 文件列表获取失败（" + "；".join(errors) + "）")
+    static_files = [f for f in files if f.startswith("static/")]
+    root_files = [f for f in files if not f.startswith("static/")]
     if "main.py" not in root_files:
         root_files.append("main.py")
     if "VERSION" not in root_files:
         root_files.append("VERSION")
     static_files = sorted(set(static_files))
     root_files = sorted(set(root_files))
-    files = root_files + static_files
     if not static_files:
         raise RuntimeError("GitHub 未返回 static 文件，已取消更新")
-    return root_files, static_files, files
+    return root_files, static_files, root_files + static_files
 
 def staged_update_file_list(staging_root: str) -> Tuple[List[str], List[str], List[str]]:
     root_files = []
