@@ -1,0 +1,74 @@
+{
+  "46": {
+    "inputs": {
+      "audio": "吾问无为谓.wav"
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "加载音频"
+    }
+  },
+  "48": {
+    "inputs": {
+      "filename_prefix": "audio/ComfyUI",
+      "audio": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "保存音频"
+    }
+  },
+  "49": {
+    "inputs": {
+      "text": "必极必特，黑白两款壳膜一体，专为特斯拉中控屏定制 "
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text"
+    }
+  },
+  "57": {
+    "inputs": {
+      "text": [
+        "49",
+        0
+      ],
+      "ref_text": "广告沉稳",
+      "language": "Chinese",
+      "seed": 447787090776306,
+      "x_vector_only": true,
+      "max_new_tokens": 1024,
+      "temperature": 0.3,
+      "top_p": 0.8,
+      "repetition_penalty": 1.05,
+      "model": [
+        "58",
+        0
+      ],
+      "ref_audio": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "Qwen3TTSVoiceClone",
+    "_meta": {
+      "title": "Qwen3 TTS Voice Clone"
+    }
+  },
+  "58": {
+    "inputs": {
+      "model_name": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+      "device": "cuda:0",
+      "dtype": "bfloat16",
+      "keep_model_loaded": true,
+      "use_flash_attn": false
+    },
+    "class_type": "Qwen3TTSModelLoader",
+    "_meta": {
+      "title": "Qwen3 TTS Model Loader"
+    }
+  }
+}

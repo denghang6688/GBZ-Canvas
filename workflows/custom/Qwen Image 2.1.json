@@ -1,0 +1,229 @@
+{
+  "192": {
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "197": {
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "310": {
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "416": {
+    "inputs": {
+      "seed": [
+        "417",
+        0
+      ],
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "471",
+        0
+      ],
+      "positive": [
+        "418",
+        0
+      ],
+      "negative": [
+        "418",
+        1
+      ],
+      "latent_image": [
+        "419",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "417": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "418": {
+    "inputs": {
+      "prompt": "一张韩系随拍街头照片，由朋友在近处以轻微俯拍角度拍摄。使用现代 iPhone 后置 1 倍主摄、标准照片模式，并开启内置 LED 闪光灯作为轻柔的日间补光，完整拍到她蹲下的身影和身后的街道。\n一位二十多岁的成年东亚女性，小巧的椭圆脸，脸颊柔和饱满，眉形纤细，鼻梁秀气挺直，唇色柔和粉嫩。她闭着眼睛开怀大笑，脸颊扬起，露出上排牙齿。妆容轻透，带有粉色腮红。她的栗棕色长发从蓬松的侧分发根自然垂落在肩头，几缕发丝被风吹到额前。\n她穿着宽松的浅灰鼠尾草绿拉链外套，内搭白色上衣，下穿象牙白花卉蕾丝半身裙，脚穿奶油色与浅棕色运动鞋。外套下方垂着两根浅黄绿色抽绳。她低身蹲着，双膝弯曲，身体微微前倾，抬头看向朋友。一只手在膝边松松地拿着一部银边手机，红色挂绳垂向地面；旁边放着一个弧形白色手提包和一个装有小黄物件的透明袋子。\n她蹲在磨损的黄白色道路标线上，周围是灰色沥青路面、排水沟、路缘和黑色金属栏杆。明亮的阳光从左上方照来，温暖地勾亮她发丝的边缘，并在路面投下栏杆的斜向影子。手机闪光灯柔和地补亮她的脸部和外套前侧。",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "192",
+        0
+      ],
+      "images.image_1": [
+        "472",
+        0
+      ],
+      "images.image_2": [
+        "473",
+        0
+      ],
+      "images.image_3": [
+        "474",
+        0
+      ],
+      "images.image_4": [
+        "475",
+        0
+      ],
+      "vae": [
+        "197",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "419": {
+    "inputs": {
+      "switch": true,
+      "on_true": [
+        "422",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "切换"
+    }
+  },
+  "422": {
+    "inputs": {
+      "width": [
+        "424",
+        0
+      ],
+      "height": [
+        "424",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "424": {
+    "inputs": {
+      "aspect_ratio": "2:3 (Portrait Photo)",
+      "megapixels": 2,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "分辨率选择器"
+    }
+  },
+  "426": {
+    "inputs": {
+      "samples": [
+        "416",
+        0
+      ],
+      "vae": [
+        "197",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "470": {
+    "inputs": {
+      "filename_prefix": "2026-10-05/20261005_140133_QwenEdit",
+      "images": [
+        "426",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "471": {
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "310",
+        0
+      ]
+    },
+    "class_type": "QwenImage21Cache",
+    "_meta": {
+      "title": "Qwen Image 2.1 Cache"
+    }
+  },
+  "472": {
+    "inputs": {
+      "image": "..simple.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "473": {
+    "inputs": {
+      "image": "..simple.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "474": {
+    "inputs": {
+      "image": "..simple.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "475": {
+    "inputs": {
+      "image": "..simple.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  }
+}

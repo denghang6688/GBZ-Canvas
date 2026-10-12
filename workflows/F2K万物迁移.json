@@ -1,0 +1,267 @@
+{
+  "1443": {
+    "inputs": {
+      "conditioning": [
+        "1453",
+        0
+      ],
+      "latent": [
+        "1451",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1444": {
+    "inputs": {
+      "conditioning": [
+        "1443",
+        0
+      ],
+      "latent": [
+        "1450",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1445": {
+    "inputs": {
+      "clip_name": "9B\\qwen_3_8b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "1446": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "1447": {
+    "inputs": {
+      "conditioning": [
+        "1456",
+        0
+      ],
+      "latent": [
+        "1451",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1448": {
+    "inputs": {
+      "conditioning": [
+        "1447",
+        0
+      ],
+      "latent": [
+        "1450",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1449": {
+    "inputs": {
+      "samples": [
+        "1458",
+        0
+      ],
+      "vae": [
+        "1446",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "1450": {
+    "inputs": {
+      "pixels": [
+        "1455",
+        0
+      ],
+      "vae": [
+        "1446",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "1451": {
+    "inputs": {
+      "pixels": [
+        "1461",
+        0
+      ],
+      "vae": [
+        "1446",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "1452": {
+    "inputs": {
+      "unet_name": "flux-2-klein\\Flux2-Klein-9B-True-v2-fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "1453": {
+    "inputs": {
+      "text": "图1的模特保持不变，展示图2的手表。突出表带的金属质感",
+      "clip": [
+        "1445",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1454": {
+    "inputs": {
+      "image": "pasted/image (12).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "1455": {
+    "inputs": {
+      "upscale_method": "bicubic",
+      "megapixels": 2,
+      "resolution_steps": 1,
+      "image": [
+        "1457",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "1456": {
+    "inputs": {
+      "text": "低质量，模糊，白色背景，更改其他物品,变形，结构改变，脏",
+      "clip": [
+        "1445",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1457": {
+    "inputs": {
+      "image": "pasted/image (13).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "1458": {
+    "inputs": {
+      "seed": 676360159402970,
+      "steps": 5,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "1452",
+        0
+      ],
+      "positive": [
+        "1444",
+        0
+      ],
+      "negative": [
+        "1448",
+        0
+      ],
+      "latent_image": [
+        "1451",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "1459": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1449",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "1461": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "letterbox",
+      "method": "lanczos",
+      "round_to_multiple": "8",
+      "scale_to_side": "longest",
+      "scale_to_length": 1500,
+      "background_color": "#000000",
+      "image": [
+        "1454",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "图层工具：按宽高比缩放 V2"
+    }
+  }
+}
