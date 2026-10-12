@@ -67,9 +67,13 @@ output/
 main.py.bak-*
 mac-启动服务.command.bak
 publish-release.bat
-*.bak
-# 形如 smart-canvas.css.bak-20260917-h3 / smart-canvas.js.bak-20260828-ratio 的带时间戳备份
-*.bak-*
+# 任何形式的备份/临时件：foo.bak、foo.bak-20261012-x、foo.bak2-tombstone、foo.rejected-*
+*.bak*
+*.rejected-*
+static/tmp-*
+static/_debug-*.html
+# 发布时生成的更新清单（魔搭创空间用，不进仓库）
+static/update-manifest.json
 
 # Environment / secrets
 .env
