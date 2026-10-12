@@ -2966,7 +2966,7 @@
                         <div class="update-source-head">
                             <div class="update-source-title">
                                 <strong>GitHub</strong>
-                                <span>国际源，从作者 GitHub 仓库读取更新，网络不畅时可能较慢。</span>
+                                <span>国际源，从作者 GitHub 仓库读取更新；直连不畅时自动切换国内镜像。</span>
                             </div>
                             <div class="update-source-head-right">
                                 <span class="update-source-check" aria-hidden="true">
@@ -3792,7 +3792,7 @@
                 const meta = document.createElement('div');
                 const name = document.createElement('div');
                 name.className = 'connectivity-name';
-                name.textContent = updateTargetLabel(item.name);
+                name.textContent = updateTargetLabel(item.name) + (item.mirror ? `（${item.mirror}）` : '');
                 const url = document.createElement('div');
                 url.className = 'connectivity-url';
                 url.textContent = item.url || '';
