@@ -2,7 +2,7 @@
 
 > 一个面向创作者的本地化 AI 无限画布工作台 —— 在浏览器里拖拽节点、组装工作流、调任意大模型（对话 / 文生图 / 文生视频 / LoRA / ControlNet / ComfyUI），一键导出可复用的工作流。
 
-[![License](https://img.shields.io/badge/license-Non--Commercial-red.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Commercial--No%20Resale-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
 
@@ -129,10 +129,10 @@ uvicorn main:app --reload --host 0.0.0.0 --port 2000
 
 ## 许可证
 
-本项目为**源码公开、禁止商用**（非 OSI 开源许可）：
+**允许商用，禁止转售与封装**（自定义许可，非 OSI 开源许可）：
 
-- 可自由用于个人学习、研究与公司内部使用；
-- 禁止以任何形式二次封装为商业产品销售或提供服务，商业使用须取得作者授权；
+- 允许任何商业目的使用，包括公司内部用于自身业务，**无需取得授权**；
+- 禁止转售、转授权、封装，或以本项目（含其修改版）对外提供收费产品或服务；
 - 基于本项目二次开发的软件必须保持开源，并注明原作者与来源。
 
 完整条款见 [LICENSE](LICENSE)。
