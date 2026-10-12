@@ -1,11 +1,17 @@
-已经申请著作权，禁止商业用途
-Commercial use is prohibited.
+已申请著作权。允许商业使用，禁止转售与封装
+Commercial use is permitted; resale and repackaging are prohibited.
 
+* 允许任何商业目的使用，包括公司内部用于自身业务，无需取得授权。
 
-* 可以自己使用和公司使用，禁止用于任何形式的修改封装成商业产品，商用须取得授权。
+* 禁止转售、转授权、封装，或以本项目（含其修改版）对外提供收费产品或服务。
 
-* 根据代码二次开发的软件必须保持开源并注明来源作者
+* 根据代码二次开发的软件必须保持开源并注明来源作者。
 
-* This software is for personal and company use only, but is prohibited from being modified or packaged into commercial products in any way. Commercial use requires authorization.
+* Commercial use is permitted for any purpose, including internal use within a company
+  for its own business; no authorization is required.
 
-* Software developed based on this code must remain open source and the original author must be credited.
+* Reselling, sublicensing, repackaging, or offering this project (or a modified version
+  of it) as a paid product or service to third parties is prohibited.
+
+* Software developed based on this code must remain open source and the original author
+  must be credited.
