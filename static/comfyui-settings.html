@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作流设置</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+                if(theme === 'custom') {
+                    document.documentElement.classList.add('studio-theme-custom');
+                    document.documentElement.classList.add('theme-custom');
+                    document.documentElement.style.setProperty('--studio-custom-color', '#22c55e');
+                }
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V10-09.1790042522"></script>
+    <script src="/static/vendor/js/lucide.js?v=V10-09.1790042522"></script>
+    <script src="/static/js/theme.js?v=V10-09.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V10-09.1790305929"></script>
+    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=V10-09.1791420277">
+    <link rel="stylesheet" href="/static/css/theme.css?v=V10-09.1790492361">
+</head>
+<body>
+    <div class="page">
+        <div class="wrap">
+            <header class="page-head">
+                <div>
+                    <div class="title" data-i18n="comfy.title">工作流设置</div>
+                    <div class="sub" data-i18n="comfy.subtitle">选择本地 ComfyUI 工作流，配置可暴露到画布的输入参数。</div>
+                </div>
+                <div class="page-head-actions">
+                    <button class="page-back-btn" type="button" onclick="goBackSettings()"><i data-lucide="arrow-left" class="w-4 h-4"></i><span>返回设置</span></button>
+                    <div id="status" class="status"></div>
+                </div>
+            </header>
+
+            <div class="conn-bar" id="connBar">
+                <button class="conn-summary" type="button" onclick="toggleConnBar()">
+                    <span class="conn-summary-title"><i data-lucide="plug-zap" class="w-4 h-4"></i><span data-i18n="comfy.connTitle">连接</span></span>
+                    <span id="connBackendChip" class="conn-chip">…</span>
+                    <span id="connDirChip" class="conn-chip">…</span>
+                    <i data-lucide="chevron-down" class="w-4 h-4 conn-chevron"></i>
+                </button>
+                <div id="connBody" class="conn-body" style="display:none">
+                    <div class="side-card workflow-panel workflow-panel-comfy">
+                        <div class="side-title">ComfyUI 后端地址</div>
+                        <div id="comfyInstancesList" style="display:flex;flex-direction:column;gap:6px"></div>
+                        <button class="upload-btn" type="button" onclick="addComfyInstance()">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加后端</span>
+                        </button>
+                        <div style="display:flex;gap:6px">
+                            <button class="upload-btn" type="button" onclick="saveComfyInstances()" style="flex:1;border-style:solid">
+                                <i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span>
+                            </button>
+                        </div>
+                        <div style="font-size:10.5px;color:var(--faint);line-height:1.55;font-weight:600">格式：<span style="font-family:ui-monospace,Menlo,monospace">host:port</span>（如 <span style="font-family:ui-monospace,Menlo,monospace">127.0.0.1:8188</span>）</div>
+                    </div>
+                    <div class="side-card workflow-panel workflow-panel-comfy">
+                        <div class="side-title">ComfyUI 安装目录</div>
+                        <div style="display:flex;flex-direction:column;gap:6px">
+                            <input id="comfyDirInput" type="text" placeholder="例如 G:\ComfyUI-AIGC\ComfyUI" style="height:32px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font-size:12px;font-family:ui-monospace,Menlo,monospace;width:100%">
+                            <div id="comfyDirDetected" style="font-size:10.5px;color:var(--faint);line-height:1.5;font-weight:600"></div>
+                            <button class="upload-btn" type="button" onclick="saveComfyDir()">
+                                <i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存目录</span>
+                            </button>
+                        </div>
+                        <div style="font-size:10.5px;color:var(--faint);line-height:1.55;font-weight:600;margin-top:6px">留空则自动检测画布目录旁边的 ComfyUI</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="layout">
+                <aside class="sidebar">
+                    <div class="side-card workflow-panel workflow-panel-comfy workflow-lib-card">
+                        <div class="workflow-lib-head">
+                            <div class="side-title" data-i18n="comfy.workflowLib">工作流库</div>
+                            <div id="workflowCount" class="workflow-count-pill"></div>
+                        </div>
+                        <div class="workflow-search-row">
+                            <i data-lucide="search" class="w-3.5 h-3.5"></i>
+                            <input id="workflowSearch" type="text" data-i18n-placeholder="comfy.searchWorkflow" placeholder="搜索工作流…" oninput="onWorkflowSearch(this.value)">
+                            <button id="workflowSearchClear" class="opt-del" type="button" style="display:none" onclick="onWorkflowSearch('')" title="清空"><i data-lucide="x" class="w-3 h-3"></i></button>
+                        </div>
+                        <div id="workflowList" class="workflow-list workflow-list-groups"></div>
+                        <button class="upload-btn" type="button" onclick="document.getElementById('uploadInput').click()">
+                            <i data-lucide="upload" class="w-3.5 h-3.5"></i><span data-i18n="comfy.uploadWorkflow">上传工作流</span>
+                        </button>
+                        <input id="uploadInput" type="file" accept="application/json" style="display:none" onchange="onUpload(event)">
+                    </div>
+                </aside>
+
+                <main class="content">
+                    <div id="graphCard" class="graph-card" style="display:none">
+                        <div class="graph-head">
+                            <div class="graph-title-row">
+                                <div style="min-width:0;flex:1">
+                                    <div class="title-edit-row">
+                                        <input id="workflowTitleInput" class="workflow-title-input" type="text" placeholder="工作流名称" data-i18n-placeholder="comfy.workflowName" oninput="updateWorkflowTitle(this.value)">
+                                    </div>
+                                    <div id="editorSub" class="editor-sub" data-i18n="comfy.editorSubDefault">从左侧列表选择，或上传新的 API 工作流</div>
+                                </div>
+                                <div class="content-actions">
+                                    <button id="deleteBtn" class="action-btn danger-btn" type="button" onclick="onDelete()" style="display:none">
+                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="common.delete">删除</span>
+                                    </button>
+                                    <button id="saveBtn" class="action-btn save-btn" type="button" onclick="onSave()" style="display:none">
+                                        <i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="comfy.saveConfig">保存配置</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="workspace-mode-tabs workspace-mode-tabs-2">
+                                <button id="workspaceGraphTab" type="button" class="active" onclick="setWorkspaceMode('graph')" data-i18n="comfy.workflow">工作流</button>
+                                <button id="workspaceNativeTab" type="button" onclick="setWorkspaceMode('native')">ComfyUI 原生页面</button>
+                            </div>
+                        </div>
+                        <div class="graph-svg-wrap" style="position:relative">
+                            <svg id="graphSvg" class="graph-svg"></svg>
+                            <div class="graph-controls">
+                                <div class="graph-ctrl-btn" onclick="graphZoom(-1)" title="缩小" data-i18n-title="canvas.decrease"><i data-lucide="zoom-out" class="w-4 h-4"></i></div>
+                                <div id="zoomPill" class="graph-zoom-pill">100%</div>
+                                <div class="graph-ctrl-btn" onclick="graphZoom(1)" title="放大" data-i18n-title="canvas.increase"><i data-lucide="zoom-in" class="w-4 h-4"></i></div>
+                                <div class="graph-ctrl-btn" onclick="graphFit()" title="适应窗口"><i data-lucide="maximize" class="w-4 h-4"></i></div>
+                            </div>
+                            <div id="popupBackdrop" class="popup-backdrop" style="display:none" onclick="closeNodePopup()"></div>
+                            <div id="nodePopup" class="popup-panel" style="display:none"></div>
+                            <div id="comfyNativeHost" class="comfy-native-host" style="display:none">
+                                <div class="comfy-native-toolbar">
+                                    <button class="comfy-native-fs-btn" type="button" onclick="comfyNativeFullscreen()" title="ComfyUI 全屏">
+                                        <i data-lucide="maximize-2" class="fs-icon-off w-3.5 h-3.5"></i>
+                                        <i data-lucide="minimize-2" class="fs-icon-on w-3.5 h-3.5"></i>
+                                        <span>全屏</span>
+                                    </button>
+                                </div>
+                                <iframe id="comfyNativeFrame" class="comfy-native-frame" src="about:blank" title="ComfyUI"></iframe>
+                                <div id="comfyNativeHint" class="comfy-native-hint" style="display:none">未配置 ComfyUI 后端地址，请先在左上角「连接」中添加并保存（如 127.0.0.1:8188），此处将显示该端口的 ComfyUI 实时画面</div>
+                            </div>
+                        </div>
+                        <div id="miniCanvasHost" style="display:none"></div>
+                    </div>
+                    <div id="nodesToggle" class="nodes-toggle" style="display:none" onclick="toggleNodeList()">
+                        <i data-lucide="list" class="w-3.5 h-3.5"></i>
+                        <span id="nodesToggleText" data-i18n="comfy.showNodeList">显示完整节点列表</span>
+                    </div>
+                    <div id="nodeList" class="node-list hidden"></div>
+                </main>
+
+                <aside class="preview-col">
+                    <div class="side-card" id="previewCard">
+                        <div class="preview-title-row">
+                            <i data-lucide="eye" class="w-4 h-4" style="color:var(--muted)"></i>
+                            <div class="preview-title" data-i18n="comfy.nodePreview">画布节点预览</div>
+                            <div class="preview-pill" data-i18n="comfy.live">实时</div>
+                        </div>
+                        <div class="preview-desc" data-i18n="comfy.previewDesc">这个工作流在画布 Comfy 节点上将显示出的控件，可直接填写并点击「运行测试」。</div>
+                        <div id="previewContent">
+                            <div class="preview-empty" data-i18n="comfy.previewEmpty">勾选节点输入字段后<br>预览将出现在这里</div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+    <div id="imageLightbox" class="image-lightbox" onclick="closeImagePreview()">
+        <img id="imageLightboxImg" src="" alt="preview" onclick="event.stopPropagation()">
+    </div>
+
+    <script>
+        function goBackSettings(){
+            if(window.parent && window.parent !== window) {
+                window.parent.postMessage({ type:'studio-switch-page', page:'settings' }, '*');
+            } else {
+                window.location.href = '/static/settings.html';
+            }
+        }
+    </script>
+    <script src="/static/js/comfyui-settings.js?v=V10-09.1791422038"></script>
+</body>
+</html>

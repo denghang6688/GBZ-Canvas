@@ -1,0 +1,159 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" data-studio-scale="off">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>外观主题</title>
+    <script src="/static/vendor/js/lucide.js?v=V10-09.1790042522"></script>
+    <script src="/static/js/theme.js?v=V10-09.1790042521"></script>
+    <style>
+        @import url('/static/vendor/css/fonts.css?v=V10-09.1790042522');
+        * { box-sizing:border-box; }
+        html, body { margin:0; min-height:100%; background:#121722; color:#eef2f7; font-family:Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+        .page { width:min(980px, calc(100% - 56px)); margin:0 auto; padding:44px 0 56px; }
+        .back { height:34px; padding:0 12px; border:0; border-radius:10px; background:#202838; color:#c8d2e2; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-weight:750; }
+        h1 { margin:22px 0 8px; font-size:28px; line-height:1.15; }
+        .sub { margin:0 0 24px; color:#9aa7bb; font-size:13px; font-weight:650; }
+        .modes { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+        .mode {
+            min-height:270px;
+            padding:18px;
+            border:0;
+            border-radius:18px;
+            background:#1b2230;
+            color:#eef2f7;
+            text-align:left;
+            cursor:pointer;
+            box-shadow:0 18px 48px rgba(0,0,0,.22);
+            transition:transform .16s ease, background .16s ease, box-shadow .16s ease;
+        }
+        .mode:hover { transform:translateY(-2px); background:#20293a; }
+        .mode.active { box-shadow:0 18px 48px rgba(51,112,255,.22), inset 0 0 0 2px #3370ff; }
+        .preview { height:150px; border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+        .preview.light { background:#f5f7fb; color:#1f2329; }
+        .preview.dark { background:#080b10; color:#f4f7fb; }
+        .preview-top { height:24px; border-radius:999px; opacity:.9; }
+        .preview.light .preview-top { background:#dfe5ef; }
+        .preview.dark .preview-top { background:#202839; }
+        .preview-row { display:flex; gap:10px; flex:1; }
+        .preview-side { width:34%; border-radius:12px; }
+        .preview-main { flex:1; border-radius:12px; }
+        .preview.light .preview-side { background:#ffffff; }
+        .preview.light .preview-main { background:#e9eef6; }
+        .preview.dark .preview-side { background:#141a24; }
+        .preview.dark .preview-main { background:#1e2635; }
+        .mode-title { display:flex; align-items:center; gap:9px; font-size:17px; font-weight:850; }
+        .mode-copy { margin:9px 0 0; color:#a8b3c5; font-size:12px; line-height:1.55; font-weight:650; }
+        .mode.active .mode-copy { color:#c9d8ff; }
+        html:not(.theme-dark), html:not(.theme-dark) body { background:#f6f8fb; color:#1f2329; }
+        html:not(.theme-dark) .sub,
+        html:not(.theme-dark) .mode-copy { color:#64748b; }
+        html:not(.theme-dark) .back,
+        html:not(.theme-dark) .mode { background:#fff; color:#1f2329; box-shadow:0 16px 42px rgba(31,35,41,.08); }
+        html:not(.theme-dark) .mode:hover { background:#f1f4f8; }
+        @media (max-width:760px) {
+            .page { width:calc(100% - 28px); padding:24px 0 36px; }
+            .modes { grid-template-columns:1fr; }
+        }
+
+        /* Monochrome appearance page. */
+        :root,
+        html.theme-dark,
+        body.theme-dark {
+            --page-bg:#050505;
+            --page-card:#1f1f1f;
+            --page-card-hover:#252525;
+            --page-text:#f4f4f4;
+            --page-muted:#a6a6a6;
+            --page-strong:#f4f4f4;
+            --page-strong-text:#080808;
+        }
+        html:not(.theme-dark),
+        html:not(.theme-dark) body {
+            --page-bg:#f7f7f7;
+            --page-card:#ffffff;
+            --page-card-hover:#eeeeee;
+            --page-text:#111111;
+            --page-muted:#5f5f5f;
+            --page-strong:#111111;
+            --page-strong-text:#ffffff;
+        }
+        html,
+        body {
+            background:var(--page-bg) !important;
+            color:var(--page-text) !important;
+        }
+        .back,
+        html:not(.theme-dark) .back {
+            background:var(--page-card) !important;
+            color:var(--page-text) !important;
+            border:0 !important;
+            box-shadow:none !important;
+        }
+        .sub,
+        .mode-copy,
+        .mode.active .mode-copy,
+        html:not(.theme-dark) .sub,
+        html:not(.theme-dark) .mode-copy {
+            color:var(--page-muted) !important;
+        }
+        .mode,
+        html:not(.theme-dark) .mode {
+            background:var(--page-card) !important;
+            color:var(--page-text) !important;
+            border:0 !important;
+            box-shadow:none !important;
+        }
+        .mode:hover,
+        html:not(.theme-dark) .mode:hover {
+            background:var(--page-card-hover) !important;
+        }
+        .mode.active {
+            box-shadow:inset 0 0 0 2px var(--page-strong) !important;
+        }
+        .preview.dark {
+            background:#111111 !important;
+        }
+        .preview.dark .preview-top,
+        .preview.dark .preview-side,
+        .preview.dark .preview-main {
+            background:#2b2b2b !important;
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <button class="back" type="button" data-back><i data-lucide="arrow-left" class="w-4 h-4"></i><span>返回设置</span></button>
+        <h1>外观主题</h1>
+        <p class="sub">选择后会整体切换主界面、设置页、画布和已打开页面。</p>
+
+        <section class="modes">
+            <button class="mode" type="button" data-theme="light">
+                <div class="preview light"><div class="preview-top"></div><div class="preview-row"><div class="preview-side"></div><div class="preview-main"></div></div></div>
+                <div class="mode-title"><i data-lucide="sun" class="w-5 h-5"></i><span>浅色模式</span></div>
+                <p class="mode-copy">更适合白天、文档整理和长时间浏览。</p>
+            </button>
+            <button class="mode" type="button" data-theme="dark">
+                <div class="preview dark"><div class="preview-top"></div><div class="preview-row"><div class="preview-side"></div><div class="preview-main"></div></div></div>
+                <div class="mode-title"><i data-lucide="moon" class="w-5 h-5"></i><span>深色模式</span></div>
+                <p class="mode-copy">更适合创作画布、暗环境和沉浸式工作。</p>
+            </button>
+        </section>
+    </main>
+    <script>
+        const savedTheme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'dark';
+        const current = savedTheme === 'dark' ? 'dark' : 'light';
+        document.querySelectorAll('[data-theme]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === current);
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('[data-theme]').forEach(item => item.classList.toggle('active', item === btn));
+                window.parent.postMessage({ type:'studio-set-theme', theme:btn.dataset.theme }, '*');
+            });
+        });
+        document.querySelector('[data-back]').addEventListener('click', () => {
+            window.parent.postMessage({ type:'studio-switch-page', page:'settings' }, '*');
+        });
+        if(window.lucide) lucide.createIcons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,1901 @@
+/*
+ * GBZ Smart Canvas node skin
+ * Canonical visual layer for canvas nodes.
+ *
+ * Keep node behavior, persistence, connections, and generation logic out of
+ * this file. New visual changes should be made here first.
+ */
+
+html body {
+    --gbz-node-bg: #181818;
+    --gbz-node-bg-soft: #202020;
+    --gbz-node-surface: #242424;
+    --gbz-node-line: rgba(226, 226, 226, .36);
+    --gbz-node-line-soft: rgba(226, 226, 226, .20);
+    --gbz-node-line-strong: rgba(246, 246, 246, .62);
+    --gbz-node-text: rgba(246, 246, 246, .92);
+    --gbz-node-muted: rgba(246, 246, 246, .58);
+    /* Single source of truth for node corner geometry. Change the outer
+       value once; nested content surfaces follow the same visual family. */
+    --gbz-node-radius: 18px;
+    --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 4px);
+    --gbz-node-toolbar-radius: 8px;
+    --gbz-node-shadow: 0 14px 34px rgba(0, 0, 0, .22);
+    --gbz-node-shadow-selected: 0 0 0 1px rgba(246, 246, 246, .36), 0 18px 42px rgba(0, 0, 0, .28);
+}
+
+html body.theme-light {
+    --gbz-node-bg: #f7f7f7;
+    --gbz-node-bg-soft: #eeeeee;
+    --gbz-node-surface: #ffffff;
+    --gbz-node-line: rgba(24, 24, 24, .24);
+    --gbz-node-line-soft: rgba(24, 24, 24, .14);
+    --gbz-node-line-strong: rgba(24, 24, 24, .48);
+    --gbz-node-text: rgba(20, 20, 22, .92);
+    --gbz-node-muted: rgba(20, 20, 22, .58);
+}
+
+/* Compatibility bridge for the historical neutral-node rules. The old
+   selectors can remain during migration, but they now consume the canonical
+   tokens instead of maintaining a second grayscale palette. */
+html body {
+    --neutral-node-bg: var(--gbz-node-bg);
+    --neutral-node-panel: var(--gbz-node-surface);
+    --neutral-node-inner: var(--gbz-node-bg-soft);
+    --neutral-node-line: var(--gbz-node-line);
+    --neutral-node-line-soft: var(--gbz-node-line-soft);
+    --neutral-node-text: var(--gbz-node-text);
+    --neutral-node-muted: var(--gbz-node-muted);
+}
+
+/* Every canvas node uses the same outer radius. The old canvas stylesheet
+   still contains per-node values (12/16/26/30px); this late skin layer is
+   the single override point so future tuning stays local to this file. */
+html body .world .image-node {
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* Shared functional-node frame. Group fills stay on their own variables. */
+html body .world .image-node.empty-node,
+html body .world .image-node.upload-entry-node,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node),
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node),
+html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node),
+html body .world .image-node.minimax-h3-node:not(.smart-group-member-node) {
+    background: var(--gbz-node-bg) !important;
+    border: 1px solid var(--gbz-node-line) !important;
+    border-radius: var(--gbz-node-radius) !important;
+    color: var(--gbz-node-text) !important;
+    box-shadow: var(--gbz-node-shadow) !important;
+}
+
+html body .world .image-node.empty-node:hover,
+html body .world .image-node.upload-entry-node:hover,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node):hover,
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node):hover,
+html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node):hover,
+html body .world .image-node.minimax-h3-node:not(.smart-group-member-node):hover,
+html body .world .image-node.empty-node.selected,
+html body .world .image-node.upload-entry-node.selected,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.minimax-h3-node:not(.smart-group-member-node).selected {
+    border-color: var(--gbz-node-line-strong) !important;
+}
+
+html body .world .image-node.empty-node.selected,
+html body .world .image-node.upload-entry-node.selected,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node).selected,
+html body .world .image-node.minimax-h3-node:not(.smart-group-member-node).selected {
+    box-shadow: var(--gbz-node-shadow-selected) !important;
+}
+
+/* One title scale and one compact action language. */
+html body .world .image-node > .node-head,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-title-row {
+    min-height: 24px !important;
+    height: 24px !important;
+    align-items: center !important;
+}
+
+html body .world .image-node > .node-head > .node-title,
+html body .world .image-node .prompt-node-title,
+html body .world .image-node .prompt-node-title span,
+html body .world .image-node .workflow-group-title,
+html body .world .image-node .media-card-title {
+    color: var(--gbz-node-text) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    line-height: 22px !important;
+    letter-spacing: 0 !important;
+    text-shadow: none !important;
+}
+
+html body .world .image-node > .node-head > .node-resolution,
+html body .world .image-node .media-card-sub,
+html body .world .image-node .prompt-node-kind-badge {
+    color: var(--gbz-node-muted) !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    line-height: 20px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+html body .world .smart-node-floating-menu.compact-icon-menu,
+html body .world .prompt-format-toolbar {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 4px !important;
+    gap: 4px !important;
+    border: 1px solid var(--gbz-node-line-soft) !important;
+    border-radius: 10px !important;
+    background: rgba(24, 24, 24, .88) !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .25) !important;
+}
+
+html body .world .smart-node-floating-menu.compact-icon-menu button,
+html body .world .prompt-format-toolbar .prompt-format-btn,
+html body .world .prompt-format-toolbar button {
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: var(--gbz-node-toolbar-radius) !important;
+    background: transparent !important;
+    color: var(--gbz-node-text) !important;
+}
+
+html body .world .smart-node-floating-menu.compact-icon-menu button:hover,
+html body .world .prompt-format-toolbar .prompt-format-btn:hover,
+html body .world .prompt-format-toolbar button:hover {
+    background: rgba(255, 255, 255, .10) !important;
+}
+
+/* Shared inset surfaces for upload, prompt, LLM, audio, and file content.
+   2026-10-08（用户要求）：节点只留外圈一圈边，内容区一律无边框、
+   无底色，与节点体融为一体（不再是“框中框”）。 */
+html body .world .node-drop,
+html body .world .upload-entry-drop,
+html body .world .upload-resource-add,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card {
+    border: 0 !important;
+    border-style: solid !important;
+    outline: 0 !important;
+    background: transparent !important;
+    color: var(--gbz-node-text) !important;
+    box-shadow: none !important;
+}
+
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text {
+    margin: 12px 14px 0 !important;
+    padding: 12px 13px !important;
+    min-height: 72px !important;
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+}
+
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text:focus,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm:focus,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card:focus-within {
+    border: 0 !important;
+    background: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text::placeholder {
+    color: var(--gbz-node-muted) !important;
+}
+
+/* 2026-10-08：.prompt-node-llm 是 LLM 选择区的容器（内部有 select/textarea
+   自带描边），保持透明，避免与内层控件叠成多层线。 */
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-output-wrap,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm {
+    border: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
+    background: transparent !important;
+}
+
+/* Empty upload surfaces have a legacy transparent reset with higher
+   specificity. 2026-10-08（用户要求）：投放框不再描边、不再垫底色。 */
+html body .world .image-node.empty-node .smart-run-empty-canvas.node-drop,
+html body .world .image-node:not(.upload-entry-node) .smart-run-empty-canvas.node-drop,
+html body .world .image-node:not(.upload-entry-node) .smart-run-empty-state .node-drop {
+    border: 0 !important;
+    border-style: solid !important;
+    outline: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+html body .world .media-audio-card,
+html body .world .media-file-card,
+html body .world .upload-resource-item {
+    border: 1px solid var(--gbz-node-line) !important;
+    border-radius: var(--gbz-node-inner-radius) !important;
+    background: var(--gbz-node-surface) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+html body .world .media-thumb.audio-thumb,
+html body .world .media-thumb.file-thumb,
+html body .world .input-thumb-audio {
+    background: var(--gbz-node-bg-soft) !important;
+    color: var(--gbz-node-muted) !important;
+}
+
+/* 2026-10-08（用户要求）：节点级媒体框全部去边框，只留节点外圈一圈。
+   分组缩略图（.thumb-item）与参考图卡是内容小卡片，保留描边。
+   选择器与主样式表 15874/15904 行同款（含 7 个 :not），靠后加载覆盖其边框。 */
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap,
+html body .world .image-node .image-wrap > .media-card,
+html body .world .image-node .image-wrap > .media-video-card,
+html body .world .image-node .image-wrap > img.node-img {
+    border: 0 !important;
+    box-shadow: none !important;
+    border-radius: var(--gbz-node-radius) !important;
+    background: #111 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--gbz-node-radius)) !important;
+}
+
+html body .world .thumb-item,
+html body .world .image-node .smart-run-ref-state.is-image-card,
+html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media,
+html body .world .image-node.upload-entry-node .upload-preview-card,
+html body .world .media-thumb.video-thumb {
+    border: 1px solid var(--gbz-node-line) !important;
+    border-radius: var(--gbz-node-radius) !important;
+    background: #111 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--gbz-node-radius)) !important;
+}
+
+/* 2026-10-08（用户反馈）双圈同心：.media-card / .media-video-card /
+   .media-thumb 是贴在 .image-wrap / .thumb-item 外圈描边内侧 1px 的内层圈，
+   半径同步减 1px（17px），否则四角两段弧不平行、错位交叉。 */
+html body .world .media-card,
+html body .world .media-video-card,
+html body .world .media-thumb.video-thumb,
+html body .world .image-node .image-wrap > .media-card,
+html body .world .image-node .image-wrap > .media-video-card,
+html body .world .image-node .image-wrap > img.node-img {
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    clip-path: inset(0 round calc(var(--gbz-node-radius) - 1px)) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) .image-wrap > .media-video-card,
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-media video {
+    border: 0 !important;
+    border-style: solid !important;
+    /* 2026-10-08（用户要求）：媒体内层卡不再描边。 */
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    background: #111 !important;
+    box-shadow: none !important;
+}
+
+/* Match the legacy selector scope so its 12px media radius cannot override
+   the canonical radius above. */
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) .image-wrap > .media-video-card,
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-media video,
+html body .world .media-video-card {
+    /* 2026-10-08（用户反馈）双圈同心：内层半径 = 外层 18px - 1px 间距 */
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-video-card {
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    clip-path: inset(0 round calc(var(--gbz-node-radius) - 1px)) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-card.media-video-card {
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    clip-path: inset(0 round calc(var(--gbz-node-radius) - 1px)) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap {
+    border-radius: var(--gbz-node-radius) !important;
+    clip-path: inset(0 round var(--gbz-node-radius)) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > img.node-img,
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-video-card,
+html body .world .media-video-card video,
+html body .world .media-video-card img[data-preview-kind="video"] {
+    /* 2026-10-08（用户反馈）双圈同心：img/video 与所在卡片的 17px 圆角保持一致，
+       不再用 inherit（会从 .image-wrap 继承 18px，导致四角弧度错位）。 */
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    object-fit: cover !important;
+    object-position: center !important;
+}
+
+html body .world .image-node.node-pending {
+    border-color: var(--gbz-node-line-strong) !important;
+    box-shadow: 0 0 0 1px rgba(246, 246, 246, .12), 0 0 26px rgba(246, 246, 246, .10), var(--gbz-node-shadow) !important;
+}
+
+html body .world .generation-pending-wrap,
+html body .world .smart-pending-thumb,
+html body .world .loading-cell {
+    /* 2026-10-10：这里必须用 background-image（不能用 background 简写）！
+       background 简写会连带把 background-position 设成 0% 0% 且带 !important，
+       而 !important 声明优先级高于 CSS 动画的关键帧 → shimmer 扫光被冻死、等待格看起来是静止的。
+       改成 background-image 后，@keyframes shimmer 的 background-position 才能生效。 */
+    background-image: linear-gradient(180deg, #242424, #171717) !important;
+    border-color: var(--gbz-node-line-soft) !important;
+}
+
+html body .world .pending-thumb-time,
+html body .world .run-time-pill {
+    background: rgba(24, 24, 24, .92) !important;
+    border: 1px solid var(--gbz-node-line) !important;
+    color: var(--gbz-node-text) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+html body .world .generation-progress {
+    background: rgba(246, 246, 246, .12) !important;
+}
+
+html body .world .generation-progress span {
+    background: rgba(246, 246, 246, .72) !important;
+}
+
+html body .world .image-node.drop-target {
+    outline: 1px solid var(--gbz-node-line-strong) !important;
+    outline-offset: 3px !important;
+}
+
+html body .world .image-node.smart-group-node:not(.smart-group-member-node),
+html body .world .image-node.workflow-group-node,
+html body .world .image-node.group-node {
+    border-style: solid !important;
+    border-radius: var(--gbz-node-radius) !important;
+    /* 注：分组边框色由用户可选的配色主题（石墨/等）决定，见 smart-canvas.js 的
+       workflow-group-color 色板，此处不覆盖，避免破坏用户选择。 */
+}
+
+/* MiniMax H3 used to have a transparent border-only treatment. It now follows
+   the same solid neutral frame as the other functional nodes. */
+html body .world .image-node.minimax-h3-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) {
+    border: 1px solid var(--gbz-node-line) !important;
+    border-style: solid !important;
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html body .world .image-node,
+    html body .world .image-node *,
+    html body .world .media-card,
+    html body .world .media-card * {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
+/* 2026-10-07：标题栏只保留一份分辨率。
+   图片节点此前同时渲染了标题栏分辨率和图片外侧旧角标，两个值会贴在一起。
+   有标题栏分辨率时，旧角标隐藏；没有标题栏分辨率的上传/参考资源仍保留自己的尺寸标记。 */
+html body .world .image-node:has(> .node-head > .node-resolution) > .node-body > .image-resolution-badge-outside {
+    display: none !important;
+}
+
+/* 顶部标题、分辨率和操作区域使用同一条 24px 基线，文字与图标都严格居中。 */
+html body .world .image-node > .node-head {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    line-height: 1 !important;
+}
+
+html body .world .image-node > .node-head > .node-title {
+    min-width: 0 !important;
+    height: 24px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+html body .world .image-node > .node-head > .node-title > svg,
+html body .world .image-node > .node-head > .node-title > i {
+    width: 14px !important;
+    height: 14px !important;
+    flex: 0 0 auto !important;
+}
+
+html body .world .image-node > .node-head > .node-title > span {
+    min-width: 0 !important;
+    line-height: 1 !important;
+}
+
+html body .world .image-node > .node-head > .node-resolution {
+    flex: 0 0 auto !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+html body .world .image-node > .node-head > .node-actions {
+    height: 24px !important;
+    min-height: 24px !important;
+    margin-left: auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+}
+
+/* 所有节点上方工具条统一容器和按钮高度；包含普通节点、组框和 LLM 工具条。 */
+html body .world .smart-node-floating-menu,
+html body .world .prompt-format-toolbar {
+    min-height: 32px !important;
+    height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+html body .world .smart-node-floating-menu > button,
+html body .world .smart-node-floating-menu .workflow-group-color-trigger,
+html body .world .prompt-format-toolbar > button,
+html body .world .prompt-format-toolbar .prompt-format-btn {
+    min-height: 24px !important;
+    height: 24px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+}
+
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu,
+html body .world .image-node.image-node > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-group-menu,
+html body .world .image-node.image-node > .smart-node-floating-menu.workflow-group-menu {
+    min-height: 32px !important;
+    height: 32px !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    align-items: center !important;
+    align-content: center !important;
+}
+
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu > button,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger {
+    min-height: 24px !important;
+    height: 24px !important;
+    line-height: 1 !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* 旧版普通节点工具条带有一串 :not() 高特异度规则，这里使用同等范围
+   覆盖它，保证普通节点和组框不再分别出现 24/32px 两种条高。 */
+html body .world .image-node.image-node:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.selected:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node:hover:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu {
+    min-height: 32px !important;
+    height: 32px !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    align-items: center !important;
+    align-content: center !important;
+}
+
+html body .world .image-node.image-node.empty-node > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.empty-node.selected > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.empty-node:hover > .smart-node-floating-menu.compact-icon-menu {
+    min-height: 32px !important;
+    height: 32px !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    align-items: center !important;
+    align-content: center !important;
+}
+
+html body .world .image-node.image-node.empty-node:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.empty-node.selected:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.empty-node:hover:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu {
+    min-height: 32px !important;
+    height: 32px !important;
+}
+
+/* 2026-10-07：ComfyUI / MiniMax H3 节点最终外框收口。
+   ComfyUI 保留上传交互，但空态中不再显示品牌文字图标；
+   MiniMax H3 只保留节点自己的外轮廓，内部空态不再绘制第二层框线。 */
+html body .world .image-node.empty-node .smart-run-comfy-icon .comfy-wordmark-img,
+html body .world .image-node.empty-node .smart-run-comfy-icon > svg {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+html body .world .image-node.minimax-h3-node,
+html body .world .image-node.minimax-h3-node:hover,
+html body .world .image-node.minimax-h3-node.selected {
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* 2026-10-08（用户要求）：节点只留外圈一圈边。
+   H3 的中间包裹层与最内层空状态画布一律无边框、无底色。 */
+html body .world .image-node.minimax-h3-node > .node-body,
+html body .world .image-node.minimax-h3-node > .node-body > .smart-run-empty-state {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+html body .world .image-node.minimax-h3-node > .node-body .smart-run-empty-canvas,
+html body .world .image-node.minimax-h3-node > .node-body .smart-run-empty-canvas.node-drop {
+    border: 0 !important;
+    border-style: solid !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    border-radius: 13px !important;
+    box-sizing: border-box !important;
+}
+
+/* 空节点（上传占位）：投放框同样不再描边、不再垫底色。 */
+html body .world .image-node.empty-node .smart-run-empty-canvas.node-drop,
+html body .world .image-node.empty-node .smart-run-empty-state .node-drop {
+    border: 0 !important;
+    border-style: solid !important;
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* 智能分组：内层卡片半径与 1px 内缩配平（此前 15px，四角缝隙偏宽）。 */
+html body .world .image-node.smart-group-node:not(.smart-group-member-node) .smart-group-card,
+html body .world .image-node.workflow-group-node .smart-group-card {
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+}
+
+/* 2026-10-07：多图生成动效对齐参考图。
+   前面的统一灰色皮肤会压住 pending 的蓝色背影光晕，这里只恢复生成中占位卡，
+   不改节点尺寸、比例、进度和任务逻辑。 */
+html body .world .image-node.node-pending .generation-pending-wrap.pending-pill-style,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style {
+    position: relative !important;
+    isolation: isolate !important;
+    overflow: hidden !important;
+    background:
+        linear-gradient(180deg, #05070d 0%, #070a12 42%, #11182d 100%) !important;
+    border: 1px solid rgba(226, 226, 226, .26) !important;
+    border-radius: var(--gbz-node-radius) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .08),
+        inset 0 -42px 92px rgba(18, 43, 105, .28),
+        0 12px 34px rgba(0, 0, 0, .28) !important;
+    animation: gbzPendingFrameGlow 4.8s ease-in-out infinite !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap.pending-pill-style::before,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb::before,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style::before {
+    content: "" !important;
+    position: absolute !important;
+    left: -20% !important;
+    right: -20% !important;
+    bottom: -25% !important;
+    height: 62% !important;
+    z-index: 1 !important;
+    pointer-events: none !important;
+    border-radius: 50% 50% 0 0 !important;
+    background:
+        radial-gradient(ellipse at 50% 100%, rgba(102, 197, 255, .92) 0%, rgba(60, 126, 255, .62) 34%, rgba(111, 74, 255, .38) 58%, rgba(15, 22, 56, .10) 74%, transparent 88%) !important;
+    filter: blur(18px) saturate(1.12) !important;
+    opacity: .96 !important;
+    transform-origin: 50% 100% !important;
+    animation: gbzPendingHaloDrift 4.8s cubic-bezier(.45, 0, .2, 1) infinite !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap.pending-pill-style::after,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb::after,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2 !important;
+    pointer-events: none !important;
+    background:
+        linear-gradient(180deg, rgba(1, 4, 10, .80) 0%, rgba(5, 8, 16, .56) 43%, rgba(4, 7, 16, .06) 72%, rgba(0, 0, 0, .20) 100%),
+        radial-gradient(ellipse at 12% 105%, rgba(137, 80, 255, .30), transparent 42%),
+        radial-gradient(ellipse at 88% 105%, rgba(43, 105, 255, .32), transparent 43%),
+        radial-gradient(ellipse at 50% 104%, rgba(95, 202, 255, .25), transparent 48%) !important;
+    opacity: .96 !important;
+    animation: gbzPendingMist 5.4s cubic-bezier(.45, 0, .2, 1) infinite !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap.pending-pill-style .pending-minimal-glow,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-minimal-glow,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-minimal-glow {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 3 !important;
+    display: block !important;
+    pointer-events: none !important;
+    opacity: .88 !important;
+    background:
+        radial-gradient(ellipse at 50% 108%, rgba(92, 197, 255, .68), transparent 45%),
+        linear-gradient(112deg, transparent 24%, rgba(255, 255, 255, .035) 43%, rgba(255, 255, 255, .10) 50%, rgba(255, 255, 255, .03) 57%, transparent 76%) !important;
+    background-size: 126% 118%, 190% 190% !important;
+    background-position: 50% 100%, -34% 42% !important;
+    filter: blur(12px) !important;
+    transform-origin: 50% 100% !important;
+    animation: gbzPendingSweep 3.6s ease-in-out infinite !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-ref-bg,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-ref-bg,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-ref-bg {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-box,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-box,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-box {
+    position: relative !important;
+    z-index: 8 !important;
+    min-height: 30px !important;
+    padding: 0 11px !important;
+    gap: 8px !important;
+    border-radius: 999px !important;
+    background: rgba(5, 8, 14, .68) !important;
+    border: 1px solid rgba(226, 226, 226, .24) !important;
+    color: rgba(248, 250, 255, .96) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .14),
+        0 10px 24px rgba(0, 0, 0, .34),
+        0 0 24px rgba(72, 156, 255, .16) !important;
+    backdrop-filter: blur(15px) saturate(1.12) !important;
+    -webkit-backdrop-filter: blur(15px) saturate(1.12) !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-box::before,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-box::before,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-box::before {
+    content: "" !important;
+    width: 6px !important;
+    height: 6px !important;
+    flex: 0 0 6px !important;
+    border-radius: 999px !important;
+    background: #bfe8ff !important;
+    box-shadow: 0 0 0 3px rgba(93, 178, 255, .12), 0 0 14px rgba(99, 191, 255, .72) !important;
+    animation: gbzPendingDot 1.45s ease-in-out infinite !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-label::after,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-label::after {
+    content: "..." !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-label,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-label,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-label {
+    color: rgba(248, 250, 255, .96) !important;
+    font-size: 12px !important;
+    font-weight: 760 !important;
+    letter-spacing: 0 !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-pct,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-pct,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-pct {
+    color: #fff !important;
+    font-weight: 880 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel {
+    height: 20px !important;
+    padding: 0 7px !important;
+    border-radius: 999px !important;
+    color: rgba(235, 242, 255, .68) !important;
+    background: rgba(255, 255, 255, .055) !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-ratio-badge,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-ratio-badge {
+    left: 8px !important;
+    bottom: 8px !important;
+    z-index: 8 !important;
+    padding: 3px 8px !important;
+    border-radius: 999px !important;
+    background: rgba(6, 8, 14, .72) !important;
+    color: rgba(255, 255, 255, .94) !important;
+    font-size: 11px !important;
+    font-weight: 760 !important;
+    line-height: 1.3 !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 8px 16px rgba(0, 0, 0, .24) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+}
+
+@keyframes gbzPendingFrameGlow {
+    0%, 100% { border-color: rgba(226, 226, 226, .20); }
+    50% { border-color: rgba(176, 213, 255, .34); }
+}
+
+@keyframes gbzPendingHaloDrift {
+    0%, 100% { opacity: .62; transform: translate3d(-14%, 6%, 0) scale(.78, .86); filter: blur(22px) saturate(1.02); }
+    28% { opacity: 1; transform: translate3d(-1%, -7%, 0) scale(1.16, 1.22); filter: blur(18px) saturate(1.18); }
+    58% { opacity: .76; transform: translate3d(15%, 2%, 0) scale(.92, 1.04); filter: blur(20px) saturate(1.10); }
+}
+
+@keyframes gbzPendingMist {
+    0%, 100% { opacity: .66; transform: translate3d(-1.5%, 0, 0); }
+    34% { opacity: .98; transform: translate3d(1.5%, -1.8%, 0); }
+    68% { opacity: .76; transform: translate3d(0, .8%, 0); }
+}
+
+@keyframes gbzPendingSweep {
+    0%, 100% { opacity: .46; transform: translate3d(-4%, 2%, 0) scale(.98); background-position: 46% 100%, -36% 42%; }
+    45% { opacity: .96; transform: translate3d(4%, -1.5%, 0) scale(1.06); background-position: 56% 100%, 118% 54%; }
+    72% { opacity: .60; transform: translate3d(1%, 1%, 0) scale(1.02); background-position: 50% 100%, 62% 48%; }
+}
+
+@keyframes gbzPendingDot {
+    0%, 100% { opacity: .58; transform: scale(.88); }
+    50% { opacity: 1; transform: scale(1.08); }
+}
+
+/* 2026-10-08：生成中状态简化。
+   生成中的占位不显示分辨率；状态文字固定在预览框中心，
+   保留取消操作但取消胶囊底色、边框和阴影。 */
+html body .world .image-node.node-pending .generation-pending-wrap .pending-ratio-badge,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-ratio-badge,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-ratio-badge {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-box,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-box,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-box {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: max-content !important;
+    max-width: calc(100% - 24px) !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    gap: 10px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-box::before,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-box::before,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-box::before {
+    display: none !important;
+    content: none !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-label,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-label,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-label {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: max-content !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    color: rgba(248, 250, 255, .96) !important;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, .72) !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: rgba(235, 242, 255, .72) !important;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, .72) !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel:hover,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel:hover,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel:hover {
+    background: transparent !important;
+    color: #fff !important;
+}
+
+/* ===== 2026-10-08（用户反馈）节点双圈圆弧同心 =====
+   智能分组/工作流分组节点：外层节点描边 18px，内层 .smart-group-card 原为
+   15px 且只内缩 1px，四角弧度不平行、缝隙变宽。按同心规则改为 18-1=17px。 */
+html body .world .image-node.smart-group-node:not(.smart-group-member-node) .smart-group-card,
+html body .world .image-node.workflow-group-node .smart-group-card {
+    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
+}
+
+/* ===== V10-08 最终覆盖：生成动画 X 与媒体圆角由皮肤文件兜底 =====
+   本文件在 smart-canvas.css 之后加载，所以这里负责最终显示效果。 */
+html body .world {
+    --smart-unified-media-radius: 18px;
+    --smart-pending-media-radius: 18px;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel,
+html body .world .image-node.node-pending .generation-stop-x {
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    flex: 0 0 24px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(255, 255, 255, .18) !important;
+    background: rgba(255, 255, 255, .07) !important;
+    color: rgba(248, 250, 255, .78) !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    cursor: pointer !important;
+    transform: none !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel i,
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel svg,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel i,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel svg,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel i,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel svg,
+html body .world .image-node.node-pending .generation-stop-x i,
+html body .world .image-node.node-pending .generation-stop-x svg {
+    width: 13px !important;
+    height: 13px !important;
+    stroke-width: 2.35 !important;
+    display: block !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel:hover,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-cancel:hover,
+html body .world .image-node.node-pending:not(.pending-group-node) .smart-pending-thumb.pending-pill-style .pending-pill-cancel:hover,
+html body .world .image-node.node-pending .generation-stop-x:hover {
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, .30) !important;
+    background: rgba(255, 255, 255, .13) !important;
+    transform: none !important;
+}
+
+html body .world .image-node.node-pending > .node-body,
+html body .world .image-node.node-pending .generation-pending-wrap,
+html body .world .image-node.node-pending .generation-pending-wrap.pending-pill-style,
+html body .world .image-node.node-pending .generation-pending-wrap.pending-single-generation,
+html body .world .image-node.node-pending .smart-pending-thumb.pending-pill-style,
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb {
+    border-radius: var(--smart-pending-media-radius) !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--smart-pending-media-radius)) !important;
+    contain: paint !important;
+    backface-visibility: hidden !important;
+    transform: translateZ(0) !important;
+}
+
+html body .world .image-node.node-pending .generation-pending-wrap::before,
+html body .world .image-node.node-pending .generation-pending-wrap::after,
+html body .world .image-node.node-pending .generation-pending-wrap > .pending-minimal-glow,
+html body .world .image-node.node-pending .generation-pending-wrap .pending-ref-bg,
+html body .world .image-node.node-pending .smart-pending-thumb.pending-pill-style::before,
+html body .world .image-node.node-pending .smart-pending-thumb.pending-pill-style::after,
+html body .world .image-node.node-pending .smart-pending-thumb.pending-pill-style > .pending-minimal-glow,
+html body .world .image-node.node-pending .smart-pending-thumb.pending-pill-style .pending-ref-bg {
+    border-radius: inherit !important;
+    clip-path: inset(0 round var(--smart-pending-media-radius)) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap,
+html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media,
+html body .world .image-node.upload-entry-node .upload-preview-media,
+html body .world .thumb-item {
+    border-radius: var(--smart-unified-media-radius) !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--smart-unified-media-radius)) !important;
+    background: #101010 !important;
+    contain: paint !important;
+    backface-visibility: hidden !important;
+    transform: translateZ(0) !important;
+}
+
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > img.node-img,
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-video-card,
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-video-card video,
+html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.node-pending) .image-wrap > .media-video-card img[data-preview-kind="video"],
+html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media > img.smart-run-ref-img,
+html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media > video,
+html body .world .image-node.upload-entry-node .upload-preview-media > img,
+html body .world .image-node.upload-entry-node .upload-preview-media > video,
+html body .world .thumb-item > img,
+html body .world .thumb-item > .media-video-card,
+html body .world .thumb-item > .media-video-card video,
+html body .world .thumb-item > .media-video-card img[data-preview-kind="video"] {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    object-fit: cover !important;
+    object-position: center !important;
+    border-radius: var(--smart-unified-media-radius) !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--smart-unified-media-radius)) !important;
+    background: transparent !important;
+}
+
+/* ===== V10-08 多图生成预览：每个占位按单图动画放大，组框只做整齐承载 ===== */
+html body .world .image-node.pending-group-node > .node-body {
+    padding: 10px !important;
+    box-sizing: border-box !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid {
+    display: grid !important;
+    grid-template-columns: repeat(var(--pending-cols, 2), var(--pending-cell-w, 96px)) !important;
+    grid-auto-rows: var(--pending-cell-h, 96px) !important;
+    align-content: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    padding: var(--pending-pad, 16px) !important;
+    gap: var(--pending-gap, 12px) !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb {
+    width: var(--thumb-w, var(--pending-cell-w, 96px)) !important;
+    height: var(--thumb-h, var(--pending-cell-h, 96px)) !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    align-self: center !important;
+    justify-self: center !important;
+    border-radius: var(--smart-pending-media-radius) !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-box {
+    max-width: calc(100% - 16px) !important;
+    gap: 7px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-pill-label {
+    font-size: 13px !important;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, .72) !important;
+}
+
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb .pending-ratio-badge {
+    left: 10px !important;
+    bottom: 10px !important;
+}
+
+/* 已完成的多图生成组：自动收紧高度，图片区域保持清晰、规整、可直接查看。 */
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group {
+    min-height: 0 !important;
+    overflow: hidden !important;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)) !important;
+    border-radius: var(--gbz-node-inner-radius) !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid {
+    display: grid !important;
+    grid-template-columns: repeat(var(--thumb-cols, 2), var(--thumb-size, 96px)) !important;
+    grid-auto-rows: var(--thumb-size, 96px) !important;
+    width: max-content !important;
+    max-width: none !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    align-content: start !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    gap: 12px !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    border-radius: var(--smart-unified-media-radius) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .20) !important;
+}
+
+/* ===== V10-08 多媒体生成组：正方形格子 + 原比例 contain =====
+   生成结果的素材比例可能不同，但宫格本身保持规整正方形；
+   图片/视频只在格子内按原比例缩放，不拉伸、不裁切、不把组框撑偏。 */
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item {
+    width: var(--thumb-w, var(--thumb-size, 96px)) !important;
+    height: var(--thumb-h, var(--thumb-size, 96px)) !important;
+    aspect-ratio: 1 / 1 !important;
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #111111 !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > img,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > img,
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > .media-thumb,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > .media-thumb {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    background: #111111 !important;
+    border-radius: inherit !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb > .media-video-card,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb > .media-video-card,
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb video,
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb video,
+html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb img[data-preview-kind="video"],
+html body .world .image-node.smart-group-node .smart-group-card.generated-image-group .smart-group-thumb-grid > .thumb-item > .media-thumb.video-thumb img[data-preview-kind="video"] {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    background: #111111 !important;
+    border-radius: inherit !important;
+}
+
+/* ===== 2026-10-08（用户要求）：不要内框 —— 提示词 LLM 节点 =====
+   节点只保留外圈一圈边，内层文本/输出区的边框与底色一律去掉，
+   让它与节点体融为一体（不再是“框中框”）。 */
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-output-wrap .prompt-node-text,
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-output-wrap .prompt-node-llm-output {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-output-wrap .prompt-node-text:focus,
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-output-wrap .prompt-node-text:focus-within {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* ===== 2026-10-08（用户要求）：全部节点去掉内框，只留外圈一圈边 =====
+   空节点（Text/ComfyUI 等）的投放框、H3 空状态、基础提示词编辑区、
+   媒体节点的 wrap/媒体卡双层边，全部清成无边框；soft 底色一并透明，
+   内容与节点体融为一体。Loop 内部的功能按钮（分段/开关/运行）不是
+   内框，保留原样。 */
+html body .world .image-node .smart-run-empty-canvas,
+html body .world .image-node .smart-run-empty-state,
+html body .world .image-node .prompt-node-text,
+html body .world .image-node .prompt-node-llm-output,
+html body .world .image-node .prompt-node-output-wrap,
+html body .world .image-node .prompt-node-llm,
+html body .world .image-node .upload-entry-drop {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+html body .world .image-node .image-wrap,
+html body .world .image-node .image-wrap > .media-card,
+html body .world .image-node .image-wrap > .media-video-card,
+html body .world .image-node .image-wrap > img.node-img {
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+/* 编辑态兜底：清边后 focus 不再出现边框/光晕。 */
+html body .world .image-node .prompt-node-text:focus,
+html body .world .image-node .prompt-node-text:focus-within,
+html body .world .image-node .prompt-node-llm:focus,
+html body .world .image-node .smart-run-empty-canvas.node-drop:focus {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+}
+
+/* ===== 2026-10-08（用户反馈）：四个圆角没收到边 =====
+   根因：.node-body 是节点内的底层面（承载背景色），此前在皮肤层被改成
+   12/14/18px 等不一致的圆角、且相对节点内缩 1px，四角因此露出未收边的缝。
+   统一：node-body 铺满到节点边框内沿（零内缩），圆角与外框一致 18px，
+   由 overflow:hidden 裁切内容，四角即与外框平行贴合。 */
+html body .world .image-node > .node-body {
+    border-radius: var(--gbz-node-radius) !important;
+    margin: 0 !important;
+    inset: 0 !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.prompt-smart-node > .node-body > .prompt-node-card,
+html body .world .image-node.empty-node > .node-body > .smart-run-empty-state {
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* prompt 节点的 .node-body / .prompt-node-card 被主样式表硬编码成 12px，
+   与节点外框 18px 不平行 → 四角漏边。用同款选择器覆盖为 18px。 */
+html body .world .image-node.prompt-basic-smart-node:not(.smart-group-member-node) > .node-body,
+html body .world .image-node.prompt-llm-smart-node:not(.smart-group-member-node) > .node-body,
+html body .world .image-node.prompt-basic-smart-node:not(.smart-group-member-node) .prompt-node-card,
+html body .world .image-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-card {
+    border-radius: var(--gbz-node-radius) !important;
+    overflow: hidden !important;
+}
+
+/* empty 节点的 14px 内层圆角同步为外框 18px。 */
+html body .world .image-node.empty-node .node-body,
+html body .world .image-node.empty-node .node-inner,
+html body .world .image-node.empty-node .node-content,
+html body .world .image-node.empty-node .smart-run-empty-state {
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* 收口：主样式表另有一条更高特异度的 LLM 专属 node-body 规则（12px + overflow:visible），
+   这里用同款选择器覆盖。overflow 保持 visible 以免裁掉节点外部的端口/工具条。 */
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .node-body {
+    border-radius: var(--gbz-node-radius) !important;
+    overflow: visible !important;
+}
+
+/* ===== 2026-10-08（用户要求）：其他节点也跟 Text 的一样 =====
+   Loop 是最后一种仍带"框中框"外观的节点：12px 描边面板、虚线上游框、
+   10px 描边输入区。全部压平成 Text 的一体化表面（无边框、无底色），
+   只保留内容与功能控件（分段/开关/加号/运行等按钮不动）。 */
+html body .world .image-node.loop-smart-node .loop-smart-panel,
+html body .world .image-node.loop-smart-node .loop-smart-panel.prompt-panel,
+html body .world .image-node.loop-smart-node .loop-smart-upstream,
+html body .world .image-node.loop-smart-node .loop-smart-text {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* Loop 文本区悬停/聚焦不再出现描边与光晕。 */
+html body .world .image-node.loop-smart-node .loop-smart-text:hover,
+html body .world .image-node.loop-smart-node .loop-smart-text:focus {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* LLM 提示词卡圆角收口：主样式表 12170 行以 (0,6,2) 特异度把卡钉在 12px，
+   此前皮肤层 (0,5,2) 的 18px 压不过它。这里用同款选择器、靠皮肤层
+   更晚加载取胜，与外框 18px 平行。 */
+html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-card {
+    border-radius: var(--gbz-node-radius) !important;
+}
+
+/* ===== 2026-10-09（用户反馈）：去掉 LLM 节点重叠的字 =====
+   prompt 节点有两套标题同位叠加：.node-head > .node-title（z=2，显示
+   节点类型默认名 "Text"）与 .prompt-node-title-row > .prompt-node-title
+   （z=9，可编辑标题，用户改名后与前者不同步），两层文字互相穿插成乱码。
+   保留可编辑标题（双击改名的那层），隐藏外层静态标题；节点头右侧的
+   操作按钮（node-actions）不受影响。 */
+html body .world .image-node.prompt-smart-node > .node-head > .node-title {
+    display: none !important;
+}
+
+/* ===== 2026-10-09（用户要求）：分组宫格只有外圈四个角是弧度 =====
+   每张小图不再各自带圆角（四方平直相接），弧度只保留在整体宫格外框
+   的四个外角——由宫格容器统一裁剪呈现；内缝十字交叉处保持方角。
+   占位期宫格（.pending-generation-group-grid）结构独立，不受影响。 */
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid {
+    border-radius: var(--gbz-node-inner-radius) !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item {
+    border-radius: 0 !important;
+    clip-path: none !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > img,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb > .media-video-card {
+    border-radius: 0 !important;
+    clip-path: none !important;
+}
+
+/* ===== 2026-10-09（用户反馈）：宫格切分组必须无缝方角 =====
+   切分组（grid-split-layout，一张图切 N 块拼回原图）的格子上方全局
+   .thumb-item 的 18px 圆角会落在每块切图上——四角露出黑底，拼图接缝处
+   出现黑色十字弧缝（截图反馈）。这里以更高特异性恢复方角、清掉裁剪；
+   外圈四个角的弧度仍由节点外框裁剪呈现，与本轮"分组宫格外四角弧度"口径一致。 */
+html body .world .thumb-grid.grid-split-layout > .thumb-item {
+    border-radius: 0 !important;
+    clip-path: none !important;
+}
+
+html body .world .thumb-grid.grid-split-layout > .thumb-item > img,
+html body .world .thumb-grid.grid-split-layout > .thumb-item > .media-thumb,
+html body .world .thumb-grid.grid-split-layout > .thumb-item > .media-thumb > .media-video-card {
+    border-radius: 0 !important;
+    clip-path: none !important;
+}
+
+/* ===== 2026-10-09（用户要求）：智能分组每张图独立方框卡片 =====
+   按用户参照图样式：每张图一个独立方框——深色底 + 128 中性灰浅色点阵背景 +
+   灰色细描边，图片在卡片内居中留边；不再使用整幅贴边拼排的旧观感。
+   仅作用于智能分组的成片宫格（grid-split 切分宫格的无缝拼接不受影响）。 */
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid {
+    gap: 14px !important;
+    background: transparent !important;
+    padding: 6px !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item {
+    background-color: #0d0e12 !important;
+    background-image: radial-gradient(rgba(128, 128, 128, .42) 1px, transparent 1.4px) !important;
+    background-size: 13px 13px !important;
+    background-position: 0 0 !important;
+    border: 1px solid rgba(128, 128, 128, .5) !important;
+    border-radius: 12px !important;
+    padding: 10px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    clip-path: none !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > img,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb > .media-video-card {
+    border-radius: 8px !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    object-fit: contain !important;
+}
+
+/* ===== 2026-10-09（用户要求）：多图占位格回归原生 .loading-cell 骨架样式 =====
+   格子直接使用页面原生骨架（细描边+深渐变、纯空），尺寸按输出比例（短边280 盒），
+   无需额外覆盖样式；本段留作说明，原"描边空心"覆盖方案已撤。 */
+
+/* ===== 2026-10-09（用户要求）：多图占位格恢复按输出比例的行内尺寸 =====
+   上方"统一两格"改版把占位格设成 width:100%/height:auto（均分拉方），
+   这里在其后加载覆盖回 --thumb-w/--thumb-h（短边280 比例盒，JS 按输出比例计算）。 */
+html body .world .image-node.pending-group-node .pending-generation-group-grid > .smart-pending-thumb {
+    width: var(--thumb-w, 100%) !important;
+    height: var(--thumb-h, auto) !important;
+}
+
+/* ===== 2026-10-09（用户要求）：智能分组内每张图右上角独立删除按钮 =====
+   smart-canvas.css 16631 行的全局规则把 .thumb-item .mini-x.image-delete 整体隐藏
+   （V10-06 起所有缩略图右上角徽章一律不显示），导致分组里每张图删不掉单张。
+   这里以更高特异性恢复分组宫格格子的删除按钮：悬停格子浮现、离开隐藏，
+   点击只删这一张（JS 按 data-ref-node-id/data-ref-image-index 定位宿主节点与索引）。 */
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .mini-x.smart-group-thumb-delete {
+    display: inline-flex !important;
+    visibility: visible !important;
+    position: absolute !important;
+    right: 6px !important;
+    top: 6px !important;
+    left: auto !important;
+    width: 24px !important;
+    height: 24px !important;
+    z-index: 8 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    background: rgba(18, 18, 18, .82) !important;
+    color: #e2e2e2 !important;
+    border: 1px solid rgba(154, 154, 154, .3) !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .38) !important;
+    backdrop-filter: blur(8px) !important;
+    transition: opacity .14s ease, background .14s ease, color .14s ease, border-color .14s ease !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item:hover > .mini-x.smart-group-thumb-delete,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item.image-selected > .mini-x.smart-group-thumb-delete {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .mini-x.smart-group-thumb-delete:hover {
+    background: rgba(248, 113, 113, .26) !important;
+    color: #fecaca !important;
+    border-color: rgba(248, 113, 113, .42) !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .mini-x.smart-group-thumb-delete i,
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item > .mini-x.smart-group-thumb-delete svg {
+    width: 13px !important;
+    height: 13px !important;
+}
+
+/* 单图分组（.smart-group-single-thumb）同样给出删除入口 */
+html body .world .image-node.smart-group-node .smart-group-card .image-wrap.smart-group-single-thumb > .mini-x.smart-group-thumb-delete {
+    display: inline-flex !important;
+    visibility: visible !important;
+    position: absolute !important;
+    right: 6px !important;
+    top: 6px !important;
+    left: auto !important;
+    width: 24px !important;
+    height: 24px !important;
+    z-index: 8 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    background: rgba(18, 18, 18, .82) !important;
+    color: #e2e2e2 !important;
+    border: 1px solid rgba(154, 154, 154, .3) !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .38) !important;
+    backdrop-filter: blur(8px) !important;
+    transition: opacity .14s ease, background .14s ease, color .14s ease, border-color .14s ease !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .image-wrap.smart-group-single-thumb:hover > .mini-x.smart-group-thumb-delete {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card .image-wrap.smart-group-single-thumb > .mini-x.smart-group-thumb-delete:hover {
+    background: rgba(248, 113, 113, .26) !important;
+    color: #fecaca !important;
+    border-color: rgba(248, 113, 113, .42) !important;
+}
+
+/* 拖拽/缩放节点时与其他按钮一致地隐藏，避免误触 */
+html body .world .image-node.smart-group-node.dragging .smart-group-thumb-delete,
+body.smart-node-drag .image-node.smart-group-node .smart-group-thumb-delete,
+body.smart-node-resize .image-node.smart-group-node .smart-group-thumb-delete {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ===== 2026-10-10（用户要求：等待态 / 生成动画按 3000 版）=====
+   skin 里把 .loading-cell / .smart-pending-thumb 统一刷成了 #242424→#171717 的实心渐变，
+   这里对「生成等待」相关的骨架格做定点覆盖：恢复 3000 的灰骨架 shimmer（横向扫光带），
+   去掉深色底 / 光环 / 计时角标留下的痕迹。选择器权重高于上面的 html body .world .*. */
+html body .world .pending-3000-wrap .loading-cell,
+html body .world .pending-3000-wrap .smart-pending-thumb,
+html body .world .thumb-grid.append-pending-grid > .smart-pending-thumb {
+    background-image: linear-gradient(90deg, var(--soft) 0%, var(--line) 50%, var(--soft) 100%) !important;
+    background-size: 200% 100% !important;
+    background-repeat: repeat !important;
+    animation: shimmer 1.5s infinite linear !important;
+    border: 1px solid var(--gbz-node-line-soft) !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+}
+html body .world .pending-3000-wrap .smart-pending-thumb::before,
+html body .world .pending-3000-wrap .smart-pending-thumb::after,
+html body .world .thumb-grid.append-pending-grid > .smart-pending-thumb::before,
+html body .world .thumb-grid.append-pending-grid > .smart-pending-thumb::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* ===== 2026-10-10（用户要求：多图排列按 3000 版）=====
+   多图节点网格改为固定列数的 CSS Grid（3000 的 .thumb-grid 就是 grid + repeat(cols,…)），
+   列数严格等于布局给的 --thumb-cols；格子统一正方形占位框（179），框内图片按原始比例
+   contain 完整显示（3000 的 .thumb-item img = width/height auto + max 100% + contain）。 */
+html body .world .image-node .thumb-grid.thumb-grid-cols {
+    display: grid !important;
+    grid-template-columns: repeat(var(--thumb-cols, 2), max-content) !important;
+    grid-auto-rows: max-content !important;
+    flex-wrap: nowrap !important;
+    justify-content: center !important;
+    align-content: start !important;
+}
+/* 2026-10-10（用户要求：四周留白与 3000 统一）——
+   DH 的 .node-body 此前高度只包住内容（179px），格子贴顶、底部空 31px；
+   3000 是 body 满高 + 格子垂直居中（上下各 ~15px）。这里让含固定列宫格的 body
+   撑满节点内高并居中，四边留白 = (node内高 - 格子高)/2，与 3000 一致。
+   2026-10-12（用户要求：左右下三面边距改小、上面不变）：改为「上对齐 + 显式内边距」——
+   上 24px 不变，左右各 12px、下 12px（与布局层 MEDIA_GROUP_PAD_* 同源）。 */
+html body .world .image-node .node-body:has(> .thumb-grid.thumb-grid-cols) {
+    height: 100% !important;
+    min-height: 0 !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    padding: 24px 12px 12px !important;
+}
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item {
+    width: var(--thumb-w, var(--thumb-size, 179px)) !important;
+    height: var(--thumb-h, var(--thumb-w, var(--thumb-size, 179px))) !important;
+    grid-row: auto !important;
+    grid-column: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    border: 1px solid rgba(148, 163, 184, .38) !important;
+    border-radius: 12px !important;
+    background: var(--soft) !important;
+}
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > img,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > img,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > video,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > video,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > img[data-preview-kind="video"],
+/* 2026-10-11（用户要求：视频与图片同一显示逻辑）——宫格里的视频卡片也要 contain，
+   否则落进上面 .thumb-item > .media-video-card video 的 cover 规则，视频被裁切不按比例显示。 */
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-video-card,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-video-card video,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > .media-video-card,
+html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > .media-video-card video,
+/* 2026-10-10（用户要求：追加新图时老图框保持不变）混合追加网格同样是统一方格，
+   框内图片按原始比例完整显示（contain），与完成态宫格一致。 */
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > img,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb > img,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > video,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb > video,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb > img[data-preview-kind="video"],
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-video-card,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-video-card video,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb > .media-video-card,
+html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .media-thumb > .media-video-card video {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    background: var(--soft) !important;
+}
+
+/* ===== 2026-10-10（用户要求）生成等待：格内中心纯文字小字「生成中.....」 =====
+   骨架格本身由 @keyframes shimmer 做横向扫光（已在上一段恢复）；
+   这里只负责把文案居中叠在骨架上，不参与动画、不拦截鼠标。 */
+html body .world .pending-3000-wrap .pending-3000-label {
+    position: absolute !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    pointer-events: none !important;
+    z-index: 3 !important;
+}
+html body .world .smart-pending-thumb.pending-cell-3000 {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+html body .world .pending-3000-text {
+    display: inline-block !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    font-weight: 400 !important;
+    letter-spacing: .08em !important;
+    white-space: nowrap !important;
+    color: var(--gbz-node-text, rgba(229, 231, 235, .78)) !important;
+    opacity: .78 !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .55) !important;
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+/* ===== 2026-10-10（用户要求）生成的每张图：右上角鼠标悬停显示删除按钮 =====
+   smart-canvas.css 16631 行的全局规则把 .thumb-item .mini-x.image-delete 整体隐藏，
+   这里对多图宫格 / 追加网格做定点放开：默认透明不可点，hover（或选中）时淡入到右上角。 */
+html body .world .image-node .thumb-grid > .thumb-item > .mini-x.image-delete {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    top: 7px !important;
+    right: 7px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    border-radius: 9px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: rgba(16, 16, 16, .82) !important;
+    color: #d0d0d0 !important;
+    border: 1px solid rgba(154, 154, 154, .28) !important;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, .32) !important;
+    backdrop-filter: blur(10px);
+    z-index: 6 !important;
+    transition: opacity .14s ease, background .14s ease, color .14s ease, border-color .14s ease !important;
+}
+html body .world .image-node .thumb-grid > .thumb-item:hover > .mini-x.image-delete,
+html body .world .image-node .thumb-grid > .thumb-item.image-selected > .mini-x.image-delete {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+html body .world .image-node .thumb-grid > .thumb-item > .mini-x.image-delete:hover {
+    background: rgba(248, 113, 113, .26) !important;
+    color: #fecaca !important;
+    border-color: rgba(248, 113, 113, .42) !important;
+}
+html body .world .image-node .thumb-grid > .thumb-item > .mini-x.image-delete i,
+html body .world .image-node .thumb-grid > .thumb-item > .mini-x.image-delete svg {
+    display: block !important;
+    visibility: visible !important;
+    width: 14px !important;
+    height: 14px !important;
+    stroke-width: 2.4 !important;
+}
+/* 拖拽 / 缩放过程中不显示，避免误触 */
+html body .world .image-node.dragging .thumb-grid > .thumb-item > .mini-x.image-delete {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ===== 2026-10-11（用户要求：只显示图标，不要文字）=====
+   面板保持 3000 口径（height 30、padding 3 5、gap 4、圆角 12），
+   按钮改回纯图标方块：24×24、padding 0；名称走 title 悬停提示。
+   span 规则保留 display:none 兜底（防其他路径渲染出文字）。
+   ===== 2026-10-11 下午（用户要求：整体放大 1.5 倍，看得更清楚）=====
+   面板 30→45、按钮 24→36、图标 14→21、gap 4→6、圆角 12→18，
+   颜色触发按钮同步 36×36，避免多图组工具条上高低不齐。 */
+html body .world .image-node.image-node:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node.empty-node > .smart-node-floating-menu.compact-icon-menu,
+html body .world .image-node.image-node > .smart-node-floating-menu.compact-icon-menu {
+    height: 45px !important;
+    min-height: 45px !important;
+    max-height: 45px !important;
+    padding: 4px 8px !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    gap: 6px !important;
+    border-radius: 18px !important;
+    max-width: min(1200px, calc(100vw - 48px)) !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;
+    align-items: center !important;
+    align-content: center !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu::-webkit-scrollbar {
+    display: none !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    border-radius: 13px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 auto !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) i,
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) svg {
+    width: 21px !important;
+    height: 21px !important;
+    stroke-width: 2.2 !important;
+    flex: 0 0 auto !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) span {
+    display: none !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action):disabled {
+    opacity: .36 !important;
+    cursor: not-allowed !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    border-radius: 13px !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger i,
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger svg {
+    width: 21px !important;
+    height: 21px !important;
+}
+
+/* ===== 2026-10-11（用户要求：视频卡片按参考稿显示「AI生成」来源角标）=====
+   只加在「生成结果」的视频卡上（item.generatedResult === true），上传素材不显示。
+   位置与参考稿一致：媒体区左上角。 */
+html body .media-ai-badge {
+    position: absolute !important;
+    left: 8px !important;
+    top: 8px !important;
+    z-index: 9 !important;
+    height: 16px !important;
+    padding: 0 7px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 6px !important;
+    border: 1px solid rgba(255,255,255,.2) !important;
+    background: rgba(255,255,255,.16) !important;
+    color: rgba(255,255,255,.94) !important;
+    font-size: 9.5px !important;
+    font-weight: 650 !important;
+    line-height: 1 !important;
+    letter-spacing: .04em !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.36) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    white-space: nowrap !important;
+}
+html body .thumb-item .media-ai-badge {
+    left: 7px !important;
+    top: 7px !important;
+}
+/* 左上角同时有「AI生成」和悬停分辨率角标时，分辨率角标右移让位，避免压在一起。 */
+html body .thumb-item:has(.media-ai-badge) > .image-resolution-badge {
+    left: 60px !important;
+    top: 4px !important;
+}
+
+/* ===== 2026-10-12（用户要求：智能分组图像显示统一成普通 Group，不要点阵）=====
+   1303 行的 10-09「独立方框卡片」规则给智能分组格子加了灰色点阵背景 + 10px 内边距
+   （图片缩在格子中间、四周露点阵）。纯图片组（.pure-image-group-card，与普通多图
+   Group 同款宫格）不再要这套：格子 = 统一方格 + var(--soft) 实底 + 细描边，
+   图片撑满格高、超出裁切，与 .group-node 的 thumb-grid-cols 格子完全一致。 */
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid {
+    gap: 8px !important;
+    padding: 0 !important;
+    background: transparent !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid > .thumb-item {
+    background-color: var(--soft, #242424) !important;
+    background-image: none !important;
+    background-size: auto !important;
+    background-position: 0 0 !important;
+    border: 1px solid rgba(148, 163, 184, .38) !important;
+    /* 2026-10-12 修「角落残缺」：border-radius 与 clip-path 必须同源——此前 radius 硬编码 12px、
+       clip 用 var(--smart-unified-media-radius)=18px（skin 860 定义），18px 裁切把 12px 边框圆角
+       切掉一角。现在三层（格子/内层卡/媒体）全部统一用该变量，与普通 Group 格子完全一致。 */
+    border-radius: var(--smart-unified-media-radius, 18px) !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--smart-unified-media-radius, 18px)) !important;
+}
+
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid > .thumb-item > img,
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb > img,
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb,
+html body .world .image-node.smart-group-node .smart-group-card.pure-image-group-card .smart-group-thumb-grid > .thumb-item > .media-thumb > .media-video-card {
+    border-radius: var(--smart-unified-media-radius, 18px) !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+}
+
+/* ===== 2026-10-12（用户要求）单节点/组节点面板固定显示 + 统一 1.5 倍尺寸 =====
+   474 起的通用块把组菜单容器压成 32px、按钮 24px（特异度高于主 css 的 45/36 规则）。
+   这里在 skin 末尾用更高特异度收口：组菜单容器 45、按钮/颜色触发器 36、图标 21，
+   与单节点 compact 面板（1610 块）完全一致。常显逻辑由主 css 完成。 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu {
+    height: 45px !important;
+    min-height: 45px !important;
+    max-height: 45px !important;
+    padding: 4px 8px !important;
+    gap: 6px !important;
+    border-radius: 18px !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu > button,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    border-radius: 13px !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button i,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button svg,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu > button i,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu > button svg,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger i,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger svg {
+    width: 21px !important;
+    height: 21px !important;
+    stroke-width: 2.2 !important;
+}
+
+/* ===== 2026-10-12（用户要求）compact 图标工具条配色与智能分组菜单统一 =====
+   1607 块已把 compact-icon-menu 尺寸统一到 45/36/21，但容器仍是半透明 panel 底、
+   按钮灰字（var(--muted)），与智能分组菜单的暗底 rgba(52,52,52,.94) + 白边 +
+   浅色字悬停高亮不一致。这里把配色对齐（尺寸不动）。 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu {
+    background: rgba(52, 52, 52, .94) !important;
+    border: 1px solid rgba(255, 255, 255, .12) !important;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, .36) !important;
+    backdrop-filter: blur(8px) !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) {
+    background: transparent !important;
+    color: #e2e2e2 !important;
+    transform: none !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action):hover:not(:disabled) {
+    background: rgba(255, 255, 255, .14) !important;
+    color: #ffffff !important;
+    transform: none !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu > button:disabled {
+    opacity: .36 !important;
+    cursor: not-allowed !important;
+}
+/* 颜色触发按钮（多图组调色板）同口径：36 方块、暗底上的浅色字 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    border-radius: 13px !important;
+    color: #e2e2e2 !important;
+}
+
+/* ===== 2026-10-12（用户要求）Group/单图工具条与智能分组面板同大小、不忽大忽小 =====
+   主 css 17003 块（10-07）去掉了 compact-icon-menu 的 --canvas-inverse-scale 反向缩放
+   补偿，画布缩放时工具条随世界缩放忽大忽小；智能分组面板（smart-group-menu）走 755
+   通用规则（带补偿），屏幕尺寸恒定。这里给 compact-icon-menu 恢复同样的补偿：
+   屏幕上恒 45px 高、按钮恒 36px，与智能分组面板完全同口径；底部间距同步按屏幕像素恒定。 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu {
+    transform: translateX(-50%) scale(var(--canvas-inverse-scale, 1)) !important;
+    transform-origin: 50% 100% !important;
+    bottom: calc(100% + (32px * var(--canvas-inverse-scale, 1))) !important;
+}
+
+/* ===== 2026-10-12（用户要求）生成等待：右上角计时 + 中间「生成中…… N%」 =====
+   计时/百分比文本由 refreshRunTimerPills 的 1s ticker 刷新
+   （[data-pending-timer] / [data-pending-progress]）。 */
+html body .world .pending-3000-timer {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    z-index: 5 !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    font-weight: 600 !important;
+    letter-spacing: .04em !important;
+    color: rgba(255, 255, 255, .96) !important;
+    background: linear-gradient(135deg, rgba(122, 108, 240, .92) 0%, rgba(91, 63, 214, .92) 100%) !important;
+    border: 1px solid rgba(168, 156, 255, .45) !important;
+    border-radius: 999px !important;
+    padding: 3px 8px !important;
+    pointer-events: none !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .5) !important;
+    font-variant-numeric: tabular-nums !important;
+    white-space: nowrap !important;
+}
+html body .world .pending-3000-pct {
+    display: inline-block !important;
+    margin-left: 6px !important;
+    font-variant-numeric: tabular-nums !important;
+    color: var(--gbz-node-text, rgba(229, 231, 235, .9)) !important;
+    opacity: .95 !important;
+}
+/* 多图追加网格里的占位格要成为计时角的定位基准（flex 居中布局不受绝对定位影响） */
+html body .world .smart-pending-thumb.pending-cell-3000 {
+    position: relative !important;
+}
+
+/* ===== 2026-10-12（用户要求）宫格切分外框与智能分组同款 =====
+   10711 块把宫格切分拍平（透明/无边框/radius 0），且 node-body padding 0——
+   但布局层（imageLayout grid-split 分支）本就预留了与智能分组相同的边距
+   （水平合计 MEDIA_GROUP_PAD_X=24、垂直合计 PAD_Y=36=上24+下12）。
+   这里恢复与智能分组完全同源的外框：18px 圆角（--gbz-node-radius）、
+   1px 边框、#141414 不透明底 + 组色半透明层叠（同 15784 智能分组口径）；
+   node-body 内边距 = 上24 左右12 下12（与智能分组框边距一致）；
+   内层宫格同心圆角 = 18-1-12 = 5px。 */
+html body .world .image-node.image-node.group-node.grid-split-node,
+html body .world .image-node.image-node.grid-split-node {
+    background-color:#141414 !important;
+    background-image:linear-gradient(var(--image-group-bg, #202020), var(--image-group-bg, #202020)) !important;
+    border:1px solid var(--image-group-border, #363636) !important;
+    border-style:solid !important;
+    border-radius:var(--gbz-node-radius, 18px) !important;
+    box-shadow:none !important;
+    padding:0 !important;
+    overflow:visible !important;
+    backdrop-filter:none !important;
+}
+html body .world .image-node.image-node.group-node.grid-split-node > .node-body {
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+    border-radius:inherit !important;
+    padding:24px 12px 12px !important;
+    min-height:0 !important;
+    gap:0 !important;
+    overflow:visible !important;
+}
+html body .world .image-node.image-node.group-node.grid-split-node .thumb-grid.grid-split-layout {
+    border-radius:5px !important;
+    background:transparent !important;
+}
+html body .world .image-node.image-node.group-node.grid-split-node.selected {
+    border-color:var(--image-group-border, var(--strong)) !important;
+    border-radius:var(--gbz-node-radius, 18px) !important;
+    box-shadow:0 0 0 1px var(--image-group-border, var(--strong)), 0 14px 36px var(--shadow) !important;
+}

@@ -1,0 +1,208 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" data-studio-scale="off">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/assets/output/canvas-top-left-icon-v4-bw.png" type="image/png">
+    <title>GBZ Studio</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'dark';
+                if(theme === 'custom') {
+                    theme = 'dark';
+                    localStorage.setItem('studio_theme', 'dark');
+                    localStorage.setItem('canvas_theme', 'dark');
+                }
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V10-09.1790042522"></script>
+    <script src="/static/vendor/js/lucide.js?v=V10-09.1790042522"></script>
+    <script src="/static/js/theme.js?v=V10-09.1790042521"></script>
+    <script src="/static/js/touch-mouse.js?v=V10-09.1790042521"></script>
+    <script>
+        /* 2026-09-20 嵌入外壳(iframe)时标记，隐藏页内品牌头，避免与外壳左上角 logo 重叠成重影 */
+        try { if (window.self !== window.top) document.documentElement.classList.add('ws-embedded'); }
+        catch(e) { document.documentElement.classList.add('ws-embedded'); }
+    </script>
+    <script src="/static/js/i18n.js?v=V10-09.1790305929"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=V10-09.1791792517">
+    <link rel="stylesheet" href="/static/css/theme.css?v=V10-09.1790492361">
+</head>
+<body>
+    <div id="workspace" class="workspace">
+        <!-- LEFT: project sidebar -->
+        <aside id="sidebar" class="ws-sidebar">
+            <div class="ws-app-head">
+                <div class="ws-app-mark" aria-hidden="true">
+                    <svg class="ws-app-mark-svg" viewBox="0 0 68 68" width="26" height="26" focusable="false">
+                        <defs>
+                            <linearGradient id="wsMarkGrad" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0" stop-color="#34d399"/>
+                                <stop offset="0.55" stop-color="#10b981"/>
+                                <stop offset="1" stop-color="#059669"/>
+                            </linearGradient>
+                            <radialGradient id="wsMarkBg" cx="0.5" cy="0.42" r="0.75">
+                                <stop offset="0" stop-color="#181c2a"/>
+                                <stop offset="0.65" stop-color="#11141f"/>
+                                <stop offset="1" stop-color="#0b0d12"/>
+                            </radialGradient>
+                        </defs>
+                        <rect x="1" y="1" width="66" height="66" rx="15" fill="url(#wsMarkBg)" stroke="rgba(255,255,255,.92)" stroke-width="2"/>
+                        <path class="ws-mark-base" d="M 55.00,34.00 L 54.85,32.11 L 54.40,30.31 L 53.69,28.68 L 52.76,27.28 L 51.67,26.14 L 50.46,25.30 L 49.19,24.73 L 47.90,24.42 L 46.63,24.35 L 45.38,24.49 L 44.19,24.80 L 43.05,25.25 L 41.98,25.83 L 40.96,26.50 L 40.00,27.25 L 39.09,28.05 L 38.23,28.90 L 37.41,29.79 L 36.62,30.70 L 35.85,31.63 L 35.10,32.57 L 34.37,33.52 L 33.63,34.48 L 32.90,35.43 L 32.15,36.37 L 31.38,37.30 L 30.59,38.21 L 29.77,39.10 L 28.91,39.95 L 28.00,40.75 L 27.04,41.50 L 26.02,42.17 L 24.95,42.75 L 23.81,43.20 L 22.62,43.51 L 21.37,43.65 L 20.10,43.58 L 18.81,43.27 L 17.54,42.70 L 16.33,41.86 L 15.24,40.72 L 14.31,39.32 L 13.60,37.69 L 13.15,35.89 L 13.00,34.00 L 13.15,32.11 L 13.60,30.31 L 14.31,28.68 L 15.24,27.28 L 16.33,26.14 L 17.54,25.30 L 18.81,24.73 L 20.10,24.42 L 21.37,24.35 L 22.62,24.49 L 23.81,24.80 L 24.95,25.25 L 26.02,25.83 L 27.04,26.50 L 28.00,27.25 L 28.91,28.05 L 29.77,28.90 L 30.59,29.79 L 31.38,30.70 L 32.15,31.63 L 32.90,32.57 L 33.63,33.52 L 34.37,34.48 L 35.10,35.43 L 35.85,36.37 L 36.62,37.30 L 37.41,38.21 L 38.23,39.10 L 39.09,39.95 L 40.00,40.75 L 40.96,41.50 L 41.98,42.17 L 43.05,42.75 L 44.19,43.20 L 45.38,43.51 L 46.63,43.65 L 47.90,43.58 L 49.19,43.27 L 50.46,42.70 L 51.67,41.86 L 52.76,40.72 L 53.69,39.32 L 54.40,37.69 L 54.85,35.89 L 55.00,34.00 Z" fill="none" stroke="url(#wsMarkGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+                        <path class="ws-mark-flow" d="M 55.00,34.00 L 54.85,32.11 L 54.40,30.31 L 53.69,28.68 L 52.76,27.28 L 51.67,26.14 L 50.46,25.30 L 49.19,24.73 L 47.90,24.42 L 46.63,24.35 L 45.38,24.49 L 44.19,24.80 L 43.05,25.25 L 41.98,25.83 L 40.96,26.50 L 40.00,27.25 L 39.09,28.05 L 38.23,28.90 L 37.41,29.79 L 36.62,30.70 L 35.85,31.63 L 35.10,32.57 L 34.37,33.52 L 33.63,34.48 L 32.90,35.43 L 32.15,36.37 L 31.38,37.30 L 30.59,38.21 L 29.77,39.10 L 28.91,39.95 L 28.00,40.75 L 27.04,41.50 L 26.02,42.17 L 24.95,42.75 L 23.81,43.20 L 22.62,43.51 L 21.37,43.65 L 20.10,43.58 L 18.81,43.27 L 17.54,42.70 L 16.33,41.86 L 15.24,40.72 L 14.31,39.32 L 13.60,37.69 L 13.15,35.89 L 13.00,34.00 L 13.15,32.11 L 13.60,30.31 L 14.31,28.68 L 15.24,27.28 L 16.33,26.14 L 17.54,25.30 L 18.81,24.73 L 20.10,24.42 L 21.37,24.35 L 22.62,24.49 L 23.81,24.80 L 24.95,25.25 L 26.02,25.83 L 27.04,26.50 L 28.00,27.25 L 28.91,28.05 L 29.77,28.90 L 30.59,29.79 L 31.38,30.70 L 32.15,31.63 L 32.90,32.57 L 33.63,33.52 L 34.37,34.48 L 35.10,35.43 L 35.85,36.37 L 36.62,37.30 L 37.41,38.21 L 38.23,39.10 L 39.09,39.95 L 40.00,40.75 L 40.96,41.50 L 41.98,42.17 L 43.05,42.75 L 44.19,43.20 L 45.38,43.51 L 46.63,43.65 L 47.90,43.58 L 49.19,43.27 L 50.46,42.70 L 51.67,41.86 L 52.76,40.72 L 53.69,39.32 L 54.40,37.69 L 54.85,35.89 L 55.00,34.00 Z" fill="none" stroke="#cfd9ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+                    </svg>
+                </div>
+                <div class="ws-app-copy">
+                    <div class="ws-app-name">GBZ Canvas</div>
+                    <div class="ws-app-sub">智能无限画布</div>
+                </div>
+            </div>
+            <div class="ws-side-head">
+                <div class="ws-side-title">工作区</div>
+                <button id="newProjectBtn" class="ws-side-add" type="button" title="新建项目" aria-label="新建项目">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div id="newProjectRow" class="ws-newproj-row">
+                <input id="newProjectInput" class="ws-newproj-input" type="text" maxlength="60" placeholder="项目名称">
+                <button id="newProjectConfirm" class="ws-mini-btn primary" type="button" title="确定" aria-label="确定"><i data-lucide="check" class="w-3.5 h-3.5"></i></button>
+                <button id="newProjectCancel" class="ws-mini-btn" type="button" title="取消" aria-label="取消"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+            </div>
+            <div id="projectList" class="ws-project-list"></div>
+            <div class="ws-side-foot">
+                <button id="trashEntry" class="ws-trash-entry" type="button">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    <span class="ws-trash-label">回收站</span>
+                    <span id="trashBadge" class="ws-trash-badge">0</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- RIGHT: board -->
+        <main class="ws-main">
+            <div class="ws-topbar">
+                <div class="ws-topbar-left">
+                    <button id="canvasTopBackBtn" class="ws-top-back-btn" type="button" title="返回项目管理" aria-label="返回项目管理">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i><span>返回</span>
+                    </button>
+                    <div class="ws-board-kicker">
+                        <i data-lucide="orbit" class="w-3.5 h-3.5"></i>
+                        <span>GBZ Workspace</span>
+                    </div>
+                    <div class="ws-board-title-row">
+                        <div id="boardProjectName" class="ws-board-name">默认项目</div>
+                        <span id="boardCanvasCount" class="ws-board-count">0</span>
+                    </div>
+                </div>
+                <div class="ws-topbar-right">
+                    <button id="backProjectsBtn" class="ws-secondary-btn" type="button"><i data-lucide="arrow-left" class="w-4 h-4"></i><span>项目管理</span></button>
+                    <button id="overviewNewProjectBtn" class="ws-primary-btn" type="button"><i data-lucide="folder-plus" class="w-4 h-4"></i><span>新建项目</span></button>
+                    <button id="pasteCanvasBtn" class="ws-paste-btn" type="button" title="粘贴到此项目" style="display:none"><i data-lucide="clipboard-paste" class="w-4 h-4"></i><span>粘贴到此项目</span></button>
+                    <button id="boardResetView" class="ws-icon-btn" type="button" title="重置视图" aria-label="重置视图"><i data-lucide="locate-fixed" class="w-4 h-4"></i></button>
+                    <button id="boardRefresh" class="ws-icon-btn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                    <button id="newCanvasBtn" class="ws-primary-btn" type="button"><i data-lucide="sparkles" class="w-4 h-4"></i><span>新建画布</span></button>
+                </div>
+            </div>
+
+            <!-- Project overview: first layer before entering canvases -->
+            <section id="projectOverview" class="project-overview">
+                <div class="project-overview-inner">
+                    <div class="project-overview-head">
+                        <div>
+                            <div class="project-overview-kicker">PROJECTS</div>
+                            <h1>项目管理</h1>
+                            <p>先按项目组织画布，再进入项目继续创作和管理素材。</p>
+                        </div>
+                        <button id="projectOverviewCreateBtn" class="project-overview-create" type="button">
+                            <i data-lucide="folder-plus" class="w-4 h-4"></i>
+                            <span>新建项目</span>
+                        </button>
+                    </div>
+                    <div id="projectOverviewGrid" class="project-overview-grid"></div>
+                </div>
+            </section>
+
+            <!-- Board (pan/zoom) -->
+            <div id="board" class="ws-board">
+                <div id="boardWorld" class="ws-board-world"></div>
+                <div id="boardEmptyHint" class="ws-board-empty">
+                    <div class="gbz-studio-title">GBZ STUDIO</div>
+                    <div class="gbz-studio-sub"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>双击画布新建项目</span></div>
+                    <div class="ws-board-empty-actions gbz-action-row">
+                        <button id="emptyCreateCanvasBtn" class="gbz-action-card" type="button"><i data-lucide="book-open" class="w-4 h-4"></i><span>故事脚本生成</span></button>
+                        <button class="gbz-action-card" type="button"><i data-lucide="rotate-3d" class="w-4 h-4"></i><span>角色三视图</span></button>
+                        <button class="gbz-action-card" type="button"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>图生视频</span></button>
+                        <button class="gbz-action-card" type="button"><i data-lucide="sparkles" class="w-4 h-4"></i><span>打开模板库</span></button>
+                    </div>
+                </div>
+                <div class="gbz-bottom-controls" aria-label="视图控制">
+                    <button id="boardZoomOut" type="button" title="缩小画布" aria-label="缩小画布"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
+                    <button id="boardMapToggle" type="button" title="节点地图" aria-label="节点地图"><i data-lucide="map" class="w-4 h-4"></i></button>
+                    <button id="boardFitView" type="button" title="适配全部节点" aria-label="适配全部节点"><i data-lucide="scan" class="w-4 h-4"></i></button>
+                    <input id="boardZoomRange" class="gbz-zoom-range" type="range" min="30" max="200" step="5" value="100" aria-label="缩放画布">
+                    <button id="boardZoomIn" type="button" title="放大画布" aria-label="放大画布"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
+                </div>
+                <button id="boardHelp" class="gbz-help" type="button" title="画布操作提示" aria-label="画布操作提示"><i data-lucide="circle-help" class="w-4 h-4"></i></button>
+                <div id="boardMinimap" class="gbz-minimap" aria-label="节点地图"></div>
+            </div>
+
+            <!-- Trash panel (overlay over the board area) -->
+            <div id="trashPanel" class="ws-trash-panel">
+                <div class="ws-trash-head">
+                    <div class="ws-trash-head-title"><i data-lucide="trash-2" class="w-4 h-4"></i><span>回收站</span></div>
+                    <div class="ws-trash-head-actions">
+                        <span id="trashBulkCount" class="ws-trash-count">回收站为空</span>
+                        <button id="trashEditToggle" class="ws-trash-tool" type="button"><i data-lucide="check-square" class="w-4 h-4"></i><span>管理编辑</span></button>
+                        <button id="trashSelectAll" class="ws-trash-tool" type="button" disabled><i data-lucide="list-checks" class="w-4 h-4"></i><span>全选</span></button>
+                        <button id="trashDeleteSelected" class="ws-trash-tool danger" type="button" disabled><i data-lucide="trash-2" class="w-4 h-4"></i><span>删除选中</span></button>
+                        <button id="trashClearAll" class="ws-trash-tool danger" type="button" disabled><i data-lucide="eraser" class="w-4 h-4"></i><span>一键清空</span></button>
+                        <button id="trashClose" class="ws-icon-btn" type="button" title="关闭" aria-label="关闭"><i data-lucide="x" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+                <div class="ws-trash-note"><i data-lucide="info" class="w-3.5 h-3.5"></i><span>回收站中的画布会在 30 天后自动清理。</span></div>
+                <div id="trashList" class="ws-trash-list"></div>
+            </div>
+
+            <section id="workflowNavPanel" class="workflow-nav-panel" aria-label="工作流导航">
+                <div class="workflow-nav-dialog">
+                    <div class="workflow-nav-head">
+                        <div class="workflow-nav-tabs">
+                            <button type="button" data-workflow-nav-tab="community">工作流社区</button>
+                            <button class="active" type="button" data-workflow-nav-tab="mine">我的工作流</button>
+                        </div>
+                        <div class="workflow-nav-search">
+                            <input id="workflowNavSearch" type="search" placeholder="搜索工作流">
+                            <i data-lucide="search"></i>
+                        </div>
+                        <button id="workflowNavClose" class="workflow-nav-close" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+                    </div>
+                    <div class="workflow-nav-cats">
+                        <button class="active" type="button" data-workflow-nav-category="all">全部</button>
+                        <button type="button" data-workflow-nav-category="recommended">推荐</button>
+                        <button type="button" data-workflow-nav-category="brand">品牌</button>
+                        <button type="button" data-workflow-nav-category="ecommerce">电商</button>
+                        <button type="button" data-workflow-nav-category="film">影视</button>
+                        <button type="button" data-workflow-nav-category="photo">摄影</button>
+                        <button type="button" data-workflow-nav-category="design">设计</button>
+                        <button type="button" data-workflow-nav-category="car">汽车</button>
+                        <button type="button" data-workflow-nav-category="acg">ACG</button>
+                        <button type="button" data-workflow-nav-category="cosplay">COSPLAY</button>
+                        <button type="button" data-workflow-nav-category="other">其他</button>
+                    </div>
+                    <div id="workflowNavGrid" class="workflow-nav-grid"></div>
+                </div>
+            </section>
+
+            <div id="boardStatus" class="ws-status"></div>
+        </main>
+    </div>
+    <script src="/static/js/canvas-list.js?v=V10-09.1791543419"></script>
+</body>
+</html>
+
