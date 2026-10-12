@@ -1,0 +1,62 @@
+{
+  "title": "F2K图像编辑",
+  "fields": [
+    {
+      "id": "f_xguf0if",
+      "node": "1412",
+      "input": "image",
+      "name": "图片",
+      "type": "image",
+      "default": "badd32c5204249a57f2fe260e1558359.jpg",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_6oe2tqw",
+      "node": "1415",
+      "input": "scale_to_length",
+      "name": "scale_to_length",
+      "type": "number",
+      "default": 1500,
+      "min": 0.0,
+      "max": 4000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_yay4xfv",
+      "node": "1418",
+      "input": "text",
+      "name": "提示词文本",
+      "type": "text",
+      "default": "变成男孩",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {
+    "prompt": {
+      "x": 24,
+      "y": 30
+    },
+    "image": {
+      "x": 24,
+      "y": 210
+    },
+    "custom": {
+      "x": 280,
+      "y": 78
+    },
+    "output": {
+      "x": 540,
+      "y": 120
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "title": "seedvr放大",
+  "fields": [
+    {
+      "id": "f_3u4jih9",
+      "node": "81",
+      "input": "image",
+      "name": "图片",
+      "type": "image",
+      "default": "b3d0b240a28b0a2befbf276e50309847.jpg",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false,
+      "enabled": null,
+      "no_prompt": null,
+      "canvas_only": null
+    },
+    {
+      "id": "f_3igzhz8",
+      "node": "41",
+      "input": "resolution",
+      "name": "分辨率",
+      "type": "number",
+      "default": 2000,
+      "min": 0.0,
+      "max": 2500.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false,
+      "enabled": null,
+      "no_prompt": null,
+      "canvas_only": null
+    }
+  ],
+  "mini_cards": {
+    "prompt": {
+      "x": 24,
+      "y": 30
+    },
+    "image": {
+      "x": 24,
+      "y": 210
+    },
+    "custom": {
+      "x": 280,
+      "y": 78
+    },
+    "output": {
+      "x": 540,
+      "y": 120
+    }
+  }
+}

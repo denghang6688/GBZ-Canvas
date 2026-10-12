@@ -1,0 +1,195 @@
+{
+  "1412": {
+    "inputs": {
+      "image": "badd32c5204249a57f2fe260e1558359.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "1413": {
+    "inputs": {
+      "clip_name": "9B\\qwen_3_8b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "1414": {
+    "inputs": {
+      "unet_name": "flux-2-klein\\Flux2-Klein-9B-True-v2-fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "1415": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "letterbox",
+      "method": "lanczos",
+      "round_to_multiple": "None",
+      "scale_to_side": "None",
+      "scale_to_length": 2000,
+      "background_color": "#000000",
+      "image": [
+        "1412",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "图层工具：按宽高比缩放 V2"
+    }
+  },
+  "1416": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "1417": {
+    "inputs": {
+      "text": "低质量，模糊，人物表情动作发生变化，除人以外的其他物品，曝光过高",
+      "clip": [
+        "1413",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1418": {
+    "inputs": {
+      "text": "变成男孩",
+      "clip": [
+        "1413",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1419": {
+    "inputs": {
+      "pixels": [
+        "1415",
+        0
+      ],
+      "vae": [
+        "1416",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "1420": {
+    "inputs": {
+      "conditioning": [
+        "1418",
+        0
+      ],
+      "latent": [
+        "1419",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1421": {
+    "inputs": {
+      "conditioning": [
+        "1417",
+        0
+      ],
+      "latent": [
+        "1419",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "1422": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1424",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "1423": {
+    "inputs": {
+      "seed": 127706989261130,
+      "steps": 5,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "1414",
+        0
+      ],
+      "positive": [
+        "1420",
+        0
+      ],
+      "negative": [
+        "1421",
+        0
+      ],
+      "latent_image": [
+        "1419",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "1424": {
+    "inputs": {
+      "samples": [
+        "1423",
+        0
+      ],
+      "vae": [
+        "1416",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  }
+}

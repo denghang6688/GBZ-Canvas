@@ -1,0 +1,167 @@
+{
+  "1002": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1386",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "1006": {
+    "inputs": {
+      "text": "低质量，模糊，人物表情动作发生变化，除人以外的其他物品，曝光过高",
+      "clip": [
+        "1380",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1007": {
+    "inputs": {
+      "image": "ai_ref_aad4154de096.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "1010": {
+    "inputs": {
+      "seed": 727264475644662,
+      "steps": 5,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.6,
+      "model": [
+        "1379",
+        0
+      ],
+      "positive": [
+        "1382",
+        0
+      ],
+      "negative": [
+        "1006",
+        0
+      ],
+      "latent_image": [
+        "1383",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "1379": {
+    "inputs": {
+      "unet_name": "flux-2-klein\\Flux2-Klein-9B-True-v2-fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "1380": {
+    "inputs": {
+      "clip_name": "9B\\qwen_3_8b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "1381": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "1382": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "1380",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1383": {
+    "inputs": {
+      "pixels": [
+        "1388",
+        0
+      ],
+      "vae": [
+        "1381",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "1386": {
+    "inputs": {
+      "samples": [
+        "1010",
+        0
+      ],
+      "vae": [
+        "1381",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "1388": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "letterbox",
+      "method": "lanczos",
+      "round_to_multiple": "None",
+      "scale_to_side": "longest",
+      "scale_to_length": 1200,
+      "background_color": "#000000",
+      "image": [
+        "1007",
+        0
+      ],
+      "mask": [
+        "1007",
+        1
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "图层工具：按宽高比缩放 V2"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "title": "custom/F2K-图像融图",
+  "fields": [
+    {
+      "id": "f_f5alww8",
+      "node": "31",
+      "input": "image",
+      "name": "图片",
+      "type": "image",
+      "default": "pasted/image (26).png",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_0xyq02o",
+      "node": "24",
+      "input": "strength_model",
+      "name": "模型强度",
+      "type": "slider",
+      "default": 0.26,
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_4l8sk4z",
+      "node": "21",
+      "input": "text",
+      "name": "提示词文本",
+      "type": "textarea",
+      "default": "Blend the object into the image seamlessly",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_20ma89d",
+      "node": "27",
+      "input": "value",
+      "name": "数值",
+      "type": "number",
+      "default": 1500,
+      "min": 0.0,
+      "max": 4000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {
+    "prompt": {
+      "x": 24,
+      "y": 30
+    },
+    "image": {
+      "x": 24,
+      "y": 210
+    },
+    "custom": {
+      "x": 280,
+      "y": 78
+    },
+    "output": {
+      "x": 540,
+      "y": 120
+    }
+  }
+}

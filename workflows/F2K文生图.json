@@ -1,0 +1,131 @@
+{
+  "1434": {
+    "inputs": {
+      "clip_name": "9B\\qwen_3_8b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "1435": {
+    "inputs": {
+      "unet_name": "flux-2-klein\\Flux2-Klein-9B-True-v2-fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "1436": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "1437": {
+    "inputs": {
+      "text": "低质量，模糊，人物表情动作发生变化，除人以外的其他物品，曝光过高",
+      "clip": [
+        "1434",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1438": {
+    "inputs": {
+      "text": "一个欧美女孩\n",
+      "clip": [
+        "1434",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "1439": {
+    "inputs": {
+      "seed": 1112066001381520,
+      "steps": 4,
+      "cfg": 1.2,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "1435",
+        0
+      ],
+      "positive": [
+        "1438",
+        0
+      ],
+      "negative": [
+        "1437",
+        0
+      ],
+      "latent_image": [
+        "1441",
+        4
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "1440": {
+    "inputs": {
+      "samples": [
+        "1439",
+        0
+      ],
+      "vae": [
+        "1436",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "1441": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "upscale_factor": 1,
+      "batch_size": 1
+    },
+    "class_type": "CR SDXL Aspect Ratio",
+    "_meta": {
+      "title": "SDXL宽高比v2"
+    }
+  },
+  "1442": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1440",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  }
+}

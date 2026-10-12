@@ -1,0 +1,127 @@
+{
+  "title": "custom/FLUX2扩图",
+  "fields": [
+    {
+      "id": "f_qvx7l2j",
+      "node": "1387",
+      "input": "value",
+      "name": "图像最长边范围",
+      "type": "number",
+      "default": 2048,
+      "min": 0.0,
+      "max": 4096.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_a7d16lv",
+      "node": "1379",
+      "input": "left",
+      "name": "左边",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "max": 2000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_jhu30hf",
+      "node": "1379",
+      "input": "top",
+      "name": "顶部",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "max": 2000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_5wp73pw",
+      "node": "1379",
+      "input": "right",
+      "name": "右边",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "max": 2000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_swjgtnm",
+      "node": "1379",
+      "input": "bottom",
+      "name": "下面",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "max": 2000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_u3lyvcg",
+      "node": "1379",
+      "input": "feathering",
+      "name": "羽化",
+      "type": "number",
+      "default": 10,
+      "min": 0.0,
+      "max": 20.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_53nq301",
+      "node": "1378",
+      "input": "image",
+      "name": "图片",
+      "type": "image",
+      "default": "ComfyUI_temp_alaco_00001_.png",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_aivkypm",
+      "node": "1120",
+      "input": "text",
+      "name": "提示词文本",
+      "type": "textarea",
+      "default": "移除蓝色区域，背景扩图。",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {
+    "prompt": {
+      "x": 24,
+      "y": 30
+    },
+    "image": {
+      "x": 24,
+      "y": 210
+    },
+    "custom": {
+      "x": 280,
+      "y": 78
+    },
+    "output": {
+      "x": 540,
+      "y": 120
+    }
+  }
+}

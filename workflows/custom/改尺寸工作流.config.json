@@ -1,0 +1,49 @@
+{
+  "title": "custom/改尺寸工作流",
+  "fields": [
+    {
+      "id": "f_wz2fv5f",
+      "node": "11",
+      "input": "image",
+      "name": "图片",
+      "type": "image",
+      "default": "pasted/image (114).png",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false
+    },
+    {
+      "id": "f_we2orc4",
+      "node": "14",
+      "input": "value",
+      "name": "数值",
+      "type": "number",
+      "default": 1500,
+      "min": 0.0,
+      "max": 3000.0,
+      "step": 1.0,
+      "options": [],
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {
+    "prompt": {
+      "x": 24,
+      "y": 30
+    },
+    "image": {
+      "x": 24,
+      "y": 210
+    },
+    "custom": {
+      "x": 280,
+      "y": 78
+    },
+    "output": {
+      "x": 540,
+      "y": 120
+    }
+  }
+}
