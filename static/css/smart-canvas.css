@@ -12717,8 +12717,8 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
     pointer-events: none !important;
 }
 
-/* ===== 2026-09-26 作者与开源信息坞（版本按钮下方） =====
-   对齐参考画布左下角品牌区：作者标（DH 图标）+ GitHub 开源地址 + 魔搭平台链接，
+/* ===== 2026-09-26 作者与项目信息坞（版本按钮下方） =====
+   对齐参考画布左下角品牌区：作者标（DH 图标）+ GitHub 项目地址 + 魔搭平台链接，
    链接统一指向作者本人仓库（denghang6688/GBZ-Canvas）。 */
 .smart-brand-dock {
     position: absolute;
@@ -12816,8 +12816,8 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
     box-shadow: none !important;
 }
 
-/* ===== 2026-09-26 品牌区重排：开源链接 → 版本号 → DH =====
-   用户要求顺序（自上而下）：开源地址（GitHub/魔搭）紧随设置按钮之下，
+/* ===== 2026-09-26 品牌区重排：项目链接 → 版本号 → DH =====
+   用户要求顺序（自上而下）：项目地址（GitHub/魔搭）紧随设置按钮之下，
    然后版本号，最后 DH 作者标。链接坞放版本按钮上方，原 dock 只留 DH。 */
 .smart-brand-dock.smart-brand-links {
     top: calc(50% + 72px);
@@ -12858,7 +12858,7 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
    对齐 wuli大雄 画布（192.168.10.5:3000）的 author-box 机制：
    平时只显示 D/H 两个朴素字母（无任何底框）+ 版本号小按钮；
    鼠标悬停品牌坞时，D/H 字母向两侧滑出淡出，展开显示
-   「DH」作者名 + GitHub 开源图标 + 魔搭 M 图标。 */
+   「DH」作者名 + GitHub 图标 + 魔搭 M 图标。 */
 .smart-brand-dock {
     top: calc(50% + 60px) !important;
     background: transparent !important;
