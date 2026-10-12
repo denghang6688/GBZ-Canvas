@@ -2810,7 +2810,7 @@
 <!-- 主题切换按钮已移除 -->
 <!-- 2026-09-20 发布功能已取消：侧栏“发布版本”按钮已移除 -->
 <!-- 2026-09-26 品牌署名（定稿：GitHub 常驻按钮在上，DH 字母悬停只展开 小红书/抖音 备用链接；版本号最下） -->
-                <a class="github-standalone-btn" role="link" tabindex="0" data-url="https://www.modelscope.cn/studios/hans186/GBZ-Canvas" onclick="window.open(this.dataset.url, '_blank', 'noopener,noreferrer')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" aria-label="项目地址" title="项目地址">
+                <a class="github-standalone-btn" role="link" tabindex="0" data-url="https://github.com/denghang6688/GBZ-Canvas" onclick="window.open(this.dataset.url, '_blank', 'noopener,noreferrer')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" aria-label="项目地址" title="项目地址">
                     <svg fill="currentColor" viewBox="0 0 16 16" aria-hidden="true" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
                 </a>
                 <div class="author-box" aria-label="作者与项目信息">
@@ -2917,7 +2917,7 @@
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
             <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
             <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V10-09.1791543961" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V10-09.1791809497" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V10-09.1791810845" class="active" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3028,7 +3028,7 @@
         const DEFAULT_PAGE_ID = 'canvas';
         const PAGE_IDS = ['zimage','enhance','klein','angle','canvas','asset-manager','settings','api-settings','comfyui-settings','language-settings'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
-        const PROJECT_URL = 'https://www.modelscope.cn/studios/hans186/GBZ-Canvas';
+        const PROJECT_URL = 'https://github.com/denghang6688/GBZ-Canvas';
         const MODELSCOPE_URL = 'https://www.modelscope.cn/studios/hans186/GBZ-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, modelscope_repo_url:MODELSCOPE_URL, sources:{ modelscope:{ configured:true }, github:{ configured:true } } };
         let updateConnectivityResult = null;
@@ -3511,7 +3511,7 @@
         });
 
         function openProjectPage() {
-            window.open(appInfo.repo_url || PROJECT_URL, '_blank', 'noopener');
+            window.open(appInfo.sources?.github?.repo_url || appInfo.repo_url || PROJECT_URL, '_blank', 'noopener');
         }
 
         function versionParts(value) {
