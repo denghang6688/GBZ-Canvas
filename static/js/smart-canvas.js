@@ -14462,9 +14462,16 @@ function smartNodeHasLiveMedia(node){
     // 2026-09-27 修复视频节点闪烁：生成节点的参考素材在 manualInputRefs（node.images 为空），
     // 之前这里只看 images → 参考视频节点每次 render 都被整卡重建，<video> 重新加载导致一闪一闪。
     // 现在把 manualInputRefs 也算作"有活媒体"，让节点走复用+移植路径。
-    if(node?.pending) return false;
-    if((node?.images || []).some(img => img?.url)) return true;
-    return (node?.manualInputRefs || []).some(img => img?.url);
+    // 2026-10-13 修复二次闪烁：之前 pending 节点一律 return false —— 在**已有视频的节点上
+    // 重新生成**时（追加重跑），整个生成期间进度轮询每 ~900ms 触发一次 render()，节点每次
+    // 都整卡重建，已落地的 <video> 被反复销毁重建重载 → 画面一闪一闪。现在只要有已落地媒体
+    // （images/manualInputRefs），即使 pending 也走复用+移植路径；真正全重建的只有「pending
+    // 且无任何媒体」的纯等待节点（占位动画本来就在新 HTML 里，不受影响）。
+    if(!node) return false;
+    const hasMedia = (node?.images || []).some(img => img?.url)
+        || (node?.manualInputRefs || []).some(img => img?.url);
+    if(node?.pending && !hasMedia) return false;
+    return hasMedia;
 }
 function mediaSignaturePartFromElement(itemEl){
     if(itemEl?.dataset?.mediaSignature) return itemEl.dataset.mediaSignature;
@@ -31186,7 +31193,15 @@ async function runComfyGeneration(node, prompt, refs, pendingNode, meta, runInfo
     // 非 H3 的 ComfyUI 视频工作流同样只留视频，避免同一个 .txt 噪声再出现一次。
     const videoMediaOnly = stripTextArtifactsFromVideoMedia(urls);
     if(videoMediaOnly) urls = videoMediaOnly;
-    if(!urls.length) throw new Error(tr('smart.errComfyNoImages'));
+    if(!urls.length){
+        // 2026-10-13：H3「成功但无媒体」给出可行动的提示，不再只说「没有返回图片」。
+        // 该形态 = ComfyUI 任务跑完但只有提示词回显、没有视频输出，常见于参考生视频
+        // 未接图片素材 / H3 服务额度不足 / 服务端未保存输出文件。
+        const emptyHint = isH3Workflow
+            ? '（H3 已执行但未产出视频：请确认参考图片素材已接到节点、H3 服务可用且额度充足；可在 ComfyUI 端日志核实该次任务输出）'
+            : '';
+        throw new Error(tr('smart.errComfyNoImages') + emptyHint);
+    }
     const kind = mediaKindForUrls(urls, firstResult.videos?.length ? 'video' : firstResult.audios?.length ? 'audio' : firstResult.texts?.length ? 'text' : 'image');
     const ext = kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png';
     // 2026-10-11：resultMediaUrls 现在可能返回对象产物（带后端文件名/kind/尺寸），
