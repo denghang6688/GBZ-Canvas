@@ -1,0 +1,23 @@
+services:
+  gbz-canvas:
+    build: .
+    image: gbz-canvas:latest
+    container_name: gbz-canvas
+    restart: unless-stopped
+    ports:
+      - "${GBZ_PORT:-2000}:2000"
+    volumes:
+      # 用户数据 / 状态挂到宿主机，重启 / 升级容器都不丢
+      - ./data:/app/data
+      - ./assets:/app/assets
+      - ./workflows:/app/workflows
+      # 可选：把宿主机已有的 .env 挂进容器（推荐用 docker secret 或主机 .env 文件）
+      - ./API/.env:/app/API/.env:ro
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:2000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
