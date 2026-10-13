@@ -8745,9 +8745,16 @@ function aspectBoxSize(aspect, shortEdge=EMPTY_UPLOAD_NODE_WIDTH){
 // videoAspect，于是在面板里选了比例、外框却始终停在默认的 16:9。这里让 H3 以 f_h3_ratio 为准。
 function h3AspectRatioFor(runSettings){
     if(!isMinimaxH3RunSettings(runSettings)) return 0;
+    // 2026-10-13（用户反馈：H3 生视频占位框是参考图的竖版、成片却是 16:9）——
+    // 实际发给 FeiHouEasyH3 的是 applyMinimaxH3WorkflowValues 里的
+    // h3AspectForWorkflow(pick('f_h3_ratio', videoAspect || 'adaptive'))；这里必须算同一个值。
+    // 以前 f_h3_ratio 没动过下拉时这里直接 return 0，占位框失去比例锚点，
+    // 一路兜底到参考图/源节点的竖版框，成片（16:9）一出就「框对不上片」。
     const raw = runSettings?.comfyParams?.['f_h3_ratio'];
-    if(raw === undefined || raw === null || raw === '') return 0;
-    return parseRatioValue(raw) || parseRatioValue(h3AspectForWorkflow(raw)) || 0;
+    const effective = (raw === undefined || raw === null || raw === '')
+        ? (runSettings?.videoAspect || 'adaptive')
+        : raw;
+    return parseRatioValue(effective) || parseRatioValue(h3AspectForWorkflow(effective)) || 0;
 }
 function genNodeRatioAspect(node){
     // 2026-09-27 节点上有参考资源（视频/图片）且已知真实分辨率时，外框比例直接跟资源走，
@@ -26137,7 +26144,11 @@ function pendingBaseBoxSize(options={}){
     // 当前这次生图请求的比例优先于节点上一次任务留下的缓存尺寸。
     // 否则切换 16:9、3:4 等比例后，生成中的预览仍会沿用旧方框。
     const requestSize = explicitRequestOutputSizeForPending(options);
-    if(requestSize && smartImageLocksRequestRatio(options.settings || settings)){
+    // 2026-10-13（用户反馈：H3 生视频占位框跟了参考图的竖版、成片却是 16:9）——
+    // H3 的成片比例由 f_h3_ratio 决定、与参考图无关，占位框必须锁在 requestSize 上，
+    // 不能落到下面 pendingSourceBoxSize 拿参考图/源节点的竖版框。
+    const h3LocksRequestRatio = h3AspectRatioFor(options.settings || settings) > 0;
+    if(requestSize && (smartImageLocksRequestRatio(options.settings || settings) || h3LocksRequestRatio)){
         if(requestSize.displayReady) return {w:Math.max(40, Math.round(requestSize.w)), h:Math.max(40, Math.round(requestSize.h))};
         return options.cellMode ? displayBoxFromNaturalSize(requestSize) : pendingDisplayBoxFromRequestSize(requestSize);
     }
