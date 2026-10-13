@@ -16943,10 +16943,12 @@ function pendingThumbHtml(node, item, index=0, edge=96){
     // 追加模式仍是默认（且唯一）落点模式：已有结果保留在原位，占位格追加在其后。
     // 2026-10-10（用户要求）：格内中心加纯文字小字「生成中.....」（配合 shimmer 扫光动画）。
     // 2026-10-12（用户要求）：每格右上角计时 + 中间「生成中…… N%」（同 1s ticker 刷新）。
+    // 2026-10-13（用户要求）：计时挪到左上角（CSS .pending-3000-timer），右上角放取消生成按钮。
     const size = Math.max(8, Math.round(Number(edge) || 96));
     const cellStartedAt = Number(item?.startedAt || node?.runStartedAt || 0) || nowMs();
     const cellPct = node ? `<span class="pending-3000-pct" data-pending-progress="${escapeAttr(node.id)}">${generationProgressView(node).percent}%</span>` : '';
-    return `<div class="smart-pending-thumb loading-cell pending-cell-3000" data-pending-thumb="1" data-pending-index="${index}" style="--thumb-w:${size}px;--thumb-h:${size}px"><span class="pending-3000-timer" data-pending-timer="1" data-pending-started-at="${cellStartedAt}">${formatRunDuration(nowMs() - cellStartedAt)}</span><span class="pending-3000-text">${pendingGeneratingText()} ${cellPct}</span></div>`;
+    const stop = node ? stopGenerationButtonHtml(node) : '';
+    return `<div class="smart-pending-thumb loading-cell pending-cell-3000" data-pending-thumb="1" data-pending-index="${index}" style="--thumb-w:${size}px;--thumb-h:${size}px"><span class="pending-3000-timer" data-pending-timer="1" data-pending-started-at="${cellStartedAt}">${formatRunDuration(nowMs() - cellStartedAt)}</span><span class="pending-3000-text">${pendingGeneratingText()} ${cellPct}</span>${stop}</div>`;
 }
 // 2026-10-10（用户要求：等待态按 3000 版）：3000 的等待态就是「整框一格灰骨架」或
 // 「灰骨架网格」（.loading-skeleton + N×.loading-cell），没有任何文字/百分比/取消浮层。
@@ -16963,8 +16965,8 @@ function pendingLoadingCellsHtml(node, count=1, box=null){
             const rows = Math.ceil(c / cols);
             return `<div class="loading-skeleton" data-pending-skeleton="1" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${w}px;height:${h}px;padding:8px;box-sizing:border-box">${Array.from({length:c}).map(() => '<div class="loading-cell"></div>').join('')}</div>`;
         })();
-    // 2026-10-12（用户要求）：右上角显示已用时间，中间「生成中……」追加百分比。
-    // 复用 refreshRunTimerPills 的 1s ticker（data-pending-timer / data-pending-progress）。
+    // 2026-10-12（用户要求）：每格计时 + 中间「生成中……」追加百分比（同 1s ticker 刷新）。
+    // 2026-10-13（用户要求）：计时挪左上角（CSS .pending-3000-timer），右上角是取消生成按钮。
     const startedAt = node ? (Number(node.runStartedAt || 0) || nowMs()) : 0;
     const timer = startedAt ? `<span class="pending-3000-timer" data-pending-timer="1" data-pending-started-at="${startedAt}">${formatRunDuration(nowMs() - startedAt)}</span>` : '';
     const pct = node ? `<span class="pending-3000-pct" data-pending-progress="${escapeAttr(node.id)}">${generationProgressView(node).percent}%</span>` : '';

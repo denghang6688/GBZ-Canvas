@@ -1832,7 +1832,8 @@ html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-f
 html body .world .pending-3000-timer {
     position: absolute !important;
     top: 8px !important;
-    right: 8px !important;
+    left: 8px !important;
+    right: auto !important;
     z-index: 5 !important;
     font-size: 11px !important;
     line-height: 1 !important;
