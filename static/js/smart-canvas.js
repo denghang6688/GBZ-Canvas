@@ -5114,19 +5114,17 @@ function singleImageLayout(image, node, scale){
     const naturalW = layoutSize.width || (Number.isFinite(explicitW) && explicitW > 24 ? explicitW : 0);
     const naturalH = layoutSize.height || (Number.isFinite(explicitH) && explicitH > 24 ? explicitH : 0);
     if(naturalW > 0 && naturalH > 0){
-        // 2026-10-10（用户要求：尺寸按 3000 版，只改生成流程）——走过生成流程的节点
-        // （genSize3000 标记）按 3000 的 singleImageLayout 计算：等比 fit 进
-        // 260×220×MEDIA_NODE_DEFAULT_SCALE（=520×440 上限），占位框尺寸与生成结果完全一致；
-        // 没走过生成流程的历史节点维持原「组框外最短边 280」口径。
+        // 2026-10-13（用户要求：最短边统一 280）——走过生成流程的节点（genSize3000 标记）
+        // 与上传/历史单图同口径：最短边贴齐 MEDIA_SINGLE_IMAGE_DEFAULT_EDGE（280），
+        // 另一边随比例伸缩；不再 fit 进 260×220×MEDIA_NODE_DEFAULT_SCALE（=520×440）的盒子。
         if(node?.genSize3000 === true){
-            const s3 = MEDIA_NODE_DEFAULT_SCALE;
-            const fit3 = Math.min((260 * s3) / naturalW, (220 * s3) / naturalH);
+            const fit3 = MEDIA_SINGLE_IMAGE_DEFAULT_EDGE / Math.min(naturalW, naturalH);
             return {
                 cols:1,
                 rows:1,
                 width:Math.max(72, Math.round(naturalW * fit3)),
                 height:Math.max(72, Math.round(naturalH * fit3)),
-                thumb:Math.round(96 * s3),
+                thumb:Math.round(96 * MEDIA_NODE_DEFAULT_SCALE),
                 single:true
             };
         }
@@ -26239,24 +26237,24 @@ function pendingBoxSize(count, options={}){
     const h = rows * bh + (rows - 1) * gap + pad * 2;
     return {w:Math.max(80, Math.round(w)), h:Math.max(80, Math.round(h))};
 }
-// 2026-10-10（用户要求：尺寸按 3000 版「AI无限智能画布」）——占位框完全套用 3000 的 pendingBoxSize：
-//   base = 本次输出分辨率等比 fit 进 260×220×MEDIA_NODE_DEFAULT_SCALE 的盒子（scale 2 → 上限 520×440）；
+// 2026-10-10（用户要求：尺寸按 3000 版「AI无限智能画布」）占位框口径，2026-10-13 调整：
+//   base 不再 fit 进 260×220×MEDIA_NODE_DEFAULT_SCALE（=520×440）的盒子，改为
+//   **最短边贴齐 MEDIA_SINGLE_IMAGE_DEFAULT_EDGE（280）**，与完成态 singleImageLayout 完全一致；
 //   c<=1 → 直接用这个比例盒（占位框尺寸 = 生成结果尺寸，出图瞬间不跳）；
-//   c>1  → cols=min(4,max(2,√c))、格长边=clamp(0.42×base长边, 96, 220)、格随 base 宽高比，
+//   c>1  → cols=min(4,max(2,√c))、格长边=clamp(0.58×base长边, 96, 300)、格随 base 宽高比，
 //          框 = cols×(格宽+8)+16 × rows×(格高+8)+16。
 function pendingBaseBox3000(size){
     const w = Number(size?.w || size?.width || 0);
     const h = Number(size?.h || size?.height || 0);
     const useW = w > 0 ? w : 1024;
     const useH = h > 0 ? h : 1024;
-    const fit = Math.min((260 * MEDIA_NODE_DEFAULT_SCALE) / useW, (220 * MEDIA_NODE_DEFAULT_SCALE) / useH);
+    const fit = MEDIA_SINGLE_IMAGE_DEFAULT_EDGE / Math.min(useW, useH);
     return {w:Math.max(72, Math.round(useW * fit)), h:Math.max(72, Math.round(useH * fit))};
 }
 // 2026-10-10（用户要求：生视频的节点显示/动画与生图完全一致，只是内容一个是视频一个是图像）——
 // API 生视频的占位框改与生图同源：先拿到本次 videoAspect 的比例（explicitRequestOutputSizeForPending
-// 返回的「短边 280」比例盒，只取比例），再按 3000 口径 fit 进 260×220×MEDIA_NODE_DEFAULT_SCALE（=520×440）。
-// 旧口径直接把这个 498×280（16:9）当成占位外框，而完成态 singleImageLayout 按 520×440 反算得到 520×292，
-// 于是出片瞬间外框会「跳」一下；生图不会（占位框尺寸本来就等于结果尺寸）。
+// 返回的「短边 280」比例盒，只取比例），再按 pendingBaseBox3000 口径取比例盒（2026-10-13 起
+// 占位框=短边 280，与完成态一致）。
 function pendingVideoBaseBox3000(runSettings, refs){
     const requestSize = explicitRequestOutputSizeForPending({settings:runSettings, refs});
     const w = Number(requestSize?.w || 0);
@@ -26342,9 +26340,9 @@ function applyAppendPendingPreviewBox(node){
     const pendingCount = appendPendingDisplayCount(node, (node.images || []).length);
     const totalCount = Math.max(1, (node.images || []).length + pendingCount);
     const base = pendingBaseBoxForStorage({node, baseBox:node.pendingBaseBox});
-    // 2026-10-10（用户要求：尺寸按 3000 版）——占位框直接用 3000 的 pendingBoxSize 口径：
-    // 单张 = 本次输出分辨率等比 fit 进 520×440 的比例盒（占位框 = 生成结果尺寸）；
-    // 多张 = cols=√c 宫格、格长边 clamp(0.42×base长边,96,220)、格随 base 宽高比。
+    // 2026-10-13（用户要求：最短边统一 280）——占位框用 pendingBaseBox3000 口径：
+    // 单张 = 本次输出分辨率的「短边 280」比例盒（占位框 = 生成结果尺寸）；
+    // 多张 = cols=√c 宫格、格长边 clamp(0.58×base长边,96,300)、格随 base 宽高比。
     node.genSize3000 = true;
     const ratioItem = pendingGridItems(node, Math.max(1, pendingCount))[0] || null;
     const compactBox = appendPendingCompactBoxSize(totalCount, pendingThumbRatioOf(node, ratioItem));
@@ -29122,7 +29120,7 @@ function appendOutputsToNode(node, additions, kind='image', options={}){
     if(node.genSize3000 === true){
         // 2026-10-10（用户要求：尺寸按 3000 版，只改生成流程）——生成完成后清掉显式 w/h，
         // 尺寸交回布局自己算（3000 的 finalize 就是 delete w/h）：
-        // 单图 → singleImageLayout 等比 fit 520×440（与占位框同尺寸，出图不跳）；
+        // 单图 → singleImageLayout「短边 280」比例盒（2026-10-13 起，与占位框同尺寸，出图不跳）；
         // 多图 → 3000 宫格（thumb 179 / gap 8 / PAD 32）。
         // 2026-10-11：单个视频例外——视频条目可能没有 natural 宽高（API 生视频只回 url），
         // delete w/h 会退化成 280 方框；保持占位框尺寸（= pendingVideoBaseBox3000 比例盒），
@@ -30275,8 +30273,8 @@ async function runGeneration(){
         if(pendingNode.replacePendingOutput) pendingNode.replacePendingResults = [];
         else delete pendingNode.replacePendingResults;
         pendingNode.appendPendingOutput = appendOutputMode;
-        // 2026-10-10（用户要求：尺寸按 3000 版，只改生成流程）——标记这个节点走过生成流程，
-        // 单图尺寸改按 3000 的「等比 fit 进 520×440」口径，占位框与生成结果尺寸一致。
+        // 2026-10-13（用户要求：最短边统一 280）——标记这个节点走过生成流程，
+        // 单图尺寸按「短边 280」比例盒取值，占位框与生成结果尺寸一致。
         pendingNode.genSize3000 = true;
         pendingNode.pendingPlaceholders = [
             ...(Array.isArray(pendingNode.pendingPlaceholders) ? pendingNode.pendingPlaceholders : []),
