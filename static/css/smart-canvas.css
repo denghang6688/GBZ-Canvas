@@ -17398,12 +17398,13 @@ html body .world .thumb-item > .media-video-card img[data-preview-kind="video"] 
 .pending-3000-wrap .smart-pending-thumb::before {
     display:none !important;
 }
-/* 取消入口：3000 的等待态本身没有取消按钮，这里保留一个低调的角落 X（功能不能丢）。 */
+/* 取消入口：3000 的等待态本身没有取消按钮，这里保留一个低调的角落 X（功能不能丢）。
+   2026-10-13（用户要求）：取消按钮放右上角（计时角标挪去了左上角）。 */
 .pending-3000-wrap .generation-stop-x {
     position:absolute !important;
     right:8px !important;
-    bottom:8px !important;
-    top:auto !important;
+    top:8px !important;
+    bottom:auto !important;
     z-index:6 !important;
     width:26px !important;
     min-width:26px !important;
@@ -17416,6 +17417,16 @@ html body .world .thumb-item > .media-video-card img[data-preview-kind="video"] 
 .pending-3000-wrap .generation-stop-x:hover {
     background:rgba(220,38,38,.72) !important;
     color:#fff !important;
+}
+/* 2026-10-13（用户要求）：追加宫格里的占位格同口径 —— 计时左上角（皮肤 .pending-3000-timer）、
+   取消生成按钮右上角。皮肤层已给 .image-node.node-pending .generation-stop-x 定了外观尺寸，
+   这里只补绝对定位（占位格 .pending-cell-3000 已是 position:relative 定位基准）。 */
+html body .world .smart-pending-thumb .generation-stop-x {
+    position: absolute !important;
+    top: 6px !important;
+    right: 6px !important;
+    bottom: auto !important;
+    z-index: 6 !important;
 }
 
 /* 追加生成（原地已有图 + 新占位格混排）时，占位格也用 3000 的纯灰骨架格，
