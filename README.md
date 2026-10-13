@@ -2,8 +2,7 @@
 
 > 一个面向创作者的本地化 AI 无限画布工作台 —— 在浏览器里拖拽节点、组装工作流、调任意大模型（对话 / 文生图 / 文生视频 / LoRA / ControlNet / ComfyUI），一键导出可复用的工作流。
 
-**不想折腾环境？** → [下载免安装便携版](https://github.com/denghang6688/GBZ-Canvas/releases/latest)（内置 Python，解压双击即用）
-
+[![Download](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E5%85%8D%E5%AE%89%E8%A3%85%E4%BE%BF%E6%90%BA%E7%89%88-brightgreen.svg)](https://github.com/denghang6688/GBZ-Canvas/releases/latest)
 [![License](https://img.shields.io/badge/license-Commercial--No%20Resale-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
@@ -17,16 +16,22 @@
 - 🖥️ **离线优先**：本地 Python + 浏览器即可运行；自动更新支持魔搭社区与 GitHub 双源；局域网内其他设备也能访问。
 - 🌗 **主题 / 多语言**：内置深色 / 浅色 / 自定义主题，支持中英双语。
 
-## 直接下载（推荐｜免安装 Python）
+## 📦 下载方式
 
-不想折腾环境？下载**便携版**压缩包，解压后双击 `启动服务.bat` 即可运行：
+| 方式 | 适合 | 说明 |
+| --- | --- | --- |
+| **[⬇️ 便携版 zip（推荐）](https://github.com/denghang6688/GBZ-Canvas/releases/latest)** | 绝大多数人 | 内置 Python 运行时（约 32 MB），解压后双击 `启动服务.bat` 即用，**不用装任何环境** |
+| [`git clone` 源码](#5-分钟上手从源码运行) | 开发者 | 需要 Python 3.10+；双击 `启动服务.bat` 会自动检测并安装依赖 |
+| [Docker](#docker推荐用于服务器--nas) | 服务器 / NAS | `docker compose up -d`，一条命令起服务 |
 
-**⬇️ [下载 GBZ智能画布 便携版（约 32 MB）](https://github.com/denghang6688/GBZ-Canvas/releases/latest)**
+> ⚠️ **别下错包**：GitHub 页面上的 **Code → Download ZIP** 给的是**源码包**（约 3 MB），不含 Python 运行时。
+> 装了 Python 3.10+ 的机器双击 `启动服务.bat` 会自动装依赖并启动；**机器上没有 Python 的，请直接下便携版**。
 
-- 内置 Python 运行时，**无需自己安装 Python**
-- 解压 → 双击 `启动服务.bat` → 浏览器自动打开 `http://127.0.0.1:2000/`
-- 出于安全考虑，包里**不含任何 API 密钥**：首次使用请用记事本编辑 `API/.env` 填入自己的密钥（也可启动后在画布左下角「API 设置」里填）
-- 版本说明见 [Releases 页面](https://github.com/denghang6688/GBZ-Canvas/releases)
+### 便携版首次使用
+
+1. 解压 → 双击 `启动服务.bat`（Windows）→ 浏览器自动打开 `http://127.0.0.1:2000/`
+2. 用记事本打开 `API/.env` 填入自己的 API 密钥（也可以启动后在画布左下角「API 设置」里填）
+3. 同一局域网的其他设备可通过 `http://<你的IP>:2000/` 访问
 
 ## 5 分钟上手（从源码运行）
 
@@ -38,7 +43,8 @@ cd GBZ-Canvas
 启动服务.bat
 ```
 
-启动后浏览器会自动打开 `http://127.0.0.1:2000/`，局域网内其他设备可通过 `http://<你的IP>:2000/` 访问。
+首次启动会自动检测并安装依赖（优先走清华镜像，失败自动回退官方源）；机器上找不到 Python 3.10+ 时，
+脚本会提示你改用免安装便携版。启动后浏览器会自动打开 `http://127.0.0.1:2000/`，局域网内其他设备可通过 `http://<你的IP>:2000/` 访问。
 
 ### macOS / Linux
 
