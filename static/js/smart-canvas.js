@@ -8606,13 +8606,17 @@ function syncH3OptimizePreviewButton(){
     if(!btn) return;
     const state = currentH3OptimizePreviewState();
     const hasResult = !!state.prompt;
+    // 2026-10-13（用户要求）：提示词优化失败时圆点显示为红色（成功仍是绿色），悬停可看失败原因。
+    const failed = !hasResult && /失败/.test(state.status || '');
     btn.classList.toggle('has-result', hasResult);
-    if(hasResult){
-        btn.setAttribute('title', '已优化，悬停查看优化后提示词');
-        btn.setAttribute('aria-label', '已优化，悬停查看优化后提示词');
+    btn.classList.toggle('opt-failed', failed);
+    if(hasResult || failed){
         if(!btn.querySelector('.opt-dot')){
             btn.insertAdjacentHTML('beforeend', '<span class="opt-dot"></span>');
         }
+        const tip = hasResult ? '已优化，悬停查看优化后提示词' : '提示词优化失败，已用原文继续，悬停查看详情';
+        btn.setAttribute('title', tip);
+        btn.setAttribute('aria-label', tip);
     } else {
         btn.querySelector('.opt-dot')?.remove();
     }
@@ -8667,9 +8671,11 @@ function showH3OptimizeHover(anchorEl){
 }
 function renderVideoEnhancePromptControl(){
     const hasResult = !!_cachedOptimizedPrompt;
-    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (hasResult ? ' has-result' : '') + '" data-manual-optimize-prompt title="AI 优化提示词">'
+    // 2026-10-13（用户要求）：优化失败 → 红点（opt-failed），成功仍是绿点。
+    const failed = !hasResult && /失败/.test(String(_cachedOptimizedPromptStatus || ''));
+    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (hasResult ? ' has-result' : '') + (failed ? ' opt-failed' : '') + '" data-manual-optimize-prompt title="' + (failed ? '提示词优化失败，悬停查看详情' : 'AI 优化提示词') + '">'
         + '<i data-lucide="wand-2"></i>'
-        + (hasResult ? '<span class="opt-dot"></span>' : '')
+        + ((hasResult || failed) ? '<span class="opt-dot"></span>' : '')
         + '</button>';
 }
 // 2026-10-11（用户要求）：时长滑块拖动时，下方药丸摘要（如 "16:9 · 768P · 12s"）的秒数实时同步。
@@ -9275,9 +9281,12 @@ function renderH3PackedControl(){
 }
 function renderH3OptimizeControl(){
     const on = !!settings?.comfyParams?.['f_h3_prompt_optimizer'];
-    const hasResult = !!currentH3OptimizePreviewState().prompt;
-    const label = hasResult ? '已优化，悬停查看优化后提示词' : (on ? '关闭运行时提示词优化' : '开启运行时提示词优化');
-    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (on ? ' active' : '') + (hasResult ? ' has-result' : '') + '" data-toggle-h3-prompt-optimizer="1" title="' + escapeAttr(label) + '" aria-label="' + escapeAttr(label) + '"><i data-lucide="wand-2"></i>' + (hasResult ? '<span class="opt-dot"></span>' : '') + '</button>';
+    const state = currentH3OptimizePreviewState();
+    const hasResult = !!state.prompt;
+    // 2026-10-13（用户要求）：优化失败 → 红点（opt-failed），成功 → 绿点，均悬停可看详情。
+    const failed = !hasResult && /失败/.test(state.status || '');
+    const label = hasResult ? '已优化，悬停查看优化后提示词' : (failed ? '提示词优化失败，已用原文继续，悬停查看详情' : (on ? '关闭运行时提示词优化' : '开启运行时提示词优化'));
+    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (on ? ' active' : '') + (hasResult ? ' has-result' : '') + (failed ? ' opt-failed' : '') + '" data-toggle-h3-prompt-optimizer="1" title="' + escapeAttr(label) + '" aria-label="' + escapeAttr(label) + '"><i data-lucide="wand-2"></i>' + ((hasResult || failed) ? '<span class="opt-dot"></span>' : '') + '</button>';
 }
 function renderComfyParams(){
     settings.comfyMode = 'custom';
