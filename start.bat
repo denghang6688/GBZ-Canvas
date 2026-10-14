@@ -7,7 +7,8 @@ cd /d "%~dp0"
 setlocal ENABLEEXTENSIONS ENABLEDELAYEDEXPANSION
 
 set "PORT=2000"
-set "APP_DL=https://github.com/denghang6688/GBZ-Canvas/releases/latest"
+REM 免安装便携版下载地址（由项目方另行提供，拿到正式地址后替换这一行即可）
+set "APP_DL=https://github.com/denghang6688/GBZ-Canvas"
 
 echo ============================================
 echo    GBZ 智能画布  (GBZ-Canvas)
@@ -40,7 +41,7 @@ if not defined PYEXE (
     echo [ERROR] 没有找到 Python 3.10+，无法启动。
     echo.
     echo   方案一（推荐）：下载「免安装便携版」，自带 Python，解压双击即用
-    echo       %APP_DL%
+    echo       下载地址：%APP_DL%
     echo.
     echo   方案二：安装 Python 3.10+，安装时勾选 "Add python.exe to PATH"
     echo       https://www.python.org/downloads/
