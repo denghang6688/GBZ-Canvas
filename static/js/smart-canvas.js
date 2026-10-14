@@ -6241,7 +6241,7 @@ function smartLoopInputSourceImages(node, ctx=smartLoopContext){
     const inputs = ctx?.forceWorkflow ? workflowInputNodesFor(node) : inputNodesFor(node);
     const refs = inputs.flatMap(input => {
         if(input?.type === 'smart-loop'){
-            return smartLoopInputImages(input, {index:Number(node.loopStart) || 1});
+            return smartLoopInputImages(input, {index:smartLoopCountStart(node)});
         }
         return outputImagesForNode(input, false, ctx);
     }).filter(ref => ref?.url);
@@ -6263,7 +6263,8 @@ function smartLoopWidth(node){
     return 340;
 }
 function smartLoopHeight(node){
-    let h = 168;
+    // 2026-10-14（循环节点 B1）：+74 = 运行状态栏（含上下边距与卡片间距）。
+    let h = 168 + 74;
     if(node?.imageInput) h += 72;
     if(node?.showPrompt) {
         const promptCount = Math.max(1, smartLoopPromptFieldValues(node).length);
@@ -13455,7 +13456,7 @@ function createPromptNode(x, y, options={}){
 }
 function createLoopNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
-    const node = {id:uid('loop'), type:'smart-loop', x, y, w:340, h:168, title:'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, imageBatchSize:1, variablePrompt:'', created_at:Date.now()};
+    const node = {id:uid('loop'), type:'smart-loop', x, y, w:340, h:168, title:'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, countStart:1, imageOffset:0, imageBatchSize:1, onError:'stop', variablePrompt:'', created_at:Date.now()};
     nodes.push(node);
     if(options.select !== false) selectedId = node.id;
     if(!options.skipRender) render();
@@ -16170,12 +16171,13 @@ function autoOpenStoryboardScriptPreview(){
 }
 if(document.readyState === 'loading') window.addEventListener('load', autoOpenStoryboardScriptPreview, {once:true});
 else autoOpenStoryboardScriptPreview();
-function loopNumberControlHtml({label, value, key, min=1, max=Number.POSITIVE_INFINITY, quick=[1,2,3,4,5,6,8,10]}){
+function loopNumberControlHtml({label, value, key, min=1, max=Number.POSITIVE_INFINITY, quick=[1,2,3,4,5,6,8,10], title=''}){
     const hasMax = Number.isFinite(Number(max));
     const v = Math.max(min, hasMax ? Math.min(Number(max), Number(value) || min) : (Number(value) || min));
     const maxAttr = hasMax ? ` max="${Number(max)}"` : '';
+    const titleAttr = title ? ` title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"` : '';
     return `<div class="loop-number-control">
-        <button class="loop-smart-control loop-number-trigger" type="button"><span>${escapeHtml(label)}</span><strong>${v}</strong></button>
+        <button class="loop-smart-control loop-number-trigger" type="button"${titleAttr}><span>${escapeHtml(label)}</span><strong>${v}</strong></button>
         <div class="loop-number-popover">
             <div class="loop-number-grid">
                 ${quick.map(n => `<button type="button" class="loop-smart-control loop-number-cell ${n === v ? 'active' : ''}" data-loop-number="${escapeHtml(key)}" data-loop-value="${n}">${n}</button>`).join('')}
@@ -16260,14 +16262,76 @@ function debounceAutoSyncLoops(){
         }
     }, 500);
 }
+// 2026-10-14（循环节点 B1）：状态栏。运行中显示「第 n/N 轮 + 进度条 + 每轮状态点」，
+// 空闲时显示上次运行结果摘要；右侧常驻失败策略选择（运行中禁用，避免中途改语义）。
+function loopRunStatusHtml(node, view, running){
+    const total = Math.max(1, Number(view?.total) || Math.max(1, smartLoopCount(node)));
+    const policy = smartLoopOnError(node);
+    const last = node?.lastLoopRun;
+    let cls = 'is-idle';
+    let titleText = tr('canvas.loopReady');
+    let subHtml = `<span class="loop-status-count">${escapeHtml(trf('canvas.loopRoundsTotal', {n:total}))}</span>`;
+    if(running){
+        cls = view?.stopping ? 'is-stopping' : 'is-running';
+        titleText = view?.stopping ? tr('canvas.loopStopping') : trf('canvas.loopRunningRound', {n:Number(view?.currentRound) || 1, total});
+        const dots = (view?.rounds || []).map(round => {
+            const state = round.status || 'pending';
+            const tip = trf('canvas.loopRoundDotTip', {
+                n:round.offset + 1,
+                index:round.index,
+                state:tr(`canvas.loopRoundState_${state}`)
+            });
+            return `<i class="loop-status-dot is-${escapeAttr(state)}" title="${escapeAttr(tip)}"></i>`;
+        }).join('');
+        subHtml = `<div class="loop-status-bar"><i style="width:${Math.max(0, Math.min(100, Number(view?.percent) || 0))}%"></i></div>
+            ${dots ? `<div class="loop-status-dots">${dots}</div>` : ''}
+            <span class="loop-status-count">${escapeHtml(`${view?.done || 0}/${total}`)}${view?.failed ? ` · ${escapeHtml(trf('canvas.loopFailedCount', {n:view.failed}))}` : ''}</span>`;
+    } else if(last && last.total){
+        cls = last.failed ? 'is-idle has-failure' : 'is-idle is-ok';
+        titleText = tr('canvas.loopLastRun');
+        subHtml = `<span class="loop-status-count">${escapeHtml(last.failed
+            ? trf('canvas.loopLastRunFailed', {ok:last.ok, total:last.total, failed:last.failed})
+            : trf('canvas.loopLastRunOk', {ok:last.ok, total:last.total}))}</span>`;
+    }
+    return `<div class="loop-smart-status ${cls}">
+        <div class="loop-status-head">
+            <span class="loop-status-title">${escapeHtml(titleText)}</span>
+            <span class="loop-smart-seg loop-status-policy">
+                <button type="button" class="loop-smart-control ${policy !== 'skip' ? 'active' : ''}" data-loop-onerror="stop" title="${escapeAttr(tr('canvas.loopOnErrorStopTip'))}" ${running ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorStop'))}</button>
+                <button type="button" class="loop-smart-control ${policy === 'skip' ? 'active' : ''}" data-loop-onerror="skip" title="${escapeAttr(tr('canvas.loopOnErrorSkipTip'))}" ${running ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorSkip'))}</button>
+            </span>
+        </div>
+        ${subHtml}
+    </div>`;
+}
+// 2026-10-14（循环节点 B1）：提示词按轮对齐。条数与轮数不匹配时，逐条注明它会用在第几轮、
+// 复用几次，避免用户以为「每条只跑一轮」。
+function loopPromptRoundHintHtml(index, fieldCount, totalRounds){
+    if(totalRounds <= 1 || fieldCount <= 0) return '';
+    const served = [];
+    for(let round = 1; round <= totalRounds; round++){
+        if((round - 1) % fieldCount === index) served.push(round);
+    }
+    if(!served.length) return '';
+    const reuse = served.length > 1;
+    const list = served.length > 4 ? `${served.slice(0, 3).join('·')}…` : served.join('·');
+    const text = reuse
+        ? trf('canvas.loopPromptRoundMany', {list, k:served.length})
+        : trf('canvas.loopPromptRoundOne', {n:served[0]});
+    return `<div class="loop-smart-round-hint ${reuse ? 'is-reuse' : ''}">${escapeHtml(text)}</div>`;
+}
 function smartLoopBodyHtml(node){
     node.count = smartLoopCount(node);
     node.mode = node.mode === 'parallel' ? 'parallel' : 'serial';
-    node.loopStart = Math.max(1, Number(node.loopStart) || 1);
+    node.countStart = smartLoopCountStart(node);
+    node.loopStart = node.countStart; // 兼容旧客户端：仍写回 loopStart
+    node.imageOffset = smartLoopImageOffset(node);
     node.imageBatchSize = Math.max(1, Math.round(Number(node.imageBatchSize) || 1));
+    node.onError = smartLoopOnError(node);
     node.showPrompt = Boolean(node.showPrompt);
     node.imageInput = Boolean(node.imageInput);
-    const imageCount = smartLoopInputImages(node, {index:node.loopStart}).length;
+    const totalRounds = node.count;
+    const imageCount = smartLoopInputImages(node, {index:node.countStart}).length;
     const loopThumbs = smartNodeInputThumbsHtml(smartLoopPreviewImages(node));
     const promptItems = smartLoopInputPromptItems(node);
     const promptFields = smartLoopPromptFieldValues(node);
@@ -16275,11 +16339,12 @@ function smartLoopBodyHtml(node){
     const promptHint = promptItems.length
         ? trf('smart.loopPromptHintFound', {n:promptItems.length})
         : tr('smart.loopPromptHintVariable');
-    const currentUpstreamPrompt = smartLoopSelectedInputPrompt(node, {index:node.loopStart});
+    const currentUpstreamPrompt = smartLoopSelectedInputPrompt(node, {index:node.countStart});
     const defaultPrompt = smartLoopDefaultPromptText();
     const loopRunState = smartCascadeRunForLoop(node.id);
     const loopRunning = Boolean(loopRunState);
     const loopStopping = Boolean(loopRunState?.stopRequested);
+    const statusView = loopRunStatusView(node);
     return `<div class="loop-smart-card ${node.imageInput ? 'has-image' : ''} ${node.showPrompt ? 'has-prompt' : ''}">
         <div class="loop-smart-row loop-smart-top">
             <div class="loop-smart-seg">
@@ -16287,6 +16352,7 @@ function smartLoopBodyHtml(node){
                 <button type="button" class="loop-smart-control ${node.mode === 'parallel' ? 'active' : ''}" data-loop-mode="parallel" title="${escapeHtml(tr('smart.loopParallelTip'))}">${escapeHtml(tr('canvas.loopParallel'))}</button>
             </div>
         </div>
+        ${loopRunStatusHtml(node, statusView, loopRunning)}
         <div class="loop-smart-row">
             <button class="loop-smart-control loop-smart-toggle ${node.imageInput ? 'active' : ''}" type="button" data-loop-toggle="image"><i data-lucide="image"></i><span>${escapeHtml(tr('canvas.loopImageToggle'))}</span></button>
             <button class="loop-smart-control loop-smart-toggle ${node.showPrompt ? 'active' : ''}" type="button" data-loop-toggle="prompt"><i data-lucide="text-cursor-input"></i><span>${escapeHtml(tr('canvas.loopPromptToggle'))}</span></button>
@@ -16295,6 +16361,7 @@ function smartLoopBodyHtml(node){
             ${loopThumbs}
             <div class="loop-smart-mini">
                 ${loopNumberControlHtml({label:tr('canvas.loopBatchSize'), value:node.imageBatchSize, key:'imageBatchSize', quick:[1,2,3,4,5,6,8,10]})}
+                ${loopNumberControlHtml({label:tr('canvas.loopImageOffset'), value:node.imageOffset, key:'imageOffset', min:0, max:9999, quick:[0,1,2,3,4,5,8,10], title:tr('canvas.loopImageOffsetTip')})}
             </div>
             <div class="loop-smart-note">${imageCount ? escapeHtml(trf('canvas.loopImageWillOutput', {n:imageCount})) : escapeHtml(tr('canvas.loopImageEmpty'))}</div>
         </div>` : ''}
@@ -16310,6 +16377,7 @@ function smartLoopBodyHtml(node){
                     <div class="loop-smart-prompt-index">${index + 1}</div>
                     <div class="loop-smart-control loop-smart-text" contenteditable="true" data-loop-prompt-index="${index}" data-placeholder="${escapeHtml(tr('canvas.loopVariablePlaceholder'))}">${smartLoopVariableHtml(displayValue || (index === 0 && !promptFields.length && !promptItems.length ? defaultPrompt : ''))}</div>
                     <button class="loop-smart-control loop-smart-icon-btn" type="button" data-loop-prompt-delete="${index}" ${visiblePromptFields.length <= 1 ? 'disabled' : ''} title="${escapeHtml(tr('common.delete'))}" aria-label="${escapeHtml(tr('common.delete'))}">×</button>
+                    ${loopPromptRoundHintHtml(index, visiblePromptFields.length, totalRounds)}
                 </div>`;
                 }).join('')}
             </div>
@@ -16320,7 +16388,7 @@ function smartLoopBodyHtml(node){
             </div>
         </div>` : ''}
         <div class="loop-smart-footer">
-            ${loopNumberControlHtml({label:tr('canvas.loopStart'), value:node.loopStart, key:'loopStart', max:9999, quick:[1,2,3,4,5,6,8,10]})}
+            ${loopNumberControlHtml({label:tr('canvas.loopStart'), value:node.countStart, key:'countStart', max:9999, quick:[1,2,3,4,5,6,8,10], title:tr('canvas.loopCountStartTip')})}
             ${loopNumberControlHtml({label:tr('canvas.loopCount'), value:node.count, key:'count', quick:[1,2,3,4,5,6,8,10]})}
             <button class="loop-smart-run ${loopRunning ? 'is-stop' : ''}" type="button" data-loop-run="${escapeAttr(node.id)}" title="${escapeAttr(loopRunning ? smartCascadeStopText(loopStopping) : tr('smart.loopRunAll'))}" aria-label="${escapeAttr(loopRunning ? smartCascadeStopText(loopStopping) : tr('smart.loopRunAll'))}">
                 <i data-lucide="${loopRunning ? 'square' : 'workflow'}"></i>
@@ -18391,6 +18459,12 @@ function render(){
         const titleHtml = smartNodeTitleHtml(node, imgs);
         const scale = nodeScale(node);
         let layout = imageLayout(imgs, scale, node);
+        // 2026-10-14（循环节点 B1）：状态栏占位。旧画布里存的 h 不含状态栏，这里只增不减地
+        // 补齐，避免存量循环节点内容溢出节点框（新节点 / 切换开关时 fitSmartLoopNode 已按新公式算）。
+        if(node.type === 'smart-loop'){
+            const loopFitH = smartLoopHeight(node);
+            if(Number(node.h) < loopFitH){ node.h = loopFitH; layout = imageLayout(imgs, scale, node); }
+        }
         // 2026-10-10（用户要求：生图动画回到 9-09 旧版）：停用 10-09 的第二处「占位大框
         // 校正」——旧版不存在这段，占位节点框保持 imageLayout 的自然结果，占位格走
         // appendPendingBodyHtml 的紧凑宫格（thumb ≈ 96~112px），不再撑成 280 大格。
@@ -19413,7 +19487,8 @@ function bindLoopNodeControls(el, node){
         control.addEventListener('dblclick', e => e.stopPropagation());
     });
     const loopNumberBounds = key => {
-        if(key === 'loopStart') return {min:1, max:9999};
+        if(key === 'loopStart' || key === 'countStart') return {min:1, max:9999};
+        if(key === 'imageOffset') return {min:0, max:9999};
         if(key === 'imageBatchSize') return {min:1, max:Number.POSITIVE_INFINITY};
         return {min:1, max:Number.POSITIVE_INFINITY};
     };
@@ -19435,6 +19510,8 @@ function bindLoopNodeControls(el, node){
         const value = normalizeLoopNumber(key, rawValue);
         if(key === 'count') node.count = value;
         if(key === 'loopStart') node.loopStart = value;
+        if(key === 'countStart'){ node.countStart = value; node.loopStart = value; }
+        if(key === 'imageOffset') node.imageOffset = value;
         if(key === 'imageBatchSize') node.imageBatchSize = value;
         scheduleSave();
         if(rerender) render();
@@ -19462,6 +19539,17 @@ function bindLoopNodeControls(el, node){
             e.preventDefault();
             e.stopPropagation();
             node.mode = btn.dataset.loopMode === 'parallel' ? 'parallel' : 'serial';
+            render();
+            scheduleSave();
+        };
+    });
+    // 2026-10-14（循环节点 B1）：失败策略。stop = 出错即停（默认）；skip = 本轮跳过继续下一轮。
+    el.querySelectorAll('[data-loop-onerror]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(btn.disabled) return;
+            node.onError = btn.dataset.loopOnerror === 'skip' ? 'skip' : 'stop';
             render();
             scheduleSave();
         };
@@ -26671,10 +26759,28 @@ function smartLoopPromptFieldText(node, fieldIndex){
     const values = smartLoopPromptFieldValues(node);
     return values[fieldIndex] || '';
 }
+// 2026-10-14（循环节点 B1）：原 loopStart 一个字段同时承担「计数/轮次起点」与「取图起点」两个语义，
+// 现在拆开：
+//   countStart —— 计数起点（第 N 轮从 N 开始计数，决定《计数》/进度）
+//   imageOffset —— 跳过源图片的前 N 张（0 起，仅 imageInput 时生效）
+// 旧数据兼容读法：countStart 缺省回退 loopStart；imageOffset 缺省 0（与旧行为一致，
+// 旧 loopStart 只影响计数、不影响取图起点）。写回时 countStart 同步 loopStart 供旧客户端读。
+function smartLoopCountStart(node){
+    const raw = node?.countStart ?? node?.loopStart;
+    const value = Math.round(Number(raw));
+    return Number.isFinite(value) && value >= 1 ? value : 1;
+}
+function smartLoopImageOffset(node){
+    const value = Math.round(Number(node?.imageOffset));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+}
+function smartLoopOnError(node){
+    return node?.onError === 'skip' ? 'skip' : 'stop';
+}
 function smartLoopSelectedLocalPrompt(node, ctx=smartLoopContext){
     const values = smartLoopActivePromptFieldValues(node);
     if(!values.length) return '';
-    const startBase = Math.max(1, Number(node?.loopStart) || 1);
+    const startBase = smartLoopCountStart(node);
     const index = Math.max(1, Number(ctx?.index || startBase) || startBase);
     return values[(index - 1) % values.length] || '';
 }
@@ -26697,14 +26803,14 @@ function smartLoopInputPromptItems(node){
 function smartLoopSelectedInputPrompt(node, ctx=smartLoopContext){
     const items = smartLoopInputPromptItems(node);
     if(!items.length) return '';
-    const startBase = Math.max(1, Number(node?.loopStart) || 1);
+    const startBase = smartLoopCountStart(node);
     const index = Math.max(1, Number(ctx?.index || startBase) || startBase);
     return items[(index - 1) % items.length] || '';
 }
 function smartLoopPrompt(node, ctx=smartLoopContext){
     if(!node?.showPrompt) return '';
     const count = smartLoopCount(node);
-    const startBase = Math.max(1, Number(node.loopStart) || 1);
+    const startBase = smartLoopCountStart(node);
     const index = Math.max(1, Number(ctx?.index || startBase) || startBase);
     const total = Math.max(1, Number(ctx?.total || count) || count);
     const selected = smartLoopSelectedInputPrompt(node, ctx);
@@ -26731,17 +26837,18 @@ function smartLoopInputImages(node, ctx=smartLoopContext){
         return imagesForNode(input);
     }).filter(img => img?.url);
     if(!refs.length) return [];
-    const startBase = Math.max(1, Number(node.loopStart) || 1);
+    const startBase = smartLoopCountStart(node);
+    const baseOffset = smartLoopImageOffset(node);
     const batchSize = Math.max(1, Math.round(Number(node.imageBatchSize) || 1));
     const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
-    const imageOffset = Math.max(0, currentIndex - startBase);
-    return refs.slice(imageOffset, imageOffset + batchSize)
+    const sliceStart = Math.max(0, baseOffset + (currentIndex - startBase));
+    return refs.slice(sliceStart, sliceStart + batchSize)
         .map((img, i) => ({...img, name:img.name || trf('canvas.loopImageLabel', {n:currentIndex + i})}));
 }
 function smartLoopPreviewImages(node){
     if(!node?.imageInput) return [];
     return inputNodesFor(node).flatMap(input => {
-        if(input?.type === 'smart-loop') return smartLoopInputImages(input, {index:Number(node.loopStart) || 1});
+        if(input?.type === 'smart-loop') return smartLoopInputImages(input, {index:smartLoopCountStart(node)});
         return imagesForNode(input);
     }).filter(img => img?.url);
 }
@@ -29834,6 +29941,60 @@ function smartCascadeAbortError(){
 function throwIfSmartCascadeStopRequested(runState=null){
     if(runState?.stopRequested || (!runState && smartCascadeStopRequested)) throw smartCascadeAbortError();
 }
+// 2026-10-14（循环节点 B1）：轮次状态是状态栏的唯一真相来源。
+// runState.rounds = [{index:计数索引, offset:第几轮(0起), status:'pending'|'running'|'done'|'failed', error}]
+function markLoopRound(runState, roundOffset, status, error=''){
+    if(!runState || !Array.isArray(runState.rounds)) return;
+    const offset = Math.max(0, Math.round(Number(roundOffset) || 0));
+    const round = runState.rounds.find(item => item.offset === offset);
+    if(!round || round.status === status) return;
+    round.status = status;
+    if(status === 'failed'){
+        round.error = String(error || '').slice(0, 160);
+        runState.failedRounds = (runState.failedRounds || 0) + 1;
+    }
+    refreshSmartLoopStatus(runState);
+}
+let smartLoopStatusRefreshTimer = null;
+// 并发轮次会连续改写状态，整树 render 太贵 —— 最快 240ms 刷新一次状态栏。
+function refreshSmartLoopStatus(runState){
+    if(!runState) return;
+    const wait = 240 - (nowMs() - (runState.lastStatusRenderAt || 0));
+    if(wait <= 0){
+        runState.lastStatusRenderAt = nowMs();
+        if(typeof render === 'function') render();
+        return;
+    }
+    if(smartLoopStatusRefreshTimer) return;
+    smartLoopStatusRefreshTimer = setTimeout(() => {
+        smartLoopStatusRefreshTimer = null;
+        runState.lastStatusRenderAt = nowMs();
+        if(typeof render === 'function') render();
+    }, wait);
+}
+// 只读推导：状态栏渲染用。不改任何运行状态。
+function loopRunStatusView(node){
+    const runState = smartCascadeRunForLoop(node?.id);
+    const total = Math.max(1, smartLoopCount(node));
+    if(!runState) return {running:false, stopping:false, total, rounds:[], done:0, failed:0, currentRound:0, percent:0};
+    const rounds = Array.isArray(runState.rounds) ? runState.rounds : [];
+    const done = rounds.filter(item => item.status === 'done').length;
+    const failed = rounds.filter(item => item.status === 'failed').length;
+    const runningRound = rounds.find(item => item.status === 'running');
+    const settled = done + failed;
+    const currentRound = runningRound ? runningRound.offset + 1 : Math.min(rounds.length || total, settled + (settled < (rounds.length || total) ? 1 : 0));
+    const percent = total ? Math.min(100, Math.round((settled / Math.max(1, rounds.length || total)) * 100)) : 0;
+    return {
+        running:true,
+        stopping:Boolean(runState.stopRequested),
+        total:rounds.length || total,
+        rounds,
+        done,
+        failed,
+        currentRound,
+        percent
+    };
+}
 function requestSmartCascadeStop(loopId=''){
     const runState = loopId ? smartCascadeRunForLoop(loopId) : (smartCascadeRuns.get(smartCascadeActiveLoopId) || [...smartCascadeRuns.values()][0] || null);
     if(runState){
@@ -29896,10 +30057,21 @@ async function runSmartCascade(targetNode=null, options={}){
     cascadeRunBtn.disabled = false;
     pushUndo();
     const totalRounds = smartLoopCount(loop?.node, smartLoopContext);
-    const startIndex = Math.max(1, Number(loop?.node?.loopStart) || 1);
+    const startIndex = smartLoopCountStart(loop?.node);
     const batchSize = loop?.node?.imageInput ? Math.max(1, Math.round(Number(loop.node.imageBatchSize) || 1)) : 1;
     const endIndex = startIndex + (totalRounds - 1) * batchSize;
     const loopMode = loop?.mode === 'parallel' ? 'parallel' : 'serial';
+    // 2026-10-14（B1）：失败策略。stop = 出错即停（旧行为，默认）；skip = 本轮标失败后继续下一轮。
+    const loopOnError = smartLoopOnError(loop?.node);
+    // 每轮状态的唯一真相来源：状态栏与收尾提示都读它。
+    runState.rounds = loop ? Array.from({length:totalRounds}, (_, round) => ({
+        index:startIndex + round * batchSize,
+        offset:round,
+        status:'pending',
+        error:''
+    })) : [];
+    runState.onError = loopOnError;
+    runState.failedRounds = 0;
     const directInPlaceParallelLimit = chain.some(node => smartSettingsForNode(node)?.engine === 'comfy')
         ? smartCascadeParallelLimit(chain)
         : totalRounds;
@@ -30009,7 +30181,7 @@ async function runSmartCascade(targetNode=null, options={}){
                 }
                 if(loopPrompts.length && targets.length > 1){
                     const firstLoop = loopPrompts[0];
-                    const startBase = Math.max(1, Number(firstLoop.loopStart) || 1);
+                    const startBase = smartLoopCountStart(firstLoop);
                     const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
                     const selectedTarget = targets[(currentIndex - 1) % targets.length];
                     if(runState.runPath && firstLoop?.id && source?.id){
@@ -30080,6 +30252,21 @@ async function runSmartCascade(targetNode=null, options={}){
             await runBranch(graph.root, rootRefs);
         };
         const roundIndexes = Array.from({length:totalRounds}, (_, round) => startIndex + round * batchSize);
+        // 2026-10-14（循环节点 B1）：包一层「轮次跟踪」——写状态栏 + 按失败策略决定继续/中断。
+        const runRoundTracked = async (loopIndex, roundOptions={}) => {
+            const roundOffset = Math.max(0, Number(roundOptions?.roundOffset) || 0);
+            markLoopRound(runState, roundOffset, 'running');
+            try {
+                await runRound(loopIndex, roundOptions);
+                markLoopRound(runState, roundOffset, 'done');
+                return true;
+            } catch(e) {
+                if(e?.smartCascadeStopped) throw e;
+                markLoopRound(runState, roundOffset, 'failed', e?.message || tr('smart.errRunFailed'));
+                if(loop && loopOnError === 'skip') return false;
+                throw e;
+            }
+        };
         if(loopMode === 'parallel' && totalRounds > 1){
             const parallelTargets = singleNodeLoopRun
                 ? singleLoopSlots
@@ -30087,12 +30274,12 @@ async function runSmartCascade(targetNode=null, options={}){
             if(parallelTargets.length) render();
             await runSmartCascadeRoundsWithLimit(roundIndexes, parallelLimit, (loopIndex, roundOffset) => {
                 const outputTarget = parallelTargets[roundOffset] || null;
-                return runRound(loopIndex, {outputTarget, roundOffset});
+                return runRoundTracked(loopIndex, {outputTarget, roundOffset});
             }, runState);
         } else {
-            for(const loopIndex of roundIndexes){
+            for(let roundOffset = 0; roundOffset < roundIndexes.length; roundOffset++){
                 throwIfSmartCascadeStopRequested(runState);
-                await runRound(loopIndex);
+                await runRoundTracked(roundIndexes[roundOffset], {roundOffset});
             }
         }
         throwIfSmartCascadeStopRequested(runState);
@@ -30106,16 +30293,34 @@ async function runSmartCascade(targetNode=null, options={}){
         settings = originalSettings;
         promptInput.innerHTML = originalPromptHtml;
         scheduleSave();
-        toast(totalRounds > 1
-            ? trf(loopMode === 'parallel' ? 'smart.loopParallelRoundsDone' : 'smart.loopRunRoundsDone', {n:totalRounds})
-            : tr('smart.loopRunDone'));
+        const failedRounds = runState.failedRounds || 0;
+        if(failedRounds > 0){
+            toast(trf('smart.loopRunRoundsPartial', {ok:Math.max(0, totalRounds - failedRounds), total:totalRounds}));
+        } else {
+            toast(totalRounds > 1
+                ? trf(loopMode === 'parallel' ? 'smart.loopParallelRoundsDone' : 'smart.loopRunRoundsDone', {n:totalRounds})
+                : tr('smart.loopRunDone'));
+        }
     } catch(e) {
         if(parallelLimit === 1) smartLoopContext = null;
         selectedId = originalSelected;
         settings = originalSettings;
         promptInput.innerHTML = originalPromptHtml;
-        toast(e?.smartCascadeStopped ? '已停止一键运行' : (e.message || tr('smart.errRunFailed')).slice(0, 160));
+        if(e?.smartCascadeStopped){
+            toast('已停止一键运行');
+        } else {
+            const failedRound = (Array.isArray(runState.rounds) ? runState.rounds : []).find(item => item.status === 'failed');
+            const prefix = failedRound ? trf('smart.loopRoundFailedHint', {n:failedRound.offset + 1}) : '';
+            toast(`${prefix}${e.message || tr('smart.errRunFailed')}`.slice(0, 200));
+        }
     } finally {
+        // 2026-10-14（循环节点 B1）：把本次轮次结果落回节点，运行结束后状态栏仍能看到失败情况。
+        if(loop?.node && Array.isArray(runState.rounds) && runState.rounds.length
+            && runState.rounds.some(item => item.status !== 'pending')){
+            const doneRounds = runState.rounds.filter(item => item.status === 'done').length;
+            const failedRounds = runState.rounds.filter(item => item.status === 'failed').length;
+            loop.node.lastLoopRun = {at:Date.now(), total:runState.rounds.length, ok:doneRounds, failed:failedRounds};
+        }
         smartCascadeRuns.delete(runKey);
         syncSmartCascadeLegacyState();
         smartCascadeSilentSelection = false;
