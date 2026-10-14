@@ -16211,16 +16211,27 @@ function loopNumberControlHtml({label, value, key, min=1, max=Number.POSITIVE_IN
         </div>
     </div>`;
 }
+// 2026-10-14（用户定稿）：变量体系更名——《计数》《总数》《进度》新增别名《轮次》《总数》《进度》，
+// 旧写法继续有效；chip 按变量类型着色（轮次蓝 / 总数紫 / 进度琥珀），不再是黑底白字大胶囊。
+const SMART_LOOP_TOKEN_PATTERN = /(《计数》|\[计数\]|《轮次》|《总数》|《进度》)/g;
 function smartLoopTokenLabel(token){
+    if(token === '《轮次》') return tr('canvas.loopVarRound');
+    if(token === '《总数》') return tr('canvas.loopVarTotal');
+    if(token === '《进度》') return tr('canvas.loopVarProgress');
     if(token === '《计数》' || token === '[计数]') return tr('canvas.counterToken');
     return token;
 }
+function smartLoopTokenColorClass(token){
+    if(token === '《总数》') return 'is-total';
+    if(token === '《进度》') return 'is-progress';
+    return 'is-round';
+}
 function smartLoopTokenChipHtml(token){
-    return `<span class="loop-smart-token-chip" contenteditable="false" data-token="${escapeHtml(token)}"><span>${escapeHtml(smartLoopTokenLabel(token))}</span><button type="button" aria-label="${escapeHtml(tr('common.delete'))}" title="${escapeHtml(tr('common.delete'))}">×</button></span>`;
+    return `<span class="loop-smart-token-chip ${smartLoopTokenColorClass(token)}" contenteditable="false" data-token="${escapeHtml(token)}"><span>${escapeHtml(smartLoopTokenLabel(token))}</span><button type="button" aria-label="${escapeHtml(tr('common.delete'))}" title="${escapeHtml(tr('common.delete'))}"></button></span>`;
 }
 function smartLoopVariableHtml(text){
-    return String(text || '').split(/(《计数》|\[计数\])/g).map(part => {
-        if(part === '《计数》' || part === '[计数]') return smartLoopTokenChipHtml('《计数》');
+    return String(text || '').split(SMART_LOOP_TOKEN_PATTERN).map(part => {
+        if(/^(《计数》|\[计数\]|《轮次》|《总数》|《进度》)$/.test(part)) return smartLoopTokenChipHtml(part);
         return escapeHtml(part);
     }).join('');
 }
@@ -16263,7 +16274,7 @@ function autoSyncLoopPromptFields(node){
     if(!items.length) return false;
     const fields = smartLoopActivePromptFieldValues(node);
     if(fields.length === items.length && fields.every((f, i) => f === items[i])) return false;
-    const hasTemplate = fields.some(f => /\u300a\u8ba1\u6570\u300b|\u300a\u603b\u6570\u300b|\[\u8ba1\u6570\]|\[\u603b\u6570\]/.test(f));
+    const hasTemplate = fields.some(f => /\u300a\u8ba1\u6570\u300b|\u300a\u603b\u6570\u300b|\[\u8ba1\u6570\]|\[\u603b\u6570\]|\u300a\u8f6e\u6b21\u300b|\u300a\u8fdb\u5ea6\u300b/.test(f));
     if(hasTemplate) return false;
     setSmartLoopPromptFieldValues(node, items);
     if(typeof scheduleSave === 'function') scheduleSave();
@@ -16305,6 +16316,34 @@ function setSmartLoopDrawerOpen(nodeId, key, open){
 }
 function toggleSmartLoopDrawer(nodeId, key){
     return setSmartLoopDrawerOpen(nodeId, key, !smartLoopDrawerOpen(nodeId, key));
+}
+// 2026-10-14（用户定稿）：「＋ 变量」菜单开合状态（同样只存内存）。
+const smartLoopVarMenuState = new Map();
+function smartLoopVarMenuOpen(nodeId){
+    return Boolean(smartLoopVarMenuState.get(String(nodeId)));
+}
+function setSmartLoopVarMenuOpen(nodeId, open){
+    smartLoopVarMenuState.set(String(nodeId), Boolean(open));
+}
+function toggleSmartLoopVarMenu(nodeId){
+    setSmartLoopVarMenuOpen(nodeId, !smartLoopVarMenuOpen(nodeId));
+    bindSmartLoopVarMenuOutside();
+    return smartLoopVarMenuOpen(nodeId);
+}
+// 点击菜单/按钮以外的地方自动收起（延迟到 click 走完再 render，避免打断其它点击处理）。
+let smartLoopVarMenuOutsideBound = false;
+function bindSmartLoopVarMenuOutside(){
+    if(smartLoopVarMenuOutsideBound || typeof document === 'undefined') return;
+    smartLoopVarMenuOutsideBound = true;
+    document.addEventListener('click', e => {
+        if(!smartLoopVarMenuState.size) return;
+        if(e.target?.closest?.('.loop-var-menu, [data-loop-var-menu]')) return;
+        let changed = false;
+        smartLoopVarMenuState.forEach((open, id) => {
+            if(open){ smartLoopVarMenuState.set(id, false); changed = true; }
+        });
+        if(changed) setTimeout(() => { if(typeof render === 'function') render(); }, 0);
+    }, true);
 }
 function smartLoopPromptColorClass(index){
     const i = Math.max(0, Math.round(Number(index) || 0));
@@ -16444,7 +16483,7 @@ function smartLoopBodyHtml(node){
         ? tr('canvas.loopSourceOff')
         : (promptItems.length
             ? trf('canvas.loopPromptSourceCount', {n:promptItems.length})
-            : (localPromptCount ? trf('canvas.loopLocalPromptCount', {n:localPromptCount}) : tr('canvas.loopSourceEmpty')));
+            : (localPromptCount ? trf('canvas.loopLocalPromptCount', {n:localPromptCount}) : tr('canvas.loopSourceEmptyPrompt')));
     const imageSummary = !node.imageInput
         ? tr('canvas.loopSourceOff')
         : (imageCount ? trf('canvas.loopImageSourceCount', {n:imageCount, batch:node.imageBatchSize}) : tr('canvas.loopSourceEmpty'));
@@ -16468,8 +16507,15 @@ function smartLoopBodyHtml(node){
                 }).join('')}
             </div>
             <div class="loop-smart-row loop-smart-prompt-actions">
-                <button class="loop-smart-control loop-smart-token loop-smart-counter-token" type="button" data-loop-token="《计数》">${escapeHtml(tr('canvas.counterToken'))}</button>
-                <span class="loop-smart-note">${escapeHtml(promptHint)}</span>
+                <span class="loop-var-wrap">
+                    <button class="loop-smart-control loop-var-btn" type="button" data-loop-var-menu="1" title="${escapeAttr(tr('canvas.loopVarMenuTip'))}" aria-label="${escapeAttr(tr('canvas.loopVarMenuTip'))}">＋ ${escapeHtml(tr('canvas.loopVarButton'))}</button>
+                    ${smartLoopVarMenuOpen(node.id) ? `<span class="loop-var-menu">
+                        <button type="button" class="loop-smart-control loop-var-item is-round" data-loop-token="《轮次》"><i>${escapeHtml(tr('canvas.loopVarRound'))}</i><em>${escapeHtml(tr('canvas.loopVarRoundTip'))}</em></button>
+                        <button type="button" class="loop-smart-control loop-var-item is-total" data-loop-token="《总数》"><i>${escapeHtml(tr('canvas.loopVarTotal'))}</i><em>${escapeHtml(tr('canvas.loopVarTotalTip'))}</em></button>
+                        <button type="button" class="loop-smart-control loop-var-item is-progress" data-loop-token="《进度》"><i>${escapeHtml(tr('canvas.loopVarProgress'))}</i><em>${escapeHtml(tr('canvas.loopVarProgressTip'))}</em></button>
+                    </span>` : ''}
+                </span>
+                <span class="loop-smart-note">${escapeHtml(tr('canvas.loopVarHint'))}</span>
                 <button class="loop-smart-control loop-smart-add-prompt" type="button" data-loop-prompt-add="1" title="${escapeHtml(tr('canvas.loopAddPrompt'))}" aria-label="${escapeHtml(tr('canvas.loopAddPrompt'))}"><i data-lucide="plus"></i></button>
             </div>
         </div>` : ''}
@@ -19744,16 +19790,29 @@ function bindLoopNodeControls(el, node){
     });
     const firstText = el.querySelector('.loop-smart-text');
     const targetPromptEditor = () => activePromptEditor && el.contains(activePromptEditor) ? activePromptEditor : firstText;
+    // 2026-10-14（用户定稿）：插入变量后收起菜单。
     el.querySelectorAll('[data-loop-token]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
             const text = targetPromptEditor();
             if(!text) return;
-            const token = btn.dataset.loopToken || '《计数》';
+            const token = btn.dataset.loopToken || '《轮次》';
             insertSmartLoopToken(text, token);
+            setSmartLoopVarMenuOpen(node.id, false);
+            // 不整树重渲染（会丢编辑光标），直接摘掉菜单节点
+            btn.closest('.loop-var-menu')?.remove();
             syncPromptFieldsFromDom();
             scheduleSave();
+        };
+    });
+    // 2026-10-14（用户定稿）：「＋ 变量」菜单开关。
+    el.querySelectorAll('[data-loop-var-menu]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleSmartLoopVarMenu(node.id);
+            render();
         };
     });
     el.querySelectorAll('[data-loop-run]').forEach(btn => {
@@ -26866,12 +26925,15 @@ function smartLoopActivePromptFieldValues(node){
     return smartLoopPromptFieldValues(node).filter(Boolean);
 }
 function smartLoopDefaultPromptText(){
-    return tr('smart.loopDefaultPrompt') || '现在生成第《计数》张卖点图片';
+    return tr('smart.loopDefaultPrompt') || '生成第《轮次》轮画面';
 }
 function isSmartLoopDefaultPrompt(text){
     const value = String(text || '').trim();
     if(!value) return false;
+    // 新旧默认都视为「未编辑」：上游接入提示词时自动让位（V10-18 起新默认，旧文案继续兼容）
     return value === smartLoopDefaultPromptText()
+        || value === '生成第《轮次》轮画面'
+        || value === 'Generate the image for round 《轮次》'
         || value === '现在生成第《计数》张卖点图片'
         || value === 'Generate selling-point image 《计数》';
 }
@@ -26950,9 +27012,11 @@ function smartLoopPrompt(node, ctx=smartLoopContext){
         .replaceAll('《计数》', String(index))
         .replaceAll('[计数]', String(index))
         .replaceAll(`[${tr('canvas.counterToken')}]`, String(index))
+        // 2026-10-14（用户定稿）：新别名《轮次》《总数》《进度》，与旧《计数》等价
+        .replaceAll('《轮次》', String(index))
         .replaceAll('《总数》', String(total))
-        .replaceAll('[总数]', String(total))
         .replaceAll('《进度》', `${index}/${total}`)
+        .replaceAll('[总数]', String(total))
         .replaceAll('[进度]', `${index}/${total}`)
         .trim();
 }

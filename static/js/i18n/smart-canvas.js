@@ -206,7 +206,7 @@
         "smart.loopPromptHintFound": { zh: "识别到 {n} 条提示词，按计数轮流输出", en: "Found {n} prompt(s); outputs rotate by count" },
         "smart.loopPromptHintVariable": { zh: "可使用 [计数] 作为变量", en: "Use [Count] as a variable" },
         "smart.loopParallelTip": { zh: "智能画布会按轮落盘，避免覆盖同一目标节点", en: "Smart Canvas saves each round separately to avoid overwriting the same target node" },
-        "smart.loopDefaultPrompt": { zh: "现在生成第《计数》张卖点图片", en: "Generate selling-point image 《计数》" },
+        "smart.loopDefaultPrompt": { zh: "生成第《轮次》轮画面", en: "Generate the image for round 《轮次》" },
         "smart.loopRunAll": { zh: "一键运行", en: "Run chain" },
         "smart.loopNoChain": { zh: "没有可一键运行的上游链路", en: "No upstream chain to run" },
         "smart.loopRunDone": { zh: "一键运行完成", en: "Chain run complete" },
