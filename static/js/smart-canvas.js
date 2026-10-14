@@ -1124,7 +1124,8 @@ function smartVideoPlayerHtml(itemOrUrl, attrs=''){
 // 播放/暂停 + 当前时间 + 进度 + 总时长 + 音量 + 截帧（相机），原生 controls 已全部摘除。
 // 顺序与参考稿一致：截帧按钮排在控制条最右端，菜单从按钮上方弹出。
 // 2026-10-11（用户要求）：控制条不放进度滑块——进度/时长保留数字显示。
-// 2026-10-14（用户要求）：图像/视频卡片不支持手动缩放，右下角缩放手柄已全部撤掉（见 canResizeNode）。
+// 2026-10-14（用户要求）：图像/视频卡片不支持手动缩放，右下角缩放手柄已撤掉；
+// 10-14 二次反馈：多图生成组框（isGroup）不是卡片，恢复其手柄（见 canResizeNode）。
 function smartVideoCanvasControlsHtml(){
     // 2026-10-11（用户要求：全面复刻参考图控制条，AI生成角标除外）：恢复进度滑块，
     // 布局 = 播放/暂停 · 当前时间 · 进度滑块 · 总时长 · 音量 · 截帧相机。
@@ -18499,11 +18500,13 @@ function render(){
         const smartGroupResizeBtn = '';
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
         const uploadPreviewOnly = isUploadEntry && imgs.length > 0;
-        // 2026-10-14（用户要求：图像/视频卡片都不支持手动缩放）——媒体节点不再渲染
-        // 右下角缩放手柄（10-12 恢复的 .node-resize-handle 对媒体卡片全部撤掉）；
-        // 仅非媒体节点（提示词/循环/智能分组/工作流组等）及其生成中状态保留手柄。
-        const canResizeNode = !isImageNode
-            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup || isWorkflowGroup);
+        // 2026-10-14（用户要求：图像/视频卡片都不支持手动缩放）——单图/单视频等媒体卡片
+        // 不再渲染右下角缩放手柄；但多图生成组框（isGroup：多图/追加中/等待组）
+        // 是框不是卡片，10-15 误伤后按用户反馈恢复手柄（10-14 二次反馈）。
+        // 非媒体节点（提示词/循环/智能分组/工作流组等）及其生成中状态保留手柄。
+        const canResizeNode = isGroup
+            || (!isImageNode
+            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup || isWorkflowGroup));
         const nodeStyleExtra = isWorkflowGroup ? workflowGroupFrameStyle(node) : (isSmartGroup ? smartGroupFrameStyle(node) : (isGroup ? imageGroupFrameStyle(node) : ''));
         // 2026-10-12（用户要求：成组后与普通 Group 节点同款）：生成型智能分组也恢复显示外部标题，
         // 卡片内不再有「N 图片」摘要行（hideGeneratedGroupHead 已无意义，恒 false 保留结构）。
