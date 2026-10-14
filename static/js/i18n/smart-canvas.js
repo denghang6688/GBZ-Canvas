@@ -213,6 +213,7 @@
         "smart.loopRunRoundsDone": { zh: "循环运行完成：{n} 轮", en: "Loop complete: {n} rounds" },
         "smart.loopParallelRoundsDone": { zh: "并发运行完成：{n} 轮", en: "Concurrent run complete: {n} rounds" },
         "smart.loopRunRoundsPartial": { zh: "循环结束：{ok}/{total} 轮成功", en: "Loop finished: {ok}/{total} rounds ok" },
+        "smart.loopRerunRoundsDone": { zh: "重跑完成：{n} 轮", en: "Re-ran {n} rounds" },
         "smart.loopRoundFailedHint": { zh: "第 {n} 轮失败：", en: "Round {n} failed: " },
         "smart.mentionInput": { zh: "输入图", en: "Inputs" },
         "smart.mentionAssets": { zh: "资产库", en: "Assets" },
