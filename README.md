@@ -2,7 +2,6 @@
 
 > 一个面向创作者的本地化 AI 无限画布工作台 —— 在浏览器里拖拽节点、组装工作流、调任意大模型（对话 / 文生图 / 文生视频 / LoRA / ControlNet / ComfyUI），一键导出可复用的工作流。
 
-[![Download](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E5%85%8D%E5%AE%89%E8%A3%85%E4%BE%BF%E6%90%BA%E7%89%88-brightgreen.svg)](https://github.com/denghang6688/GBZ-Canvas/releases/latest)
 [![License](https://img.shields.io/badge/license-Commercial--No%20Resale-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
@@ -20,18 +19,11 @@
 
 | 方式 | 适合 | 说明 |
 | --- | --- | --- |
-| **[⬇️ 便携版 zip（推荐）](https://github.com/denghang6688/GBZ-Canvas/releases/latest)** | 绝大多数人 | 内置 Python 运行时（约 32 MB），解压后双击 `启动服务.bat` 即用，**不用装任何环境** |
-| [`git clone` 源码](#5-分钟上手从源码运行) | 开发者 | 需要 Python 3.10+；双击 `启动服务.bat` 会自动检测并安装依赖 |
+| [`git clone` 源码（推荐）](#5-分钟上手从源码运行) | 大多数用户 | 需要 Python 3.10+；双击 `启动服务.bat` 会自动检测并安装依赖 |
 | [Docker](#docker推荐用于服务器--nas) | 服务器 / NAS | `docker compose up -d`，一条命令起服务 |
 
-> ⚠️ **别下错包**：GitHub 页面上的 **Code → Download ZIP** 给的是**源码包**（约 3 MB），不含 Python 运行时。
-> 装了 Python 3.10+ 的机器双击 `启动服务.bat` 会自动装依赖并启动；**机器上没有 Python 的，请直接下便携版**。
-
-### 便携版首次使用
-
-1. 解压 → 双击 `启动服务.bat`（Windows）→ 浏览器自动打开 `http://127.0.0.1:2000/`
-2. 用记事本打开 `API/.env` 填入自己的 API 密钥（也可以启动后在画布左下角「API 设置」里填）
-3. 同一局域网的其他设备可通过 `http://<你的IP>:2000/` 访问
+> ⚠️ GitHub 页面上的 **Code → Download ZIP** 给的是**源码包**（约 3 MB），不含 Python 运行时；
+> 装了 Python 3.10+ 的机器双击 `启动服务.bat` 会自动装依赖并启动。
 
 ## 5 分钟上手（从源码运行）
 
@@ -44,7 +36,7 @@ cd GBZ-Canvas
 ```
 
 首次启动会自动检测并安装依赖（优先走清华镜像，失败自动回退官方源）；机器上找不到 Python 3.10+ 时，
-脚本会提示你改用免安装便携版。启动后浏览器会自动打开 `http://127.0.0.1:2000/`，局域网内其他设备可通过 `http://<你的IP>:2000/` 访问。
+脚本会给出安装指引。启动后浏览器会自动打开 `http://127.0.0.1:2000/`，局域网内其他设备可通过 `http://<你的IP>:2000/` 访问。
 
 ### macOS / Linux
 
