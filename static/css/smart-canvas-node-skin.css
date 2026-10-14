@@ -1988,7 +1988,21 @@ html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop
 .loop-drawer-caret { flex:0 0 13px; display:flex; align-items:center; justify-content:center; color:var(--faint); }
 .loop-drawer-caret i, .loop-drawer-caret svg { width:12px !important; height:12px !important; }
 .loop-drawer-body { width:100%; min-width:0; flex:0 0 auto; display:flex; flex-direction:column; gap:6px; padding:1px 1px 2px; }
-.loop-drawer-body .loop-smart-text { min-height:46px; max-height:88px; }
+/* 2026-10-14（用户反馈）：抽屉内提示词条目默认单行截断（title 悬停看全文），
+   聚焦编辑时才展开多行——长提示词不再把节点撑大。 */
+.loop-drawer-body .loop-smart-text {
+    min-height:26px; max-height:26px; padding:4px 9px; line-height:18px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.loop-drawer-body .loop-smart-text:focus {
+    min-height:46px; max-height:88px;
+    white-space:pre-wrap; overflow:auto;
+}
+.loop-drawer-body .loop-smart-upstream-text {
+    max-height:18px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+}
+/* 2026-10-14（用户反馈「显示不稳定」）：上游预览不做 hover 展开——鼠标划过整段
+   展开/收回会造成布局抖动；恒单行 + title 悬停看全文，与条目同款零抖动。 */
 
 .loop-rail { width:100%; min-width:0; flex:0 0 auto; }
 .loop-rail-track { position:relative; display:flex; flex-direction:column; gap:4px; padding:2px 2px 2px 26px; }
@@ -2022,8 +2036,8 @@ html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop
 .loop-chip-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:center; gap:6px; margin-top:2px; }
 .loop-chip-row .loop-number-control { width:100%; flex:1 1 auto; }
 .loop-chip-row .loop-number-trigger { width:100%; height:30px; padding:0 7px; gap:4px; }
-.loop-policy-seg { flex:0 0 auto !important; width:auto !important; display:grid !important; grid-template-columns:auto auto !important; padding:1px; border-radius:9px; }
-.loop-policy-seg button { height:24px; padding:0 8px; border-radius:7px; font-size:10px; }
+.loop-policy-seg { flex:1 1 auto !important; width:100% !important; display:grid !important; grid-template-columns:repeat(3, minmax(0, 1fr)) !important; padding:1px; border-radius:9px; }
+.loop-policy-seg button { height:24px; padding:0 6px; border-radius:7px; font-size:10px; }
 .loop-runbar { flex:0 0 36px; height:36px; margin-top:2px; border-radius:12px; box-shadow:none; }
 .loop-runbar i, .loop-runbar svg { width:14px !important; height:14px !important; }
 
@@ -2087,3 +2101,39 @@ html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-var-btn { background:rgba(46,46,46,.95); border-color:rgba(154,154,154,.34); color:#e6e6e6; }
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-var-btn:hover { border-color:rgba(220,220,220,.6); }
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-var-menu { background:#303030; border-color:rgba(154,154,154,.34); }
+
+/* ==========================================================================
+   2026-10-14 V10-19：输出模式下拉 + 失败策略三态（用户定稿设计稿）；
+   浮层交互与「＋ 变量」菜单同款：内存态开关、点外部收起、切换后保持展开。
+   ========================================================================== */
+.loop-output-wrap { position:relative; display:block; width:100px; }
+.loop-output-btn { display:flex; align-items:center; gap:4px; width:100%; height:30px; padding:0 8px; border-radius:8px; }
+.loop-output-btn > span { flex:0 0 auto; font-size:10px; }
+.loop-output-btn > strong { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; font-weight:850; text-align:right; }
+.loop-output-btn::after { content:""; flex:0 0 auto; width:0; height:0; border-left:3.5px solid transparent; border-right:3.5px solid transparent; border-top:4px solid currentColor; opacity:.55; }
+.loop-output-btn.is-open::after { transform:rotate(180deg); }
+.loop-output-menu { position:absolute; right:0; bottom:calc(100% + 5px); z-index:41; width:214px; display:flex; flex-direction:column; gap:3px; padding:5px; border-radius:10px; border:1px solid rgba(154,154,154,.34); background:#303030; box-shadow:0 14px 34px rgba(5,5,5,.4); max-height:min(56vh, 430px); overflow-y:auto; scrollbar-width:thin; }
+.loop-output-menu-label { padding:3px 7px 1px; font-size:9.5px; font-weight:800; color:#8a8a8a; }
+.loop-output-item { display:flex; align-items:center; gap:7px; width:100%; height:26px; padding:0 7px; border-radius:7px; border:0; background:transparent; text-align:left; }
+.loop-output-item:hover { background:rgba(255,255,255,.09); }
+.loop-output-item i { flex:0 0 auto; font-style:normal; font-size:10px; font-weight:800; padding:1px 7px; border-radius:5px; }
+.loop-output-item em { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-style:normal; font-size:9.5px; color:#9a9a9a; }
+.loop-output-item.is-on { background:rgba(255,255,255,.12); }
+.loop-output-item.is-on em { color:#e6e6e6; }
+.loop-output-item:disabled { opacity:.42; cursor:not-allowed; }
+.loop-output-item:disabled:hover { background:transparent; }
+.loop-output-item.is-auto i { color:#9cc3f7; background:rgba(59,130,246,.18); border:1px solid rgba(59,130,246,.55); }
+.loop-output-item.is-inplace i { color:#8fdcb9; background:rgba(16,185,129,.16); border:1px solid rgba(16,185,129,.55); }
+.loop-output-item.is-slots i { color:#c4b0f2; background:rgba(139,92,246,.16); border:1px solid rgba(139,92,246,.55); }
+.loop-output-item.is-group i { color:#8fd6e8; background:rgba(6,182,212,.16); border:1px solid rgba(6,182,212,.55); }
+.loop-output-item.is-stitch i { color:#f2c98f; background:rgba(245,158,11,.14); border:1px solid rgba(245,158,11,.55); }
+.loop-output-item.is-layout i { color:#c4c4c4; background:rgba(138,137,132,.18); border:1px solid rgba(138,137,132,.5); }
+.loop-policy-row { display:flex; align-items:center; gap:6px; margin-top:2px; }
+.loop-policy-row .loop-policy-seg { flex:1 1 auto; min-width:0; }
+.loop-retry-count { flex:0 0 auto; }
+.loop-retry-count .loop-number-control { width:auto; }
+.loop-retry-count .loop-number-trigger { width:auto; min-width:72px; height:30px; }
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-btn { background:rgba(46,46,46,.95); border-color:rgba(154,154,154,.34); color:#e6e6e6; }
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-btn > span { color:#9a9a9a; }
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-btn:hover { border-color:rgba(220,220,220,.6); }
+html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-menu { background:#303030; border-color:rgba(154,154,154,.34); }

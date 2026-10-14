@@ -6263,24 +6263,26 @@ function smartParallelPromptSuffix(roundOffset=0){
 function smartLoopWidth(node){
     return 340;
 }
-// 单条提示词在抽屉里的高度（实测标定）：文本区 CSS 限高 46~88px。
-// 一行短提示词 = 46 文本 + 18（轮次提示行 12 + 间距 6）；长文案直接被限高 88 → 106。
-// 宁可高估（多留白）也不要低估（内容被裁）。
+// 单条提示词在抽屉里的高度（实测标定）。2026-10-14（用户反馈）：抽屉内条目默认单行截断
+// （26px 文本 + 轮次提示行 18 + 条目留白 2），聚焦编辑时才展开（编辑走内部滚动，不改节点高度），
+// 长短文案恒 46 —— 宁可高估（多留白）也不要低估（内容被裁）。
 function smartLoopPromptItemHeight(text){
-    const len = String(text || '').trim().length;
-    return len <= 20 ? 64 : 106;
+    return 46;
 }
 function smartLoopHeight(node){
     // 2026-10-14（方案 A「轨道运行单」）：逐段实测标定（layout px，不受画布缩放影响）。
     // 高度 = 节点外框(32) + 各段内容 + 卡片行间距 6×(段数-1)。
     const rounds = Math.max(1, smartLoopCount(node));
     const visibleRounds = Math.min(rounds, SMART_LOOP_RAIL_MAX_VISIBLE);
+    // 2026-10-14（V10-19）：运行中运行头会多出一条 4px 进度条（.loop-status-bar 是流内元素，占布局高度）。
+    const loopRunningNow = Boolean(smartCascadeRunForLoop(node?.id));
     const segments = [
-        41,                      // 运行头（状态 + 顺序/并发）
+        loopRunningNow ? 45 : 41, // 运行头（状态 + 顺序/并发；运行中额外 4px 进度条）
         31,                      // 提示词源抽屉头
         31,                      // 图片源抽屉头
         visibleRounds * 34 + 4,  // 轮次轨道（每站 34 + 轨道留白 4）
-        30,                      // 参数芯片行（起始/次数/失败策略）
+        32,                      // 参数芯片行（起始 / 次数 / 输出下拉）
+        32,                      // 失败策略行（出错即停 / 跳过继续 / 自动重试）
         36                       // 贯穿运行条
     ];
     if(node?.imageInput && smartLoopDrawerOpen(node.id, 'image')){
@@ -16330,17 +16332,51 @@ function toggleSmartLoopVarMenu(nodeId){
     bindSmartLoopVarMenuOutside();
     return smartLoopVarMenuOpen(nodeId);
 }
+// 2026-10-14（V10-19）：输出模式下拉开合状态（与变量菜单相同，只存内存，不进画布数据）。
+const smartLoopOutputMenuState = new Map();
+function smartLoopOutputMenuOpen(nodeId){
+    return Boolean(smartLoopOutputMenuState.get(String(nodeId)));
+}
+function setSmartLoopOutputMenuOpen(nodeId, open){
+    smartLoopOutputMenuState.set(String(nodeId), Boolean(open));
+}
+function toggleSmartLoopOutputMenu(nodeId){
+    setSmartLoopOutputMenuOpen(nodeId, !smartLoopOutputMenuOpen(nodeId));
+    bindSmartLoopVarMenuOutside();
+    return smartLoopOutputMenuOpen(nodeId);
+}
+// 2026-10-14（V10-19）：输出模式 / 槽位排列 / 重试次数三个字段的兼容读法。
+// 老画布没有这些字段 → 按 auto + horizontal + 重试 2 次处理，行为与改动前完全一致。
+const SMART_LOOP_OUTPUT_MODES = new Set(['auto', 'inplace', 'slots', 'group', 'stitch']);
+function smartLoopOutputMode(node){
+    const value = String(node?.outputMode || '');
+    return SMART_LOOP_OUTPUT_MODES.has(value) ? value : 'auto';
+}
+function smartLoopSlotLayout(node){
+    return node?.slotLayout === 'vertical' ? 'vertical' : 'horizontal';
+}
+const SMART_LOOP_RETRY_MIN = 1;
+const SMART_LOOP_RETRY_MAX = 3;
+const SMART_LOOP_RETRY_DEFAULT = 2;
+function smartLoopRetryCount(node){
+    const value = Math.round(Number(node?.retryCount));
+    if(!Number.isFinite(value)) return SMART_LOOP_RETRY_DEFAULT;
+    return Math.min(SMART_LOOP_RETRY_MAX, Math.max(SMART_LOOP_RETRY_MIN, value));
+}
 // 点击菜单/按钮以外的地方自动收起（延迟到 click 走完再 render，避免打断其它点击处理）。
 let smartLoopVarMenuOutsideBound = false;
 function bindSmartLoopVarMenuOutside(){
     if(smartLoopVarMenuOutsideBound || typeof document === 'undefined') return;
     smartLoopVarMenuOutsideBound = true;
     document.addEventListener('click', e => {
-        if(!smartLoopVarMenuState.size) return;
-        if(e.target?.closest?.('.loop-var-menu, [data-loop-var-menu]')) return;
+        if(!smartLoopVarMenuState.size && !smartLoopOutputMenuState.size) return;
+        if(e.target?.closest?.('.loop-var-menu, [data-loop-var-menu], .loop-output-menu, [data-loop-output-menu]')) return;
         let changed = false;
         smartLoopVarMenuState.forEach((open, id) => {
             if(open){ smartLoopVarMenuState.set(id, false); changed = true; }
+        });
+        smartLoopOutputMenuState.forEach((open, id) => {
+            if(open){ smartLoopOutputMenuState.set(id, false); changed = true; }
         });
         if(changed) setTimeout(() => { if(typeof render === 'function') render(); }, 0);
     }, true);
@@ -16348,6 +16384,51 @@ function bindSmartLoopVarMenuOutside(){
 function smartLoopPromptColorClass(index){
     const i = Math.max(0, Math.round(Number(index) || 0));
     return `is-c${i % SMART_LOOP_PROMPT_COLOR_COUNT}`;
+}
+// 2026-10-14（V10-19）：输出模式下拉（参数芯片行第三块）。
+// 浮层分两组：输出方式（4 项）+ 槽位排列（2 项，仅槽位模式可点），交互与「＋ 变量」菜单一致。
+function loopOutputModeLabel(mode){
+    if(mode === 'inplace') return tr('canvas.loopOutputInplace');
+    if(mode === 'slots') return tr('canvas.loopOutputSlots');
+    if(mode === 'group') return tr('canvas.loopOutputResultGroup');
+    if(mode === 'stitch') return tr('canvas.loopOutputStitch');
+    return tr('canvas.loopOutputAuto');
+}
+function loopOutputModeTip(mode){
+    if(mode === 'inplace') return tr('canvas.loopOutputInplaceTip');
+    if(mode === 'slots') return tr('canvas.loopOutputSlotsTip');
+    if(mode === 'group') return tr('canvas.loopOutputResultGroupTip');
+    if(mode === 'stitch') return tr('canvas.loopOutputStitchTip');
+    return tr('canvas.loopOutputAutoTip');
+}
+function smartLoopOutputChipHtml(node, running){
+    const mode = smartLoopOutputMode(node);
+    const layout = smartLoopSlotLayout(node);
+    const open = smartLoopOutputMenuOpen(node.id);
+    return `<span class="loop-output-wrap">
+        <button class="loop-smart-control loop-output-btn ${open ? 'is-open' : ''}" type="button" data-loop-output-menu="1" title="${escapeAttr(tr('canvas.loopOutputMenuTip'))}" aria-label="${escapeAttr(tr('canvas.loopOutputMenuTip'))}" ${running ? 'disabled' : ''}>
+            <span>${escapeHtml(tr('canvas.loopOutput'))}</span><strong>${escapeHtml(loopOutputModeLabel(mode))}</strong>
+        </button>
+        ${open ? `<span class="loop-output-menu">
+            <span class="loop-output-menu-label">${escapeHtml(tr('canvas.loopOutputGroupMode'))}</span>
+            ${['auto', 'inplace', 'slots', 'group', 'stitch'].map(item => `<button type="button" class="loop-smart-control loop-output-item is-${item} ${mode === item ? 'is-on' : ''}" data-loop-output-mode="${item}"><i>${escapeHtml(loopOutputModeLabel(item))}</i><em>${escapeHtml(loopOutputModeTip(item))}</em></button>`).join('')}
+            <span class="loop-output-menu-label">${escapeHtml(tr('canvas.loopOutputGroupLayout'))}</span>
+            ${[['horizontal', 'canvas.loopSlotHorizontal', 'canvas.loopSlotHorizontalTip'], ['vertical', 'canvas.loopSlotVertical', 'canvas.loopSlotVerticalTip']].map(([value, labelKey, tipKey]) => `<button type="button" class="loop-smart-control loop-output-item is-layout ${layout === value && mode === 'slots' ? 'is-on' : ''}" data-loop-slot-layout="${value}" ${mode === 'slots' ? '' : 'disabled'}><i>${escapeHtml(tr(labelKey))}</i><em>${escapeHtml(tr(tipKey))}</em></button>`).join('')}
+        </span>` : ''}
+    </span>`;
+}
+// 2026-10-14（V10-19）：失败策略行（三态 seg；选中「自动重试」时才出现次数控件）。
+function loopPolicyRowHtml(node, running){
+    const policy = node.onError;
+    const retryOn = policy === 'retry';
+    return `<div class="loop-smart-row loop-policy-row">
+        <span class="loop-smart-seg loop-policy-seg">
+            <button type="button" class="loop-smart-control ${!retryOn && policy !== 'skip' ? 'active' : ''}" data-loop-onerror="stop" title="${escapeAttr(tr('canvas.loopOnErrorStopTip'))}" ${running ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorStop'))}</button>
+            <button type="button" class="loop-smart-control ${policy === 'skip' ? 'active' : ''}" data-loop-onerror="skip" title="${escapeAttr(tr('canvas.loopOnErrorSkipTip'))}" ${running ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorSkip'))}</button>
+            <button type="button" class="loop-smart-control ${retryOn ? 'active' : ''}" data-loop-onerror="retry" title="${escapeAttr(tr('canvas.loopOnErrorRetryTip'))}" ${running ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorRetry'))}</button>
+        </span>
+        ${retryOn ? `<span class="loop-retry-count">${loopNumberControlHtml({label:tr('canvas.loopRetryCount'), value:smartLoopRetryCount(node), key:'retryCount', min:SMART_LOOP_RETRY_MIN, max:SMART_LOOP_RETRY_MAX, quick:[1, 2, 3], title:tr('canvas.loopRetryCountTip')})}</span>` : ''}
+    </div>`;
 }
 // 紧凑运行头：B1 的「第 n/N 轮 + 进度条 + 上次结果」保留，失败策略挪到参数芯片行。
 function loopRunStatusHtml(node, view, running){
@@ -16414,10 +16495,17 @@ function loopRoundRailHtml(node, view){
         try { promptText = node.showPrompt ? smartLoopPrompt(node, {index, total:endIndex}) : ''; } catch(e){ promptText = ''; }
         const promptIndex = promptCount ? ((index - 1) % promptCount) : -1;
         const stateLabel = tr(`canvas.loopRoundState_${status}`);
-        const tip = `${trf('canvas.loopRoundDotTip', {n:offset + 1, index, state:stateLabel})}${promptText ? `\n${promptText}` : ''}`;
+        // 2026-10-14（V10-19）：自动重试进行中——站点保持蓝色，右侧显示「重试 n/m」。
+        const retryAttempt = Math.max(0, Number(live?.retryAttempt) || 0);
+        const retryMax = Math.max(0, Number(live?.retryMax) || 0);
+        const retrying = status === 'running' && retryAttempt > 0 && retryMax > 0;
+        const retryLabel = retrying ? trf('canvas.loopRoundRetrying', {n:retryAttempt, m:retryMax}) : '';
+        const tip = `${trf('canvas.loopRoundDotTip', {n:offset + 1, index, state:retrying ? retryLabel : stateLabel})}${promptText ? `\n${promptText}` : ''}`;
         const right = status === 'failed'
             ? `<button type="button" class="loop-smart-control loop-station-retry" data-loop-round-retry="${offset}" title="${escapeAttr(tr('canvas.loopRetryRoundTip'))}">${escapeHtml(tr('canvas.loopRetryRound'))}</button>`
-            : (status === 'running' ? `<span class="loop-station-state">${escapeHtml(stateLabel)}</span>` : '');
+            : (retrying
+                ? `<span class="loop-station-state is-retrying">${escapeHtml(retryLabel)}</span>`
+                : (status === 'running' ? `<span class="loop-station-state">${escapeHtml(stateLabel)}</span>` : ''));
         stations.push(`<div class="loop-station is-${escapeAttr(status)}" data-loop-round="${offset}" title="${escapeAttr(tip)}">
             <span class="loop-station-dot ${promptIndex >= 0 ? smartLoopPromptColorClass(promptIndex) : ''}">${offset + 1}</span>
             <span class="loop-station-text${promptText ? '' : ' is-empty'}">${escapeHtml(promptText || (node.showPrompt ? tr('canvas.loopPromptNone') : tr('canvas.loopPromptDisabled')))}</span>
@@ -16459,6 +16547,9 @@ function smartLoopBodyHtml(node){
     node.imageOffset = smartLoopImageOffset(node);
     node.imageBatchSize = Math.max(1, Math.round(Number(node.imageBatchSize) || 1));
     node.onError = smartLoopOnError(node);
+    node.outputMode = smartLoopOutputMode(node);
+    node.slotLayout = smartLoopSlotLayout(node);
+    node.retryCount = smartLoopRetryCount(node);
     node.showPrompt = Boolean(node.showPrompt);
     node.imageInput = Boolean(node.imageInput);
     const totalRounds = node.count;
@@ -16493,14 +16584,14 @@ function smartLoopBodyHtml(node){
         ${node.showPrompt && promptOpen ? `<div class="loop-drawer-body">
             ${currentUpstreamPrompt ? `<div class="loop-smart-upstream">
                 <div class="loop-smart-upstream-label">${escapeHtml(promptHint)}</div>
-                <div class="loop-smart-upstream-text">${escapeHtml(currentUpstreamPrompt)}</div>
+                <div class="loop-smart-upstream-text" title="${escapeAttr(currentUpstreamPrompt)}">${escapeHtml(currentUpstreamPrompt)}</div>
             </div>` : ''}
             <div class="loop-smart-prompt-list">
                 ${visiblePromptFields.map((value, index) => {
                     const displayValue = promptItems.length && isSmartLoopDefaultPrompt(value) ? '' : value;
                     return `<div class="loop-smart-prompt-item">
                     <div class="loop-smart-prompt-index ${smartLoopPromptColorClass(index)}">${index + 1}</div>
-                    <div class="loop-smart-control loop-smart-text" contenteditable="true" data-loop-prompt-index="${index}" data-placeholder="${escapeHtml(tr('canvas.loopVariablePlaceholder'))}">${smartLoopVariableHtml(displayValue || (index === 0 && !promptFields.length && !promptItems.length ? defaultPrompt : ''))}</div>
+                    <div class="loop-smart-control loop-smart-text" contenteditable="true" data-loop-prompt-index="${index}" data-placeholder="${escapeHtml(tr('canvas.loopVariablePlaceholder'))}" title="${escapeAttr(displayValue || (index === 0 && !promptFields.length && !promptItems.length ? defaultPrompt : ''))}">${smartLoopVariableHtml(displayValue || (index === 0 && !promptFields.length && !promptItems.length ? defaultPrompt : ''))}</div>
                     <button class="loop-smart-control loop-smart-icon-btn" type="button" data-loop-prompt-delete="${index}" ${visiblePromptFields.length <= 1 ? 'disabled' : ''} title="${escapeHtml(tr('common.delete'))}" aria-label="${escapeHtml(tr('common.delete'))}">×</button>
                     ${loopPromptRoundHintHtml(index, visiblePromptFields.length, totalRounds)}
                 </div>`;
@@ -16532,11 +16623,9 @@ function smartLoopBodyHtml(node){
         <div class="loop-smart-row loop-chip-row">
             ${loopNumberControlHtml({label:tr('canvas.loopStart'), value:node.countStart, key:'countStart', max:9999, quick:[1,2,3,4,5,6,8,10], title:tr('canvas.loopCountStartTip')})}
             ${loopNumberControlHtml({label:tr('canvas.loopCount'), value:node.count, key:'count', quick:[1,2,3,4,5,6,8,10]})}
-            <span class="loop-smart-seg loop-policy-seg">
-                <button type="button" class="loop-smart-control ${node.onError !== 'skip' ? 'active' : ''}" data-loop-onerror="stop" title="${escapeAttr(tr('canvas.loopOnErrorStopTip'))}" ${loopRunning ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorStop'))}</button>
-                <button type="button" class="loop-smart-control ${node.onError === 'skip' ? 'active' : ''}" data-loop-onerror="skip" title="${escapeAttr(tr('canvas.loopOnErrorSkipTip'))}" ${loopRunning ? 'disabled' : ''}>${escapeHtml(tr('canvas.loopOnErrorSkip'))}</button>
-            </span>
+            ${smartLoopOutputChipHtml(node, loopRunning)}
         </div>
+        ${loopPolicyRowHtml(node, loopRunning)}
         <button class="loop-smart-run loop-runbar ${loopRunning ? 'is-stop' : ''}" type="button" data-loop-run="${escapeAttr(node.id)}" title="${escapeAttr(loopRunning ? smartCascadeStopText(loopStopping) : tr('smart.loopRunAll'))}" aria-label="${escapeAttr(loopRunning ? smartCascadeStopText(loopStopping) : tr('smart.loopRunAll'))}">
             <i data-lucide="${loopRunning ? 'square' : 'play'}"></i>
             <span>${escapeHtml(loopRunning ? smartCascadeStopText(loopStopping) : trf('canvas.loopRunRounds', {n:totalRounds}))}</span>
@@ -19638,6 +19727,7 @@ function bindLoopNodeControls(el, node){
         if(key === 'loopStart' || key === 'countStart') return {min:1, max:9999};
         if(key === 'imageOffset') return {min:0, max:9999};
         if(key === 'imageBatchSize') return {min:1, max:Number.POSITIVE_INFINITY};
+        if(key === 'retryCount') return {min:SMART_LOOP_RETRY_MIN, max:SMART_LOOP_RETRY_MAX};
         return {min:1, max:Number.POSITIVE_INFINITY};
     };
     const normalizeLoopNumber = (key, rawValue) => {
@@ -19661,6 +19751,7 @@ function bindLoopNodeControls(el, node){
         if(key === 'countStart'){ node.countStart = value; node.loopStart = value; }
         if(key === 'imageOffset') node.imageOffset = value;
         if(key === 'imageBatchSize') node.imageBatchSize = value;
+        if(key === 'retryCount') node.retryCount = value;
         scheduleSave();
         if(rerender) render();
         else syncLoopNumberUi(source, key, value);
@@ -19691,13 +19782,45 @@ function bindLoopNodeControls(el, node){
             scheduleSave();
         };
     });
-    // 2026-10-14（循环节点 B1）：失败策略。stop = 出错即停（默认）；skip = 本轮跳过继续下一轮。
+    // 2026-10-14（循环节点 B1）：失败策略。stop = 出错即停（默认）；skip = 跳过继续；retry = 自动重试 N 次。
     el.querySelectorAll('[data-loop-onerror]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
             if(btn.disabled) return;
-            node.onError = btn.dataset.loopOnerror === 'skip' ? 'skip' : 'stop';
+            const next = String(btn.dataset.loopOnerror || 'stop');
+            node.onError = next === 'skip' ? 'skip' : (next === 'retry' ? 'retry' : 'stop');
+            if(typeof fitSmartLoopNode === 'function') fitSmartLoopNode(node);
+            render();
+            scheduleSave();
+        };
+    });
+    // 2026-10-14（V10-19）：输出模式下拉（芯片行第三块）。切换后保持浮层打开，方便继续设置下面那组排列。
+    el.querySelectorAll('[data-loop-output-menu]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(btn.disabled) return;
+            toggleSmartLoopOutputMenu(node.id);
+            render();
+        };
+    });
+    el.querySelectorAll('[data-loop-output-mode]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            node.outputMode = smartLoopOutputMode({outputMode:btn.dataset.loopOutputMode});
+            if(typeof fitSmartLoopNode === 'function') fitSmartLoopNode(node);
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-loop-slot-layout]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(btn.disabled) return;
+            node.slotLayout = btn.dataset.loopSlotLayout === 'vertical' ? 'vertical' : 'horizontal';
             render();
             scheduleSave();
         };
@@ -26963,7 +27086,10 @@ function smartLoopImageOffset(node){
     return Number.isFinite(value) && value > 0 ? value : 0;
 }
 function smartLoopOnError(node){
-    return node?.onError === 'skip' ? 'skip' : 'stop';
+    const value = String(node?.onError || '');
+    if(value === 'skip') return 'skip';
+    if(value === 'retry') return 'retry';
+    return 'stop';
 }
 function smartLoopSelectedLocalPrompt(node, ctx=smartLoopContext){
     const values = smartLoopActivePromptFieldValues(node);
@@ -26973,7 +27099,8 @@ function smartLoopSelectedLocalPrompt(node, ctx=smartLoopContext){
     return values[(index - 1) % values.length] || '';
 }
 function smartLoopUpstreamPromptPreviewHeight(node){
-    return smartLoopInputPromptItems(node).length ? 78 : 0;
+    // 2026-10-14（用户反馈）：上游提示词预览恒单行（label 12 + 间距 6 + 单行 18 + 缓冲 4）。
+    return smartLoopInputPromptItems(node).length ? 40 : 0;
 }
 const smartLoopPromptVisiting = new Set();
 function smartLoopInputPromptItems(node){
@@ -28386,12 +28513,46 @@ function tagLoopOutputSlot(output, rootNode, loopNode, roundIndex, slotIndex){
     output.loopOutputEdge = Math.max(40, Math.round(Number(output.loopOutputEdge) || MEDIA_SINGLE_IMAGE_DEFAULT_EDGE));
     return output;
 }
-function arrangeLoopOutputSlotsHorizontally(rootNode, loopNode=null, slots=null){
+// 2026-10-14（V10-19 C）：槽位落点统一算法，解决用户反馈的「循环出的图在右边单独拉线，显得很乱」：
+//   ① 贴齐所在工作流组框【外侧】——旧公式只按「源节点右边 + 80」算，槽位会骑跨组框边线，视觉被切断；
+//   ② 竖排每列 / 横排每行最多 LOOP_SLOT_PER_LINE 个，超出自动折列 / 折行，列不再无边拉长；
+//   ③ 同一算法供「运行时落点」「运行前整理」「加载归一化」三处共用，避免三套坐标算出三种结果。
+const LOOP_SLOT_PER_LINE = 3;
+const LOOP_SLOT_GAP = 28;
+// 节点所在的工作流组（按成员中心点包含判定，与 workflowGroupMembers 同口径）。
+function workflowGroupForNode(target){
+    if(!target?.id || isWorkflowGroupNode(target)) return null;
+    return nodes.find(node => isWorkflowGroupNode(node) && workflowGroupMembers(node).some(member => member.id === target.id)) || null;
+}
+function loopSlotStep(){ return MEDIA_SINGLE_IMAGE_DEFAULT_EDGE + LOOP_SLOT_GAP; }
+// 槽位 / 结果组的锚点 x：源节点右侧 80px，但必须完全落在工作流组框外侧 40px（框内则顺延到框外）。
+function loopOutputAnchorX(rootNode){
+    const rect = nodeRect(rootNode);
+    const base = (Number(rootNode?.x) || 0) + (Number(rect.width) || 260) + 80;
+    const group = workflowGroupForNode(rootNode);
+    if(!group) return Math.round(base);
+    const frame = nodeRectRaw(group);
+    return Math.round(Math.max(base, frame.x + frame.width + 40));
+}
+function loopSlotPositionAt(rootNode, slotIndex, layout='horizontal'){
+    const index = Math.max(0, Number(slotIndex) || 0);
+    const step = loopSlotStep();
+    const anchorX = loopOutputAnchorX(rootNode);
+    const anchorY = Math.round(Number(rootNode?.y) || 0);
+    if(layout === 'vertical'){
+        const column = Math.floor(index / LOOP_SLOT_PER_LINE);
+        const row = index % LOOP_SLOT_PER_LINE;
+        return {x: Math.round(anchorX + column * step), y: Math.round(anchorY + row * step)};
+    }
+    const row = Math.floor(index / LOOP_SLOT_PER_LINE);
+    const column = index % LOOP_SLOT_PER_LINE;
+    return {x: Math.round(anchorX + column * step), y: Math.round(anchorY + row * step)};
+}
+// 按 loopNode.slotLayout 把槽位摆开：
+// horizontal（默认）= 源节点右侧一排、y 对齐源节点；vertical = 源节点右侧起点、向下依次排开。
+function arrangeLoopOutputSlots(rootNode, loopNode=null, slots=null){
     if(!rootNode?.id) return [];
-    const rootRect = nodeRect(rootNode);
-    const rootX = Number(rootNode.x) || 0;
-    const rootY = Number(rootNode.y) || 0;
-    const firstX = rootX + (Number(rootRect.width) || 260) + 80;
+    const layout = smartLoopSlotLayout(loopNode);
     const slotIndexOf = (node, fallback=0) => {
         const raw = node?.loopSlotIndex;
         return raw !== null && raw !== '' && Number.isFinite(Number(raw))
@@ -28412,10 +28573,92 @@ function arrangeLoopOutputSlotsHorizontally(rootNode, loopNode=null, slots=null)
         output.loopOutputSlot = true;
         output.loopOutputEdge = edge;
         output.loopSlotIndex = slotIndex;
-        output.x = Math.round(firstX + slotIndex * (edge + 28));
-        output.y = Math.round(rootY);
+        const pos = loopSlotPositionAt(rootNode, slotIndex, layout);
+        output.x = pos.x;
+        output.y = pos.y;
     });
     return candidates;
+}
+// 2026-10-14（V10-19）「拼接长图」输出模式：把各轮槽位的结果图按轮次顺序纵向拼成一张长图。
+// 复用宫格拼接的底层能力（displayMediaUrl/proxiedMediaUrl 取图 + uploadCroppedBlob 上传 +
+// createImageNodeAt 落节点），但不依赖编辑器上下文，也不需要用户拖拽布局；
+// 各轮原图（槽位）一律保留，随时可以重拼。
+function loadLoopStitchImage(imageItem){
+    return new Promise(resolve => {
+        const url = displayMediaUrl(imageItem);
+        if(!url) return resolve(null);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => {
+            const fallback = proxiedMediaUrl(imageItem);
+            if(!fallback || fallback === img.src) return resolve(null);
+            img.onerror = () => resolve(null);
+            img.src = fallback;
+        };
+        img.src = url;
+    });
+}
+async function stitchLoopRoundsToLongImage(rootNode, loopNode, slots){
+    if(!rootNode?.id) return null;
+    const ordered = (Array.isArray(slots) ? slots : [])
+        .filter(slot => slot && Array.isArray(slot.images) && slot.images.some(img => img?.url))
+        .sort((a, b) => (Number(a.loopSlotIndex) || 0) - (Number(b.loopSlotIndex) || 0));
+    if(!ordered.length){ toast(tr('canvas.loopStitchEmpty')); return null; }
+    const parts = [];
+    for(const slot of ordered){
+        const item = (slot.images || []).find(img => img?.url);
+        if(!item) continue;
+        const img = await loadLoopStitchImage(item);
+        if(!img) continue;
+        parts.push({img, w:Math.max(1, img.naturalWidth || img.width || 1), h:Math.max(1, img.naturalHeight || img.height || 1)});
+    }
+    if(!parts.length){ toast(tr('canvas.loopStitchEmpty')); return null; }
+    // 宽度统一到各轮最大自然宽（至少 256），高度按比例缩放后累加 —— 就是「上下拼接」。
+    const targetW = Math.max(256, Math.round(Math.max(...parts.map(part => part.w))));
+    const scaled = parts.map(part => {
+        const scale = targetW / part.w;
+        return {img:part.img, w:targetW, h:Math.max(1, Math.round(part.h * scale))};
+    });
+    const totalH = scaled.reduce((sum, part) => sum + part.h, 0);
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = targetW;
+    canvasEl.height = totalH;
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx){ toast(tr('canvas.loopStitchFailed')); return null; }
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, targetW, totalH);
+    let cursorY = 0;
+    scaled.forEach(part => {
+        ctx.drawImage(part.img, 0, cursorY, part.w, part.h);
+        cursorY += part.h;
+    });
+    let file = null;
+    try {
+        const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
+        if(blob) file = await uploadCroppedBlob(blob, `loop-stitch-${Date.now()}.png`);
+    } catch(e) { file = null; }
+    if(!file?.url){ toast(tr('canvas.loopStitchFailed')); return null; }
+    // 落点：所有槽位最右侧 +80，避免压住原有输出节点。
+    const rects = ordered.map(slot => nodeRect(slot));
+    const rootRect = nodeRect(rootNode);
+    const rightMost = rects.length ? Math.max(...rects.map(rect => rect.x + rect.width)) : (rootRect.x + rootRect.width);
+    const outputNode = createImageNodeAt(
+        {x:Math.round(rightMost + 80), y:Math.round(rootRect.y)},
+        [{url:file.url, name:file.name, kind:'image', natural_w:canvasEl.width, natural_h:canvasEl.height}],
+        {select:false, skipUndo:true}
+    );
+    if(outputNode){
+        outputNode.title = tr('canvas.loopStitchTitle');
+        outputNode.loopOutputStitch = true;
+        outputNode.loopSourceId = loopNode?.id || '';
+        outputNode.loopRootId = rootNode?.id || '';
+        addConnection(rootNode.id, outputNode.id, 'flow');
+    }
+    render();
+    scheduleSave();
+    toast(trf('canvas.loopStitchDone', {n:scaled.length}));
+    return outputNode;
 }
 function normalizeLoopOutputSlotLayoutOnLoad(){
     const buckets = new Map();
@@ -28429,22 +28672,26 @@ function normalizeLoopOutputSlotLayoutOnLoad(){
     });
     let changed = false;
     buckets.forEach(({root, loopNode, slots}) => {
+        // 排列方向（slotLayout）存在循环节点上，bucket 里的 loopNode 只有 id，必须回查真实节点。
+        const realLoop = nodes.find(node => node.id === loopNode.id) || loopNode;
         const before = slots.map(slot => `${slot.x}|${slot.y}|${slot.loopOutputSlot}|${slot.loopOutputEdge}`).join(';');
-        arrangeLoopOutputSlotsHorizontally(root, loopNode, slots);
+        arrangeLoopOutputSlots(root, realLoop, slots);
         const after = slots.map(slot => `${slot.x}|${slot.y}|${slot.loopOutputSlot}|${slot.loopOutputEdge}`).join(';');
         if(before !== after) changed = true;
     });
     return changed;
 }
 function createLoopOutputSlot(rootNode, roundIndex, roundOffset=0, options={}){
-    const rootRect = nodeRect(rootNode);
     const output = cloneSmartNode(rootNode, 0, 0);
     output.id = uid('smart');
     output.type = 'smart-image';
     const edge = Math.max(40, Math.round(Number(options.outputEdge) || MEDIA_SINGLE_IMAGE_DEFAULT_EDGE));
     const slotIndex = Math.max(0, Number(options.slotIndex ?? roundOffset) || 0);
-    output.x = (Number(rootNode.x) || 0) + (Number(rootRect.width) || 260) + 80 + slotIndex * (edge + 28);
-    output.y = Number(rootNode.y) || 0;
+    // 2026-10-14（V10-19 C）：落点交给统一算法——贴齐工作流组框外侧 + 超 3 张自动折列/折行。
+    const slotLayout = smartLoopSlotLayout(options.loopNode || null);
+    const slotPos = loopSlotPositionAt(rootNode, slotIndex, slotLayout);
+    output.x = slotPos.x;
+    output.y = slotPos.y;
     output.title = `Image ${roundIndex}`;
     output.images = [];
     output.pending = options.pending ? Math.max(1, Number(options.pending) || 1) : 0;
@@ -28534,15 +28781,19 @@ function removeLoopOutputArtifacts(rootNode, loopNode, keepIds=new Set()){
         if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(id => !deleteIds.has(id));
     });
 }
+// 2026-10-14（V10-19 B）：「结果组容器」输出模式。各轮结果不再散落成独立节点，而是收进一个
+// 「循环生成结果」组框，画布上只保留 loop 目标节点 → 组 的一条连线。
+// keepResults=true 用于单轮重跑：不清空组内已有图，新图直接追加（与原地追加同口径）。
 function prepareLoopResultGroup(rootNode, loopNode, options={}){
     if(!rootNode?.id || !loopNode?.id) return null;
+    const keepResults = Boolean(options.keepResults);
     let group = loopResultGroupForRoot(rootNode, loopNode);
-    const rootRect = nodeRect(rootNode);
     if(!group){
         group = {
             id:uid('group'),
             type:'smart-group',
-            x:Math.round((Number(rootNode.x) || 0) + (Number(rootRect.width) || 260) + 80),
+            // 落点同样贴齐工作流组框外侧（与槽位共用锚点算法），避免组框骑跨组边线。
+            x:loopOutputAnchorX(rootNode),
             y:Math.round(Number(rootNode.y) || 0),
             title:'循环生成结果',
             images:[],
@@ -28555,6 +28806,7 @@ function prepareLoopResultGroup(rootNode, loopNode, options={}){
             created_at:Date.now()
         };
         nodes.push(group);
+        addConnection(rootNode.id, group.id, 'flow');
     }
     group.type = 'smart-group';
     group.title = '循环生成结果';
@@ -28563,7 +28815,6 @@ function prepareLoopResultGroup(rootNode, loopNode, options={}){
     group.loopSourceId = loopNode.id;
     group.loopRootId = rootNode.id;
     group.sourceNodeId = rootNode.id;
-    group.images = [];
     group.outputKind = 'image';
     group.pending = 0;
     group.running = false;
@@ -28573,20 +28824,40 @@ function prepareLoopResultGroup(rootNode, loopNode, options={}){
     delete group.runFinishedAt;
     delete group.runElapsedMs;
     clearGenerationProgress(group);
-    fitLoopResultGroup(group);
-    const historyIds = new Set(nodes
-        .filter(node => isHistoryGroupNode(node) && node.historyFor === group.id)
-        .map(node => node.id));
-    if(historyIds.size){
-        rememberSmartDeletedNodes([...historyIds]);
-        nodes = nodes.filter(node => !historyIds.has(node.id));
-        if(canvas) canvas.connections = (canvas.connections || []).filter(conn => !historyIds.has(conn.from) && !historyIds.has(conn.to));
+    if(!keepResults){
+        group.images = [];
+        // 清掉该组的历史分组与其它遗留产物（保留本组自身）。
+        const historyIds = new Set(nodes
+            .filter(node => isHistoryGroupNode(node) && node.historyFor === group.id)
+            .map(node => node.id));
+        if(historyIds.size){
+            rememberSmartDeletedNodes([...historyIds]);
+            nodes = nodes.filter(node => !historyIds.has(node.id));
+            if(canvas) canvas.connections = (canvas.connections || []).filter(conn => !historyIds.has(conn.from) && !historyIds.has(conn.to));
+        }
+        removeLoopOutputArtifacts(rootNode, loopNode, new Set([group.id]));
     }
-    addConnection(rootNode.id, group.id, 'flow');
-    removeLoopOutputArtifacts(rootNode, loopNode, new Set([group.id]));
+    fitLoopResultGroup(group);
     const runPath = smartCascadePathForCtx(options.ctx || options.runState);
     if(runPath?.states) runPath.states[`${rootNode.id}->${group.id}`] = 'wait';
     return group;
+}
+// 只删「循环结果组」（保留槽位）——从 group 模式切回 slots/原地时用，避免旧组白留在画布上。
+function removeLoopResultGroupOnly(rootNode, loopNode){
+    const group = loopResultGroupForRoot(rootNode, loopNode);
+    if(!group) return false;
+    const ids = new Set([group.id]);
+    nodes.forEach(node => {
+        if(isHistoryGroupNode(node) && ids.has(node.historyFor)) ids.add(node.id);
+    });
+    rememberSmartDeletedNodes([...ids]);
+    nodes = nodes.filter(node => !ids.has(node.id));
+    if(canvas) canvas.connections = (canvas.connections || []).filter(conn => !ids.has(conn.from) && !ids.has(conn.to));
+    nodes.forEach(node => {
+        if(Array.isArray(node.items)) node.items = node.items.filter(id => !ids.has(id));
+        if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(id => !ids.has(id));
+    });
+    return true;
 }
 function appendLoopResultsToGroup(group, additions, kind='image', meta=null){
     if(!group || !additions?.length) return [];
@@ -30133,15 +30404,28 @@ function throwIfSmartCascadeStopRequested(runState=null){
 }
 // 2026-10-14（循环节点 B1）：轮次状态是状态栏的唯一真相来源。
 // runState.rounds = [{index:计数索引, offset:第几轮(0起), status:'pending'|'running'|'done'|'failed', error}]
-function markLoopRound(runState, roundOffset, status, error=''){
+function markLoopRound(runState, roundOffset, status, error='', retryInfo=null){
     if(!runState || !Array.isArray(runState.rounds)) return;
     const offset = Math.max(0, Math.round(Number(roundOffset) || 0));
     const round = runState.rounds.find(item => item.offset === offset);
-    if(!round || round.status === status) return;
+    if(!round) return;
+    // 2026-10-14（V10-19）：重试进行中——状态保持 running（站点显示「重试 n/m」，不标红），
+    // 只有次数用尽后才落到 failed。这样重试期间轨道不会闪红。
+    if(retryInfo){
+        round.retryAttempt = Math.max(0, Number(retryInfo.attempt) || 0);
+        round.retryMax = Math.max(0, Number(retryInfo.max) || 0);
+        round.status = 'running';
+        refreshSmartLoopStatus(runState);
+        return;
+    }
+    if(round.status === status) return;
     round.status = status;
     if(status === 'failed'){
         round.error = String(error || '').slice(0, 160);
         runState.failedRounds = (runState.failedRounds || 0) + 1;
+    } else {
+        round.retryAttempt = 0;
+        round.retryMax = 0;
     }
     refreshSmartLoopStatus(runState);
 }
@@ -30237,8 +30521,18 @@ async function runSmartCascade(targetNode=null, options={}){
     if(!loopId && smartCascadeAnyRunning()){ requestSmartCascadeStop(); return; }
     const directLoopTargetRun = Boolean(loop && isDirectLoopTargetRun(loop, tail, graph));
     const singleNodeLoopRun = Boolean(loop && (chain.length === 1 || directLoopTargetRun));
-    const directInPlaceLoopRun = Boolean(singleNodeLoopRun && directLoopTargetRun);
-    const directGroupedLoopRun = Boolean(singleNodeLoopRun && directLoopTargetRun && !directInPlaceLoopRun);
+    // 2026-10-14（V10-19）：输出模式显式覆盖落点。
+    //   auto    = 改动前的自动推断（直接下游目标 → 原地，否则 → 槽位）
+    //   inplace = 强制原地；slots = 强制槽位；stitch = 每轮照常落槽位，收尾再纵向拼成一张长图
+    const loopOutputMode = smartLoopOutputMode(loop?.node);
+    const autoInPlaceLoopRun = Boolean(singleNodeLoopRun && directLoopTargetRun);
+    const directInPlaceLoopRun = Boolean(singleNodeLoopRun && (loopOutputMode === 'inplace'
+        || (loopOutputMode === 'auto' && autoInPlaceLoopRun)));
+    const directStitchLoopRun = Boolean(singleNodeLoopRun && loopOutputMode === 'stitch');
+    // 2026-10-14（V10-19 B）：group = 显式选择「结果组」——各轮结果收进一个「循环生成结果」组框，
+    // 画布上只留一条连线。旧版这里是一条恒 false 的死分支（A && B && !(A && B)），
+    // 现在改成由 node.outputMode === 'group' 显式驱动，prepareLoopResultGroup 重新可用。
+    const directGroupLoopRun = Boolean(singleNodeLoopRun && loopOutputMode === 'group');
     if(!graph.edges.length && !singleNodeLoopRun){ toast(tr('smart.loopNoChain')); return; }
     const originalSelected = selectedId;
     const originalSettings = cloneSmartSettings(settings);
@@ -30278,24 +30572,32 @@ async function runSmartCascade(targetNode=null, options={}){
     const directInPlaceParallelLimit = chain.some(node => smartSettingsForNode(node)?.engine === 'comfy')
         ? smartCascadeParallelLimit(chain)
         : totalRounds;
-    const parallelLimit = directGroupedLoopRun
-        ? 1
-        : (loopMode === 'parallel' && totalRounds > 1
-            ? (directInPlaceLoopRun ? directInPlaceParallelLimit : smartCascadeParallelLimit(chain))
+    const parallelLimit = (loopMode === 'parallel' && totalRounds > 1
+            ? ((directInPlaceLoopRun || directGroupLoopRun) ? directInPlaceParallelLimit : smartCascadeParallelLimit(chain))
             : 1);
-    const precreateSingleSlots = singleNodeLoopRun && !directInPlaceLoopRun && loopMode === 'parallel' && totalRounds > 1 && parallelLimit > 1;
+    const precreateSingleSlots = singleNodeLoopRun && !directInPlaceLoopRun && !directGroupLoopRun && loopMode === 'parallel' && totalRounds > 1 && parallelLimit > 1;
     let singleLoopSlots = [];
     let directLoopResultGroup = null;
     if(singleNodeLoopRun){
         runState.runPath = {states:{}};
         smartCascadeRunPath = runState.runPath;
-        if(directInPlaceLoopRun) removeLoopOutputArtifacts(tail, loop.node);
+        // 2026-10-14：单轮重跑 = 只补跑失败轮。跳过产物清理，并把原地目标预标记为
+        // 「已初始化」——否则 prepareLoopAppendTarget 会把重跑当首次运行，将目标节点里
+        // 已成功的图全部清空/归档进历史分组，只剩新 1 张（用户看到的「重跑替换」）。
+        // 预标记后新图直接追加到已有结果上，凑齐全部轮次。
+        if(onlyRoundOffsets && directInPlaceLoopRun){
+            runState.loopAppendInitialized = new Set([tail.id]);
+        } else if(directInPlaceLoopRun){
+            removeLoopOutputArtifacts(tail, loop.node);
+        } else if(directGroupLoopRun){
+            // 结果组容器：整轮运行 = 清空重建；单轮重跑 = 保留已有结果、新图追加进组。
+            directLoopResultGroup = prepareLoopResultGroup(tail, loop.node, {runState, keepResults:Boolean(onlyRoundOffsets)});
+            runState.loopResultGroupId = directLoopResultGroup?.id || '';
+        }
     }
-    if(directGroupedLoopRun){
-        directLoopResultGroup = prepareLoopResultGroup(tail, loop.node, {runState});
-        if(directLoopResultGroup) runState.loopResultGroupId = directLoopResultGroup.id;
-        render();
-    } else if(singleNodeLoopRun && !directInPlaceLoopRun){
+    if(singleNodeLoopRun && !directInPlaceLoopRun && !directGroupLoopRun){
+        // 从「结果组」切回槽位/原地时，把旧的循环结果组清掉（槽位本身照旧复用，不删）。
+        if(!onlyRoundOffsets && removeLoopResultGroupOnly(tail, loop.node)) render();
         singleLoopSlots = Array.from({length:totalRounds}, (_, round) => {
             const loopIndex = startIndex + round * batchSize;
             const slot = loopOutputSlotForRound(tail, loop.node, loopIndex, round);
@@ -30309,8 +30611,8 @@ async function runSmartCascade(targetNode=null, options={}){
                 singleLoopSlots[slotOffset] = createLoopOutputSlot(tail, loopIndex, slotOffset, {queued:true, loopNode:loop.node, slotIndex:slotOffset, runState});
             }
         }
-        // 旧版本可能把循环输出槽纵向堆叠；每次运行前统一整理到源节点右侧一排。
-        arrangeLoopOutputSlotsHorizontally(tail, loop.node, singleLoopSlots.filter(Boolean));
+        // 2026-10-14（V10-19）：每次运行前按 slotLayout 统一整理槽位（横向一排 / 纵向一列）。
+        arrangeLoopOutputSlots(tail, loop.node, singleLoopSlots.filter(Boolean));
         render();
     }
     if(!singleNodeLoopRun){
@@ -30350,14 +30652,20 @@ async function runSmartCascade(targetNode=null, options={}){
             if(singleNodeLoopRun){
                 const refs = loopRefsSnapshot;
                 const slotIndex = Math.max(0, Math.floor((loopIndex - startIndex) / batchSize));
-                if(directGroupedLoopRun){
-                    const outputTarget = directLoopResultGroup || nodes.find(n => n.id === runState.loopResultGroupId) || prepareLoopResultGroup(tail, loop.node, {runState});
-                    await runLoopRoundIntoSlot(loop.node, tail, outputTarget, loopIndex, ctx);
-                    return;
-                }
                 if(directInPlaceLoopRun){
                     await runLoopRoundIntoSlot(loop.node, tail, tail, loopIndex, ctx);
                     return;
+                }
+                if(directGroupLoopRun){
+                    // 2026-10-14（V10-19 B）：本轮结果落进「循环生成结果」组框（组不存在时补建）。
+                    const groupTarget = liveSmartNode(directLoopResultGroup)
+                        || loopResultGroupForRoot(tail, loop.node)
+                        || prepareLoopResultGroup(tail, loop.node, {runState, keepResults:true});
+                    directLoopResultGroup = groupTarget;
+                    if(groupTarget){
+                        await runLoopRoundIntoSlot(loop.node, tail, groupTarget, loopIndex, ctx);
+                        return;
+                    }
                 }
                 const outputTarget = tagLoopOutputSlot(
                     options.outputTarget || singleLoopSlots[slotIndex] || loopOutputSlotForRound(tail, loop.node, loopIndex, slotIndex) || createLoopOutputSlot(tail, loopIndex, slotIndex, {loopNode:loop.node, slotIndex, runState}),
@@ -30457,19 +30765,32 @@ async function runSmartCascade(targetNode=null, options={}){
         const roundIndexes = Array.from({length:totalRounds}, (_, round) => startIndex + round * batchSize)
             .filter((_, round) => !onlyRoundOffsets || onlyRoundOffsets.has(round));
         if(onlyRoundOffsets && !roundIndexes.length){ toast(tr('canvas.loopNothingToRerun')); return; }
+        // 2026-10-14：roundIndexes 是「过滤后的下标序列」，重跑时其位置 ≠ 真实轮次 offset
+        // （例：只重跑 offset=2，roundIndexes=[3]，位置 0）。轮次状态/并行槽位必须按
+        // loopIndex 反推真实 offset，否则 markLoopRound 会把第 1 轮状态错标、被重跑轮永不更新。
+        const roundOffsetOf = loopIndex => Math.max(0, Math.round(((Number(loopIndex) || startIndex) - startIndex) / batchSize));
         // 2026-10-14（循环节点 B1）：包一层「轮次跟踪」——写状态栏 + 按失败策略决定继续/中断。
+        // 2026-10-14（V10-19）：新增 retry 档——同一轮内部自动重试 N 次，重试期间站点显示「重试 n/m」，
+        // 次数用尽才标红并跳过本轮（语义 = 更顽强的 skip），不会中断整个循环。
         const runRoundTracked = async (loopIndex, roundOptions={}) => {
             const roundOffset = Math.max(0, Number(roundOptions?.roundOffset) || 0);
+            const maxRetry = loopOnError === 'retry' ? smartLoopRetryCount(loop?.node) : 0;
             markLoopRound(runState, roundOffset, 'running');
-            try {
-                await runRound(loopIndex, roundOptions);
-                markLoopRound(runState, roundOffset, 'done');
-                return true;
-            } catch(e) {
-                if(e?.smartCascadeStopped) throw e;
-                markLoopRound(runState, roundOffset, 'failed', e?.message || tr('smart.errRunFailed'));
-                if(loop && loopOnError === 'skip') return false;
-                throw e;
+            for(let attempt = 0; ; attempt++){
+                try {
+                    await runRound(loopIndex, roundOptions);
+                    markLoopRound(runState, roundOffset, 'done');
+                    return true;
+                } catch(e) {
+                    if(e?.smartCascadeStopped) throw e;
+                    if(attempt < maxRetry){
+                        markLoopRound(runState, roundOffset, 'running', '', {attempt:attempt + 1, max:maxRetry});
+                        continue;
+                    }
+                    markLoopRound(runState, roundOffset, 'failed', e?.message || tr('smart.errRunFailed'));
+                    if(loop && (loopOnError === 'skip' || loopOnError === 'retry')) return false;
+                    throw e;
+                }
             }
         };
         if(loopMode === 'parallel' && totalRounds > 1){
@@ -30477,14 +30798,14 @@ async function runSmartCascade(targetNode=null, options={}){
                 ? singleLoopSlots
                 : [];
             if(parallelTargets.length) render();
-            await runSmartCascadeRoundsWithLimit(roundIndexes, parallelLimit, (loopIndex, roundOffset) => {
-                const outputTarget = parallelTargets[roundOffset] || null;
-                return runRoundTracked(loopIndex, {outputTarget, roundOffset});
+            await runSmartCascadeRoundsWithLimit(roundIndexes, parallelLimit, (loopIndex) => {
+                const outputTarget = parallelTargets[roundOffsetOf(loopIndex)] || null;
+                return runRoundTracked(loopIndex, {outputTarget, roundOffset: roundOffsetOf(loopIndex)});
             }, runState);
         } else {
-            for(let roundOffset = 0; roundOffset < roundIndexes.length; roundOffset++){
+            for(let pos = 0; pos < roundIndexes.length; pos++){
                 throwIfSmartCascadeStopRequested(runState);
-                await runRoundTracked(roundIndexes[roundOffset], {roundOffset});
+                await runRoundTracked(roundIndexes[pos], {roundOffset: roundOffsetOf(roundIndexes[pos])});
             }
         }
         throwIfSmartCascadeStopRequested(runState);
@@ -30550,6 +30871,15 @@ async function runSmartCascade(targetNode=null, options={}){
         syncRunButtonState();
         cascadeRunBtn.disabled = false;
         if(directInPlaceLoopRun) finishLoopTargetPreviewState(tail);
+        // 2026-10-14（V10-19 B）：结果组容器模式 —— 跑完按最终张数收敛组框尺寸（组内单行排列）。
+        if(directGroupLoopRun){
+            const resultGroup = liveSmartNode(directLoopResultGroup) || loopResultGroupForRoot(tail, loop.node);
+            if(resultGroup) fitLoopResultGroup(resultGroup);
+        }
+        // 2026-10-14（V10-19）：拼接长图模式 —— 各轮跑完后纵向拼成一张长图；原图槽位保留可重拼。
+        if(directStitchLoopRun){
+            await stitchLoopRoundsToLongImage(tail, loop.node, singleLoopSlots.filter(Boolean));
+        }
         scheduleSave();
         render();
     }

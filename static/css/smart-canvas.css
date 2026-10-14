@@ -17702,3 +17702,40 @@ body.smart-node-resize .image-node .smart-video-canvas-download.smart-video-down
     opacity:0 !important;
     pointer-events:none !important;
 }
+
+/* ===== 2026-10-14 独立画布页补「首页侧栏同款」快捷导航（用户要求两页共用一套按钮） =====
+   位置：品牌坞纵列最上方（工作流导航 / 无限画布 / 资产库 / 设置），下方一条细分隔线再接
+   原有的 DH 标识与版本号。被首页 iframe 嵌入时 html.is-embedded 会整体隐藏品牌坞，
+   所以这些按钮只在独立打开画布页时出现，不会与首页侧栏重复。 */
+.smart-brand-dock .brand-studio-btn {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 16, 16, .86);
+    color: #a6a6a6;
+    border: 1px solid rgba(154, 154, 154, .22);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .28);
+    backdrop-filter: blur(12px);
+    cursor: pointer;
+    transition: color .16s ease, border-color .16s ease, transform .16s ease, background .16s ease;
+}
+.smart-brand-dock .brand-studio-btn:hover {
+    color: #fff;
+    border-color: rgba(244, 244, 245, .5);
+    background: rgba(38, 38, 38, .92);
+    transform: translateY(-1px);
+}
+.smart-brand-dock .brand-studio-btn:active { transform: translateY(0); }
+.smart-brand-dock .brand-studio-btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.smart-brand-dock .brand-dock-sep {
+    width: 18px;
+    height: 1px;
+    flex: 0 0 auto;
+    margin: 2px 0;
+    background: rgba(154, 154, 154, .28);
+}

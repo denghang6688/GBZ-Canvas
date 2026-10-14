@@ -24,21 +24,38 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=V10-18.1790042522"></script>
-    <script src="/static/js/theme.js?v=V10-18.1790042521"></script>
-    <script src="/static/js/touch-mouse.js?v=V10-18.1790042521"></script>
-    <script src="/static/js/i18n.js?v=V10-18.1790305929"></script>
+    <script src="/static/vendor/js/lucide.js?v=V10-14.1790042522"></script>
+    <script src="/static/js/theme.js?v=V10-14.1790042521"></script>
+    <script src="/static/js/touch-mouse.js?v=V10-14.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V10-14.1790305929"></script>
     <script>
         // 2026-09-26 被外壳(index.html) iframe 嵌入时隐藏画布页自己的品牌坞：
         // 外壳侧栏已有 GitHub/DH/版本号，再显示会并排重复；且品牌坞透过透明侧栏显形
         // 就是之前「白色光晕」的来源。独立打开画布页时品牌坞正常显示。
         if (window.self !== window.top) { document.documentElement.classList.add('is-embedded'); }
     </script>
+    <script>
+        // 2026-10-14（用户要求「两个页面共用同款侧边按钮」）：独立打开画布页时，品牌坞顶部
+        // 提供与首页侧栏同款的快捷入口（工作流导航 / 无限画布 / 资产库 / 设置）。
+        // 点击时带 ?page= 参数回到首页对应功能页；?nav=workflow 让首页启动后直接展开工作流导航。
+        // 被首页 iframe 嵌入时整个品牌坞已被 html.is-embedded 规则隐藏，这些按钮不会出现。
+        window.smartDockOpenStudio = function(btn){
+            try {
+                const page = (btn && btn.dataset && btn.dataset.studioPage) || 'canvas';
+                const params = new URLSearchParams();
+                params.set('page', page);
+                const nav = btn && btn.dataset && btn.dataset.studioNav;
+                if (nav) params.set('nav', nav);
+                location.href = '/static/index.html?' + params.toString();
+            } catch(e) {}
+            return false;
+        };
+    </script>
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V10-18.1791896013">
-    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V10-18.1791960934">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V10-14.1791970609">
+    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V10-14.1791974078">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -264,9 +281,47 @@
         <!-- <button id="billingToggle" class="asset-toggle billing-toggle" type="button" onclick="toggleBillingPanel()" title="余额统计"><i data-lucide="wallet"></i><span id="billingNavText">余额</span></button> -->
         <!-- 2026-09-26 品牌坞（定稿：GitHub 常驻按钮在上，DH 悬停只展开 小红书/抖音 备用链接；版本号最下） -->
         <div id="smartBrandDock" class="smart-brand-dock" aria-label="作者与项目信息">
-            <a class="brand-github-btn" role="link" tabindex="0" data-url="https://github.com/denghang6688/GBZ-Canvas" onclick="window.open(this.dataset.url, '_blank', 'noopener,noreferrer')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" aria-label="项目地址" title="项目地址">
-                <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-            </a>
+            <!-- 2026-10-14（用户要求）：独立画布页补「首页侧栏同款」快捷导航。
+                 与首页 nav-item 一一对应：工作流导航 / 无限画布 / 资产库 / 设置，
+                 点击带 ?page= 参数跳回首页对应功能页（嵌入首页时整坞隐藏，不会重复）。 -->
+            <button class="brand-studio-btn" type="button" data-studio-page="canvas" data-studio-nav="workflow" data-i18n-title="canvas.dockWorkflowNav" title="工作流导航" aria-label="工作流导航" onclick="return window.smartDockOpenStudio(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4" y="3" width="7" height="6" rx="1.6"></rect>
+                    <rect x="13" y="15" width="7" height="6" rx="1.6"></rect>
+                    <path d="M7.5 9v3.2a2.8 2.8 0 0 0 2.8 2.8H13"></path>
+                    <path d="M11 6h2.8A2.2 2.2 0 0 1 16 8.2V15"></path>
+                    <path d="M5.5 17.5H13"></path>
+                </svg>
+            </button>
+            <button class="brand-studio-btn" type="button" data-studio-page="canvas" data-i18n-title="canvas.dockCanvas" title="无限画布（回工作台）" aria-label="无限画布" onclick="return window.smartDockOpenStudio(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 7.5V5.8A1.8 1.8 0 0 1 5.8 4h1.7"></path>
+                    <path d="M16.5 4h1.7A1.8 1.8 0 0 1 20 5.8v1.7"></path>
+                    <path d="M20 16.5v1.7a1.8 1.8 0 0 1-1.8 1.8h-1.7"></path>
+                    <path d="M7.5 20H5.8A1.8 1.8 0 0 1 4 18.2v-1.7"></path>
+                    <circle cx="12" cy="12" r="2.4"></circle>
+                    <path d="M12 7.5v2.1M12 14.4v2.1M7.5 12h2.1M14.4 12h2.1"></path>
+                </svg>
+            </button>
+            <button class="brand-studio-btn" type="button" data-studio-page="asset-manager" data-i18n-title="canvas.dockAssets" title="资产库" aria-label="资产库" onclick="return window.smartDockOpenStudio(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 19.5V6.8A2.8 2.8 0 0 1 6.8 4h10.4A2.8 2.8 0 0 1 20 6.8v12.7"></path>
+                    <path d="M7 8h10"></path>
+                    <path d="M7 12h10"></path>
+                    <path d="M7 16h6"></path>
+                </svg>
+            </button>
+            <button class="brand-studio-btn" type="button" data-studio-page="settings" data-i18n-title="canvas.dockSettings" title="设置" aria-label="设置" onclick="return window.smartDockOpenStudio(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
+                </svg>
+            </button>
+            <div class="brand-dock-sep" aria-hidden="true"></div>
+            <!-- 2026-10-14 用户要求暂时隐藏 GitHub 图标，恢复时取消注释即可 -->
+        <!-- <a class="brand-github-btn" role="link" tabindex="0" data-url="https://github.com/denghang6688/GBZ-Canvas" onclick="window.open(this.dataset.url, '_blank', 'noopener,noreferrer')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" aria-label="项目地址" title="项目地址">
+            <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        </a> -->
             <div class="brand-dh-box">
                 <div class="brand-letters-clip">
                     <span class="brand-letter brand-letter-d">D</span>
@@ -317,7 +372,7 @@
         </style>
         <aside id="smartAgentPanel" class="smart-agent-panel smart-agent-gpt-host" aria-label="GPT 对话">
             <button id="smartAgentCloseBtn" class="smart-agent-frame-close" type="button" title="收起 GPT 对话"><i data-lucide="x"></i></button>
-            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V10-18.1791960965" title="AI 助手"></iframe>
+            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V10-14.1791984584" title="AI 助手"></iframe>
             <script>
                 // 聊天 iframe 的 src 由脚本注入时间戳：保证任何情况下都加载最新版聊天页（绕过一切缓存）
                 (function(){
@@ -971,7 +1026,7 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=V10-18.1791960737"></script>
+    <script src="/static/js/smart-canvas.js?v=V10-14.1791974063"></script>
 </body>
 </html>
 
