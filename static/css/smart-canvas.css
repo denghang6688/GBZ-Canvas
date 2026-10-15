@@ -16975,12 +16975,20 @@ html body .smart-brand-dock {
    画布左侧版本按钮在缩放后边框过暗、圆角过大，视觉上像缺了一角。
    保留原有尺寸和文字，只增强四边实线与内外描边。 */
 html body #smartVersionButton.smart-version-button {
-    width: 52px !important;
+    /* 2026-10-15 修复版本号被裁（用户截图：两端各裁掉一点）。
+       本块原为 width/min-width/max-width 全锁 52px 且 padding:0，文字在 52px 里
+       只剩约 4px 余量；Chrome 最小字号（中文环境常见 12px）或字体回退一撑就两端裁字。
+       与上方 10-05 注释记录过的旧坑同源（锁宽 + 窄内边距）。
+       改为：宽度随内容自适应，52px 只作保底，两端留 7px 内边距。
+       注意上方 16937 区已给出 width:max-content/min-width:40px，本块后写且同特异度，
+       原先的 52px 锁宽把它整个推翻；此处改回自适应后视觉尺寸基本不变。 */
+    width: max-content !important;
     min-width: 52px !important;
-    max-width: 52px !important;
+    max-width: none !important;
     height: 24px !important;
     min-height: 24px !important;
-    padding: 0 !important;
+    padding: 0 5px !important;
+    box-sizing: border-box !important;
     border: 1px solid rgba(214, 214, 214, .86) !important;
     border-radius: 5px !important;
     background: rgba(20, 20, 20, .98) !important;
