@@ -3748,7 +3748,14 @@ const smartVersionState = {
 function smartVersionLabel(value='', mode='full'){
     const clean = smartVersionClean(value);
     if(!clean) return 'V-';
-    if(/^v/i.test(clean)) return clean.toUpperCase();
+    if(/^v/i.test(clean)){
+        // 2026-10-15 新命名 V<年2位>.<月>.<日>.<当日序号>：compact 去年份段 → V10.14.1
+        if(mode === 'compact'){
+            const m = clean.match(/^v\d{1,2}\.(\d{1,2})\.(\d{1,2})\.(\d+)$/i);
+            if(m) return `V${m[1].padStart(2,'0')}.${m[2].padStart(2,'0')}.${m[3]}`;
+        }
+        return clean.toUpperCase();
+    }
     return `V${clean}`;
 }
 function smartVersionParts(value=''){

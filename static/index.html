@@ -805,7 +805,8 @@
         .sidebar:hover .side-pill { gap:8px; }
 
         .project-version-badge {
-            width:44px;
+            /* 2026-10-15 44→52：新命名短显 V10.14.1（8 字符）放得下 */
+            width:52px;
             min-height:18px;
             padding:0 4px;
             border-radius:999px;
@@ -961,7 +962,7 @@
                 flex-basis:30px;
                 width:40px;
             }
-            .project-version-badge { width:40px; min-height:16px; font-size:8px; }
+            .project-version-badge { width:50px; min-height:16px; font-size:8px; }
             .update-now-btn.show { min-height:22px; width:48px; }
             .author-box {
                 height:32px;
@@ -1022,7 +1023,7 @@
                 font-size:11px;
             }
             .side-pill svg { width:15px; height:15px; }
-            .project-version-badge { width:38px; min-height:16px; font-size:8px; }
+            .project-version-badge { width:48px; min-height:16px; font-size:8px; }
             .update-now-btn.show { width:46px; min-height:22px; font-size:8px; }
         }
 
@@ -1663,7 +1664,7 @@
             max-width: 0;
         }
         .sidebar.is-collapsing:hover .project-version-badge {
-            width: 44px;
+            width: 52px;
         }
         .sidebar.is-collapsing:hover .project-version-compact,
         .sidebar.is-collapsing:hover .update-version-compact {
@@ -2297,9 +2298,10 @@
 
         #studioSidebar nav #project-version-badge {
             display:flex !important;
-            width:42px !important;
-            min-width:42px !important;
-            max-width:42px !important;
+            /* 2026-10-15 42→52：新命名短显 V10.14.1（8 字符）放得下 */
+            width:52px !important;
+            min-width:52px !important;
+            max-width:52px !important;
             min-height:28px !important;
             height:28px !important;
             margin:3px auto 0 !important;
@@ -2909,16 +2911,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V26.10.14.1.1791984584" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
             <iframe id="frame-enhance" data-src="/static/enhance.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=V26.10.14.1.1791984584" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
             <iframe id="frame-angle" data-src="/static/angle.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-settings" data-src="/static/settings.html?v=V26.10.14.1.1791984584" scrolling="yes"></iframe>
+            <iframe id="frame-settings" data-src="/static/settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
             <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V26.10.14.1.1791984584" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V26.10.14.1.1791984584" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V26.10.14.1.1792021064" class="active" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3561,7 +3563,12 @@
         function compactVersion(value) {
             const text = String(value || '').trim();
             const parts = text.match(/\d+/g) || [];
-            if(/^V/i.test(text)) return text.toUpperCase();
+            if(/^V/i.test(text)) {
+                // 2026-10-15 新命名 V<年2位>.<月>.<日>.<当日序号>：短显去年份段 → V10.14.1
+                const m = text.match(/^v\d{1,2}\.(\d{1,2})\.(\d{1,2})\.(\d+)$/i);
+                if(m) return `V${m[1].padStart(2,'0')}.${m[2].padStart(2,'0')}.${m[3]}`;
+                return text.toUpperCase();
+            }
             if(parts.length >= 3 && /^20\d{2}[._-]\d{1,2}[._-]\d{1,2}/.test(text)) return `${parts[0]}.${String(parts[1]).padStart(2,'0')}.${String(parts[2]).padStart(2,'0')}`;
             return text.replace(/^v/i, '') || '-';
         }
