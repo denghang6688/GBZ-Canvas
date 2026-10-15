@@ -37,7 +37,7 @@
   "1363": {
     "inputs": {
       "mode": "image",
-      "prompt": "一个女孩在海边骑行",
+      "prompt": "一个女孩",
       "resolution": "640P",
       "aspect_ratio": "16:9",
       "width": 320,
@@ -136,7 +136,7 @@
   "1391": {
     "inputs": {
       "steps": 8,
-      "shift_video": 10,
+      "shift_video": 8,
       "shift_audio": 3,
       "sampler_name": "dual_clock_euler",
       "scheduler": "native_flow",
@@ -172,7 +172,7 @@
   },
   "1393": {
     "inputs": {
-      "noise_seed": 331454739686285
+      "noise_seed": 325314464182849
     },
     "class_type": "RandomNoise",
     "_meta": {

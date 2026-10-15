@@ -150,7 +150,11 @@ function applyCliProtocolDefaults(item, protocol){
 }
 let rhWorkflowEditorState = { open:false, index:-1, entry:null, config:null, expanded:{}, activeNodeId:'', graph:{ k:1, x:0, y:0, w:0, h:0 }, pan:null, bound:false, previewParams:{}, previewRunning:false, previewStatus:'', previewOutputs:[] };
 let rhEditorMode = 'workflow';
-let recommendInlineOpen = false;
+// 2026-10-15 默认显示「推荐平台」视图：之前 false → 页面初始停在 API 管理，
+// 只有 loadProviders 成功调用 openRecommendApi 才切到推荐平台；若 fetch 失败或 JS 报错，
+// 用户就会卡在「API 管理」详细页无法回到推荐平台。改默认 true 后初始即推荐平台，
+// 用户主动选/添加 provider 时会被 selectProvider/addProvider/addCliProvider 切回管理视图。
+let recommendInlineOpen = true;
 // 推荐平台看板（rc-board）的卡片状态：模型页签/搜索/展开 与 拉取状态
 let recommendModelState = {};
 let recommendFetchState = {};
