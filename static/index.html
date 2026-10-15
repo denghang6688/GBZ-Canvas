@@ -27,11 +27,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.14.1.1790042522"></script>
-    <script src="/static/js/theme.js?v=V26.10.14.1.1790042521"></script>
-    <script src="/static/js/i18n.js?v=V26.10.14.1.1790305929"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.15.1.1790042522"></script>
+    <script src="/static/js/theme.js?v=V26.10.15.1.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V26.10.15.1.1790305929"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=V26.10.14.1.1790042522');
+        @import url('/static/vendor/css/fonts.css?v=V26.10.15.1.1790042522');
 
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -860,6 +860,26 @@
         .project-version-full { display:none; }
         .sidebar:hover .project-version-compact { display:none; }
         .sidebar:hover .project-version-full { display:inline; }
+
+        /* 2026-10-15 悬停版本徽章：上方气泡显示完整版本号 */
+        #project-version-hover-tip {
+            position:fixed;
+            transform:translate(-50%,-100%);
+            z-index:10000;
+            padding:5px 10px;
+            border-radius:8px;
+            border:1px solid #4a4a4a;
+            background:#202020;
+            color:#f0f0f0;
+            font-size:11px;
+            font-weight:700;
+            line-height:1.2;
+            white-space:nowrap;
+            opacity:0;
+            pointer-events:none;
+            transition:opacity .15s ease;
+        }
+        #project-version-hover-tip.show { opacity:1; }
 
         .update-now-btn {
             display:none;
@@ -2686,8 +2706,8 @@
 
         #studioSidebar nav #project-version-badge span,
         #studioSidebar nav #project-version-badge .project-version-compact {
-            /* 9px 在窄栏里仍清晰，同时为完整版本号预留稳定空间。 */
-            font-size: 9px !important;
+            /* 2026-10-15 9→8px：短显 V10.15.1（8 字符）稳落 52px 胶囊内 */
+            font-size: 8px !important;
             line-height: 1 !important;
             font-weight: 800 !important;
             letter-spacing: 0 !important;
@@ -2706,6 +2726,8 @@
             width: max-content !important;
             max-width: none !important;
         }
+
+        /* 2026-10-15 悬停徽章：完整版本号改为上方气泡（#project-version-hover-tip，挂 body 不受徽章 overflow 裁剪） */
     </style>
 </head>
 
@@ -2911,16 +2933,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-settings" data-src="/static/settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V26.10.14.1.1792021064" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V26.10.14.1.1792021064" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-settings" data-src="/static/settings.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-language-settings" data-src="/static/language-settings.html?v=V26.10.15.1.1792024283" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/smart-canvas.html?v=V26.10.15.1.1792024283" class="active" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3576,7 +3598,8 @@
         function versionLabel(value, mode = 'full') {
             const text = String(value || '').trim();
             if(!text) return 'V-';
-            if(/^V/i.test(text)) return text.toUpperCase();
+            // 2026-10-15 修复：compact 模式此前对带 V 前缀的串直接返回全文（全串塞进 52px 胶囊被裁成「6.10.14」）
+            if(/^V/i.test(text)) return mode === 'compact' ? compactVersion(text) : text.toUpperCase();
             return mode === 'compact' ? `V${compactVersion(text)}` : `V${text.replace(/^v/i, '')}`;
         }
 
@@ -3598,7 +3621,14 @@
                 compactSpan.textContent = versionLabel(showVersion, 'compact');
                 const fullSpan = document.createElement('span');
                 fullSpan.className = 'project-version-full';
-                fullSpan.textContent = updatePending ? `智能画布 ${full}·可更新` : `智能画布 ${full}`;
+                // 2026-10-15 品牌前缀拆独立 span：悬停徽章只显完整版本号（72px 内放得下）
+                const fullBrand = document.createElement('span');
+                fullBrand.className = 'project-version-full-brand';
+                fullBrand.textContent = '智能画布 ';
+                const fullVer = document.createElement('span');
+                fullVer.className = 'project-version-full-ver';
+                fullVer.textContent = updatePending ? `${full}·可更新` : full;
+                fullSpan.append(fullBrand, fullVer);
                 badge.append(compactSpan, fullSpan);
             } else {
                 badge.textContent = 'V-';
@@ -3610,6 +3640,31 @@
                 : (window.StudioI18n?.lang?.() === 'en'
                     ? `GBZ Canvas · current version: ${full} · click to check for updates`
                     : `GBZ智能画布 · 当前版本：${full} · 点击检测更新`);
+            // 2026-10-15 悬停气泡：徽章上方显示完整版本号
+            badge.dataset.version = full;
+            const tip = document.getElementById('project-version-hover-tip') || (() => {
+                const el = document.createElement('div');
+                el.id = 'project-version-hover-tip';
+                el.setAttribute('role', 'tooltip');
+                document.body.appendChild(el);
+                return el;
+            })();
+            if(!badge.dataset.tipWired){
+                badge.dataset.tipWired = '1';
+                badge.addEventListener('mouseenter', () => {
+                    tip.textContent = versionLabel(badge.dataset.version || '');
+                    const r = badge.getBoundingClientRect();
+                    // 气泡以徽章中心对齐，但钳制在视口内（徽章贴屏幕左缘时防出屏）
+                    const tw = tip.getBoundingClientRect().width || 0;
+                    const cx = Math.min(Math.max(r.left + r.width / 2, tw / 2 + 6), window.innerWidth - tw / 2 - 6);
+                    tip.style.left = Math.round(cx) + 'px';
+                    tip.style.top = Math.round(r.top - 8) + 'px';
+                    tip.classList.add('show');
+                });
+                badge.addEventListener('mouseleave', () => tip.classList.remove('show'));
+                window.addEventListener('scroll', () => tip.classList.remove('show'), true);
+                window.addEventListener('resize', () => tip.classList.remove('show'));
+            }
         }
 
         function refreshUpdateButtonText() {
