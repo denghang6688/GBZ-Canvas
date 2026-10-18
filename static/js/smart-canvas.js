@@ -18038,6 +18038,7 @@ function lpPaintMaskOverlay(nodeId, nodeRef, canvasRef, retried){
 }
 function syncLocalMaskOverlays(){
     if(typeof lpSweepWorkspaceNodes === 'function') lpSweepWorkspaceNodes();
+    if(typeof lpSweepLocalInpaintResults === 'function') lpSweepLocalInpaintResults();
     let needsDeferred = false;
     document.querySelectorAll('canvas[data-lp-mask]').forEach(cv => {
         const node = nodes.find(n => n.id === cv.dataset.lpMask);
@@ -25914,6 +25915,7 @@ function localInpaintPlanForNode(node){
 function localInpaintResultTargetFor(node){
     if(!node?.id) return null;
     const conns = Array.isArray(canvas?.connections) ? canvas.connections : [];
+    const candidates = [];
     for(const conn of conns){
         if(!conn || conn.from !== node.id || !conn.to || conn.to === node.id) continue;
         if(!['input', 'flow'].includes(conn.kind || 'flow')) continue;
@@ -25925,19 +25927,34 @@ function localInpaintResultTargetFor(node){
         if(isMinimaxH3Node(target)) continue;
         if(isSmartGroupNode(target) || isWorkflowGroupNode(target)) continue;
         if(target.localInpaintPlan?.enabled) continue;
-        if(target.running || Number(target.pending) > 0) continue;
-        return target;
+        candidates.push(target);
     }
-    return null;
+    // 2026-10-18（用户要求"忙也复用"）：本工作台已有的专属结果节点优先复用，
+    // 不因 running/pending 另开新分支；连点生成也只会落到同一条分支上。
+    const owned = candidates.find(t => t.localInpaintOutputNode === true || t.sourcePlanNodeId === node.id);
+    if(owned) return owned;
+    return candidates.find(t => !(t.running || Number(t.pending) > 0)) || null;
 }
 // 把贴回结果追加进输出节点：空占位节点直接填入（清掉占位宽高，按图片比例自适应），
 // 已有内容的节点原地追加，不改标题（用户可能重命名过）。
 function pushLocalInpaintResultTo(target, imageRef, editorNode){
     if(!target || !imageRef?.url) return false;
-    const hasContent = (target.images || []).some(img => img?.url);
+    // 2026-10-18（用户要求）：按 URL 去重——同一张图被重放/重复回调时不再叠加成两个格子
+    const seen = new Set();
+    const keep = (target.images || []).filter(img => {
+        const url = img?.url || '';
+        if(!url || seen.has(url)) return false;
+        seen.add(url);
+        return true;
+    });
+    const hasContent = keep.length > 0;
     pushUndo();
-    if(hasContent){
-        target.images = [...(target.images || []).filter(img => img?.url), {...imageRef}];
+    const idx = keep.findIndex(img => img.url === imageRef.url);
+    if(idx >= 0){
+        keep[idx] = {...imageRef};
+        target.images = keep;
+    } else if(hasContent){
+        target.images = [...keep, {...imageRef}];
     } else {
         target.images = [{...imageRef}];
         delete target.w;
@@ -25948,6 +25965,25 @@ function pushLocalInpaintResultTo(target, imageRef, editorNode){
     target.sourcePlanNodeId = editorNode?.id || '';
     if(typeof markSmartNodeImagesEdited === 'function') markSmartNodeImagesEdited(target);
     return true;
+}
+// 2026-10-18（用户要求「选 2 张就只该出 2 张」）：局部编辑结果节点按「轮次」显示。
+// 每轮开跑时记下上一轮还挂着的图；本轮第一个结果落地时把它们摘掉，于是节点里
+// 始终只有「本轮这几张」，不再跨轮叠加成 4 张 / 6 张。
+function lpMarkLocalInpaintRound(node){
+    if(!node) return;
+    node.localInpaintRoundId = uid('lpRun');
+    // 只对「系统自动建的结果节点」按轮替换；用户自己连上去的图片节点保持追加，绝不清空
+    node.localInpaintPrevUrls = node.localInpaintOutputNode === true
+        ? (node.images || []).map(img => img?.url).filter(Boolean)
+        : [];
+}
+// 返回「需要丢弃的上一轮 URL 集合」；调用方据此过滤 existing，保证同轮并发任务仍能累积
+function lpConsumePreviousRound(node, additions){
+    if(!node || !Array.isArray(additions) || !additions.length) return null;
+    const prev = Array.isArray(node.localInpaintPrevUrls) ? node.localInpaintPrevUrls : null;
+    if(!prev || !prev.length) return null;
+    delete node.localInpaintPrevUrls;
+    return new Set(prev);
 }
 // 2026-10-18（用户要求「遮罩工作台不变，不要把结果填进工作台」）：
 // 工作台节点永远只显示干净原图 + 遮罩色块。任何路径（旧数据兜底 / 恢复运行 /
@@ -25963,12 +25999,17 @@ function lpRedirectWorkspaceOutputs(node, additions, kind='image'){
         target = createImageNodeAt(derivedImageNodePoint(node, liveAdditions), liveAdditions.map(img => ({...img})), {select:false, skipUndo:true});
         if(target){
             target.title = '局部编辑结果';
+            target.localInpaintOutputNode = true;
             target.sourcePlanNodeId = node.id;
             addConnection(node.id, target.id, 'flow');
         }
     }
     if(!target) return false;
-    target.images = [...(target.images || []).filter(img => img?.url), ...liveAdditions.map(img => ({...img}))];
+    // 按 URL 去重：同一批产物被多条路径写进来时不叠加
+    const existing = (target.images || []).filter(img => img?.url);
+    const seen = new Set(existing.map(img => img.url));
+    const fresh = liveAdditions.filter(img => !seen.has(img.url));
+    target.images = [...existing, ...fresh.map(img => ({...img}))];
     if(target.localInpaintOutputNode !== true && (target.title === 'Group' || !String(target.title || '').trim())) target.title = '局部编辑结果';
     target.sourcePlanNodeId = node.id;
     if(typeof scheduleLocalInpaintStitch === 'function') scheduleLocalInpaintStitch(target, kind);
@@ -26005,6 +26046,23 @@ function lpSweepWorkspaceNodes(){
         delete node.outputKind;
     });
 }
+// 2026-10-18：旧数据自愈——局部编辑结果节点里可能有「同一 URL 出现两次」的重复格子
+// （历史回调重放造成），渲染时按 URL 去重一次，用户不用手动删。
+function lpSweepLocalInpaintResults(){
+    nodes.forEach(node => {
+        if(node?.localInpaintOutputNode !== true) return;
+        const imgs = node.images || [];
+        if(imgs.length < 2) return;
+        const seen = new Set();
+        const next = imgs.filter(img => {
+            const url = img?.url || '';
+            if(url && seen.has(url)) return false;
+            if(url) seen.add(url);
+            return true;
+        });
+        if(next.length !== imgs.length) node.images = next;
+    });
+}
 // 遮罩计划持有者：优先节点自身；否则沿「编辑节点 → 本节点」连线找上游编辑节点。
 // （2026-10-17 分流后，原始模型输出与生成中占位都在下游输出节点上，而 localInpaintPlan 仍在编辑节点上。）
 function localInpaintPlanHolderFor(node){
@@ -26019,6 +26077,16 @@ function localInpaintPlanHolderFor(node){
     }
     return null;
 }
+// 2026-10-18（用户要求「一次生成 2 张就只出 2 张」）：贴回改成「按 URL 逐张处理」。
+// 旧实现只取 images 最后一张 + 全局 token 互斥：并发两个任务时，后发起的那次会把前一次的
+// token 顶掉，于是先完成的那张永远停在「模型原始输出」（没有 localInpaintStitched 标记），
+// 看上去就是「2 张里有一张不是贴回的」。现在按 URL 排队，各张互不影响。
+const localInpaintStitchJobs = new Map();   // nodeId -> Set<url>（处理中的贴回源）
+function lpStitchJobsFor(nodeId){
+    let jobs = localInpaintStitchJobs.get(nodeId);
+    if(!jobs){ jobs = new Set(); localInpaintStitchJobs.set(nodeId, jobs); }
+    return jobs;
+}
 function scheduleLocalInpaintStitch(node, kind='image'){
     if(kind !== 'image') return false;
     const planNode = localInpaintPlanHolderFor(node);
@@ -26026,74 +26094,99 @@ function scheduleLocalInpaintStitch(node, kind='image'){
     const plan = planNode.localInpaintPlan;
     const patches = (node.images || []).filter(img => img?.url);
     if(!patches.length) return false;
-    // 取最新一张做贴回源（并发/多轮时 images 里可能同时有旧结果与本轮原始输出）
-    const patch = patches[patches.length - 1];
     const onEditor = node.id === planNode.id;
+    const jobs = lpStitchJobsFor(node.id);
+    // 只挑「还没贴回过、也不在处理中」的模型原始输出；已贴回成图 / 用户原有素材一律不动
+    const waiting = patches.filter(img => {
+        if(img.localInpaintStitched === true) return false;
+        if(jobs.has(img.url)) return false;
+        return img.generatedResult === true || img.derivedFrom?.operation === 'local-inpaint';
+    });
+    if(!waiting.length){
+        if(!jobs.size && node.localInpaintStitching) delete node.localInpaintStitching;
+        return false;
+    }
+    // 兜底路径（旧数据里结果落在编辑节点自身）会整体复位节点，只处理最新一张
+    const todo = onEditor ? [waiting[waiting.length - 1]] : waiting;
     const keepSize = onEditor ? smartNodeSizeSnapshot(node) : null;
     const containingGroup = onEditor ? nodes.find(group => isWorkflowGroupNode(group) && workflowGroupMembers(group).some(member => member.id === node.id)) || null : null;
     const keepFrame = keepSize ? {x:Math.round(Number(node.x || 0)), y:Math.round(Number(node.y || 0)), w:keepSize.w, h:keepSize.h} : null;
-    const token = ++localInpaintStitchToken;
-    node.localInpaintStitching = true;
-    node.localInpaintStitchToken = token;
-    stitchLocalInpaintResult(plan.source, patch, plan.rect, plan.mask, plan.pad).then(file => {
-        const live = nodes.find(n => n.id === node.id);
-        const livePlanNode = nodes.find(n => n.id === planNode.id);
-        if(!live || live.localInpaintStitchToken !== token || !file) return;
-        const resultImage = {
-            url:file.url,
-            name:file.name || 'local-inpaint-stitch.png',
-            kind:'image',
-            generatedResult:true,
-            localInpaintStitched:true,
-            derivedFrom:{nodeId:livePlanNode?.id || '', imageIndex:0, operation:'local-inpaint'}
-        };
-        if(!onEditor){
-            // 常规路径：原始输出落在下游输出节点上 → 就地替换为贴回成图（保持追加顺序）
-            const idx = (live.images || []).findIndex(img => img === patch || (img?.url && img.url === patch.url));
-            if(idx >= 0) live.images[idx] = resultImage;
-            else live.images = [...(live.images || []).filter(img => img?.url), resultImage];
-            if(live.localInpaintOutputNode === true) live.title = '局部编辑结果';
-            if(livePlanNode) live.sourcePlanNodeId = livePlanNode.id;
-        } else {
-            // 兜底（旧数据/刷新恢复）：原始输出落在了编辑节点自身 → 写到下游目标，编辑节点复位
-            const target = localInpaintResultTargetFor(live);
-            if(target){
-                pushLocalInpaintResultTo(target, resultImage, live);
-            } else {
-                const created = createImageNodeAt(derivedImageNodePoint(live, [resultImage]), [resultImage], {select:false, skipUndo:false});
-                if(created){
-                    created.title = '局部编辑结果';
-                    created.sourcePlanNodeId = live.id;
-                    addConnection(live.id, created.id, 'input');
-                }
-            }
-            live.images = [{
-                ...plan.source,
-                kind:'image',
-                natural_w:Number(plan.rect?.sourceW) || undefined,
-                natural_h:Number(plan.rect?.sourceH) || undefined
-            }];
-            keepSmartNodeSize(live, keepSize);
-            const liveGroup = containingGroup ? nodes.find(group => group.id === containingGroup.id) : null;
-            if(liveGroup && keepFrame) restoreWorkflowGroupMemberFrame(live, liveGroup, keepFrame);
-            live.title = '局部编辑';
-            // 只清掉自动生成的遮罩引用；替换图（localInpaintReplace）保留，方便下次重跑
-            if(Array.isArray(live.manualInputRefs)) live.manualInputRefs = live.manualInputRefs.filter(ref => !ref.localInpaintRef);
-            delete live.outpaintSize;
-        }
-        // 编辑节点（分流路径）不做任何改动：干净原图 + 遮罩红框 + plan 常驻，可改提示词反复迭代
+    const settle = live => {
+        if(!live) return;
+        if(jobs.size) return;      // 还有别的图在贴回
         delete live.localInpaintStitching;
         delete live.localInpaintStitchToken;
-        render();
-        scheduleSave();
-    }).catch(err => {
-        const live = nodes.find(n => n.id === node.id);
-        if(live){
-            delete live.localInpaintStitching;
-            delete live.localInpaintStitchToken;
-        }
-        toast((err?.message || '局部贴回失败').slice(0, 120));
-        render();
+    };
+    if(!onEditor) node.localInpaintStitching = true;
+    todo.forEach(patch => {
+        jobs.add(patch.url);
+        const token = ++localInpaintStitchToken;
+        if(onEditor) node.localInpaintStitchToken = token;
+        stitchLocalInpaintResult(plan.source, patch, plan.rect, plan.mask, plan.pad).then(file => {
+            jobs.delete(patch.url);
+            const live = nodes.find(n => n.id === node.id);
+            const livePlanNode = nodes.find(n => n.id === planNode.id);
+            if(!live || !file) return settle(live);
+            // 这张图已经被用户删掉 / 被新一轮替换掉了 → 结果丢弃，别把旧产物塞回去
+            const stillThere = (live.images || []).some(img => img?.url === patch.url);
+            if(!stillThere && !onEditor) return settle(live);
+            const resultImage = {
+                url:file.url,
+                name:file.name || 'local-inpaint-stitch.png',
+                kind:'image',
+                generatedResult:true,
+                localInpaintStitched:true,
+                derivedFrom:{nodeId:livePlanNode?.id || '', imageIndex:0, operation:'local-inpaint'}
+            };
+            if(!onEditor){
+                // 常规路径：原始输出落在下游输出节点上 → 就地替换为贴回成图（保持原位置）
+                const idx = (live.images || []).findIndex(img => img?.url === patch.url);
+                if(idx >= 0){
+                    live.images[idx] = resultImage;
+                } else if(!(live.images || []).some(img => img?.url === resultImage.url)){
+                    live.images = [...(live.images || []).filter(img => img?.url), resultImage];
+                }
+                if(live.localInpaintOutputNode === true) live.title = '局部编辑结果';
+                if(livePlanNode) live.sourcePlanNodeId = livePlanNode.id;
+            } else {
+                // 兜底（旧数据/刷新恢复）：原始输出落在了编辑节点自身 → 写到下游目标，编辑节点复位
+                const target = localInpaintResultTargetFor(live);
+                if(target){
+                    pushLocalInpaintResultTo(target, resultImage, live);
+                } else {
+                    const created = createImageNodeAt(derivedImageNodePoint(live, [resultImage]), [resultImage], {select:false, skipUndo:false});
+                    if(created){
+                        created.title = '局部编辑结果';
+                        created.localInpaintOutputNode = true;
+                        created.sourcePlanNodeId = live.id;
+                        addConnection(live.id, created.id, 'input');
+                    }
+                }
+                live.images = [{
+                    ...plan.source,
+                    kind:'image',
+                    natural_w:Number(plan.rect?.sourceW) || undefined,
+                    natural_h:Number(plan.rect?.sourceH) || undefined
+                }];
+                keepSmartNodeSize(live, keepSize);
+                const liveGroup = containingGroup ? nodes.find(group => group.id === containingGroup.id) : null;
+                if(liveGroup && keepFrame) restoreWorkflowGroupMemberFrame(live, liveGroup, keepFrame);
+                live.title = '局部编辑';
+                // 只清掉自动生成的遮罩引用；替换图（localInpaintReplace）保留，方便下次重跑
+                if(Array.isArray(live.manualInputRefs)) live.manualInputRefs = live.manualInputRefs.filter(ref => !ref.localInpaintRef);
+                delete live.outpaintSize;
+            }
+            // 编辑节点（分流路径）不做任何改动：干净原图 + 遮罩红框 + plan 常驻，可改提示词反复迭代
+            settle(live);
+            render();
+            scheduleSave();
+        }).catch(err => {
+            jobs.delete(patch.url);
+            const live = nodes.find(n => n.id === node.id);
+            settle(live);
+            toast((err?.message || '局部贴回失败').slice(0, 120));
+            render();
+        });
     });
     return true;
 }
@@ -31220,7 +31313,9 @@ function appendOutputsToNode(node, additions, kind='image', options={}){
         return true;
     }), options.meta || {});
     if(!next.length) return [];
-    node.images = [...existing, ...next];
+    // 2026-10-18（用户要求）：局部编辑结果节点按轮显示——本轮首个产物落地时摘掉上一轮的图
+    const lpPrevRound = lpConsumePreviousRound(node, next);
+    node.images = [...(lpPrevRound ? existing.filter(img => !lpPrevRound.has(img.url)) : existing), ...next];
     if(Number(options.limit) > 0 && node.images.length > Number(options.limit)){
         node.images = node.images.slice(-Number(options.limit));
     }
@@ -32592,6 +32687,8 @@ async function runGeneration(){
             ];
             branchNode.pending = Math.max(1, (Number(branchNode.pending) || 0) + phCount);
             branchNode.appendPendingOutput = true;
+            // 2026-10-18（用户要求）：本轮结果落地时丢掉上一轮的图，选 2 张就只显示 2 张
+            lpMarkLocalInpaintRound(branchNode);
             delete branchNode.replacePendingOutput;
             delete branchNode.replacePendingOutputs;
             delete branchNode.replacePendingResults;
@@ -34023,7 +34120,7 @@ function finalizeSmartPendingTask(node, taskId, images, kind='image', options={}
     // 但同一轮里的多个并发任务必须累积：node.replacePendingResults 记录本轮已落地的产物。
     // 早期实现每次都从空数组重来，于是 count=2 时后一张会把前一张顶掉，节点最终只剩 1 张
     // （用户反馈：替换模式下只能生成 1 张图）。
-    const existing = replaceOutput
+    let existing = replaceOutput
         ? cleanHistoryImages(Array.isArray(node.replacePendingResults) ? node.replacePendingResults : [])
         : cleanHistoryImages(node.images || []);
     const seen = new Set(existing.map(img => `${img.kind || ''}|${img.url || ''}`));
@@ -34037,6 +34134,10 @@ function finalizeSmartPendingTask(node, taskId, images, kind='image', options={}
             seen.add(key);
             return true;
         });
+    // 2026-10-18（用户要求「选 2 张就只出 2 张」）：局部编辑结果节点本轮第一个结果落地时，
+    // 把上一轮还挂着的图摘掉（同一轮并发任务的产物仍按 additions 正常累积）。
+    const lpPrevRound = lpConsumePreviousRound(node, additions);
+    if(lpPrevRound) existing = existing.filter(img => !lpPrevRound.has(img.url));
     // 2026-10-09（用户要求"根源解决不要出现素材组"）：多图分流运行中刷新页面后，resume
     // 会把结果按任务恢复落地到源节点——而分流分支（智能分组）已承载同样内容，于是源节点
     // 变成与分组同图的"素材组"残留。落地前检查：下游连线指向的智能分组已包含本次全部
