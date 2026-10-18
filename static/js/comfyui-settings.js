@@ -49,6 +49,53 @@ function isBuiltinWorkflowItem(item){
 function normalizeWorkflowItem(item){
     return {...item, builtin:isBuiltinWorkflowItem(item)};
 }
+// ===== ComfyUI 工作流分类（2026-10-15）=====
+// 与画布 composer 共用同一套后端分类（GET /api/workflows 返回 category / category_source）：
+// 生图 / 生视频 / 生音频 / 放大 / 其他。
+const WF_CATEGORY_DEFS = [
+    {key:'image',   label:'生图'},
+    {key:'video',   label:'生视频'},
+    {key:'audio',   label:'生音频'},
+    {key:'upscale', label:'放大'},
+    {key:'other',   label:'其他'}
+];
+// 后端没给分类时的兜底推断（老接口/离线场景）——只按文件名关键词猜，尽力而为。
+function guessWorkflowCategory(w){
+    const text = `${String(w?.name || '')} ${String(w?.title || '')}`.toLowerCase();
+    if(/video|视频|vod|seedance|kling|runway|vidu|wan.*video|hailuo|h3|minimax|ref2va|t2va|fl2va/.test(text)) return 'video';
+    if(/audio|音频|tts|music|sound|voice|suno/.test(text)) return 'audio';
+    if(/upscale|放大|seedvr|supir|增强|enhance/.test(text)) return 'upscale';
+    if(/image|图片|生图|文生图|edit|klein|扩图|融图|洗图/.test(text)) return 'image';
+    return 'other';
+}
+function workflowCategoryKey(w){
+    const raw = String(w?.category || '').trim().toLowerCase();
+    if(WF_CATEGORY_DEFS.some(def => def.key === raw)) return raw;
+    return guessWorkflowCategory(w);
+}
+function workflowCategoryLabel(key){
+    return WF_CATEGORY_DEFS.find(def => def.key === key)?.label || '其他';
+}
+async function setWorkflowCategory(name, value){
+    if(!name) return;
+    try {
+        setStatus('正在保存分类...');
+        const res = await fetch(`/api/workflows/${encodeURIComponent(name)}/category`, {
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(value === 'auto' ? {category:'', source:'auto'} : {category:value, source:'manual'})
+        });
+        if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '分类失败');
+        const data = await res.json();
+        const item = workflows.find(w => w.name === name);
+        if(item){ item.category = data.category; item.category_source = data.category_source; }
+        renderList();
+        setStatus(`已归类：${workflowCategoryLabel(data.category)}`);
+        new BroadcastChannel('studio-api').postMessage({ type: 'workflows-changed' });
+    } catch(e){
+        setStatus('分类失败：' + (e.message || e));
+    }
+}
 function visibleWorkflows(){
     return workflows;
 }
@@ -444,19 +491,11 @@ function renderList(){
         refreshIcons();
         return;
     }
-    // 按类型分类：生图 / 生视频 / 生音频
-    function workflowCategory(w) {
-        const name = String(w.name || '').toLowerCase();
-        const title = String(w.title || '').toLowerCase();
-        if(/video|视频|vod|seedance|kling|runway|vidu|wan.*video|hailuo|jimeng.*video|h3|minimax|ref2va|t2va|fl2va/.test(name + ' ' + title)) return 'video';
-        if(/audio|音频|tts|music|sound|voice|suno|doubao.*tts/.test(name + ' ' + title)) return 'audio';
-        return 'image';
-    }
-    const catOrder = ['image', 'video', 'audio'];
-    const catLabels = { image: '生图', video: '生视频', audio: '生音频' };
-    const groups = catOrder.map(cat => ({
-        label: catLabels[cat],
-        items: filtered.filter(w => workflowCategory(w) === cat)
+    // 2026-10-15：分类改为以后端为准（工作流 .config.json 里手写的 category，或后端按输出节点推断），
+    // 统一成 5 类：生图 / 生视频 / 生音频 / 放大 / 其他；每张卡片可直接改分类（右键同理见画布 composer）。
+    const groups = WF_CATEGORY_DEFS.map(def => ({
+        label: def.label,
+        items: filtered.filter(w => workflowCategoryKey(w) === def.key)
     })).filter(g => g.items.length);
     listEl.innerHTML = groups.map(g => `
         <div class="workflow-group-head"><span>${escapeHtml(g.label)}</span><span class="workflow-group-count">${g.items.length}</span></div>
@@ -466,6 +505,12 @@ function renderList(){
             const inCustom = String(w.name || '').startsWith('custom/');
             const metaBits = [tf('comfy.fieldCount', {count: w.field_count})];
             if(isDup) metaBits.push(inCustom ? 'custom/' : tr('comfy.rootDir'));
+            // 2026-10-15：手动分类下拉（改完即写 .config.json，跟着工作流导出/导入走）
+            const catKey = workflowCategoryKey(w);
+            const catSelect = `<select class="wf-cat-select" title="工作流分类" onclick="event.stopPropagation()" onchange="event.stopPropagation();setWorkflowCategory('${escapeHtml(w.name)}', this.value)">
+                    ${WF_CATEGORY_DEFS.map(def => `<option value="${def.key}" ${def.key === catKey ? 'selected' : ''}>${def.label}</option>`).join('')}
+                    <option value="auto">自动</option>
+                </select>`;
             return `
         <div class="workflow-card ${w.name===selectedName?'active':''}" onclick="selectWorkflow('${escapeHtml(w.name)}')" title="${escapeHtml(w.name)}" style="cursor:pointer">
             <span class="workflow-icon"><i data-lucide="${w.builtin?'package':'file-json-2'}" class="w-3.5 h-3.5"></i></span>
@@ -473,6 +518,7 @@ function renderList(){
                 <div class="workflow-name">${escapeHtml(w.title)}${isDup?` <i data-lucide="alert-triangle" class="w-3 h-3 wf-dup-icon" title="${escapeHtml(tr('comfy.dupWarning'))}"></i>`:''}</div>
                 <div class="workflow-meta">${metaBits.map(escapeHtml).join(' · ')}</div>
             </span>
+            ${catSelect}
             ${w.builtin?'':`<span class="wf-del-btn" onclick="event.stopPropagation();deleteWorkflow('${escapeHtml(w.name)}')" title="删除工作流" style="cursor:pointer;color:#666;padding:2px;border-radius:4px;flex-shrink:0"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></span>`}
         </div>`;
         }).join('')}

@@ -340,6 +340,21 @@ let idlePortMagnetState = null;
 let saveTimer = null;
 let apiProviders = [];
 let comfyWorkflows = [];
+// 2026-10-15（用户要求）ComfyUI 工作流分 5 类：生图 / 生视频 / 生音频 / 放大 / 其他。
+// 分类值来自后端（工作流 .config.json 里手写的 category，或后端按输出节点推断的 category），
+// 这里只负责展示与筛选；手动改分类走 PUT /api/workflows/{name}/category。
+const COMFY_WORKFLOW_CATEGORY_DEFS = [
+    {key:'image',   i18n:'smart.wfcatImage',   fallback:'生图'},
+    {key:'video',   i18n:'smart.wfcatVideo',   fallback:'生视频'},
+    {key:'audio',   i18n:'smart.wfcatAudio',   fallback:'生音频'},
+    {key:'upscale', i18n:'smart.wfcatUpscale', fallback:'放大'},
+    {key:'other',   i18n:'smart.wfcatOther',   fallback:'其他'}
+];
+const COMFY_WORKFLOW_CATEGORY_KEY = 'smart_comfy_workflow_category';
+let comfyWorkflowCategory = (() => {
+    try { return localStorage.getItem(COMFY_WORKFLOW_CATEGORY_KEY) || 'all'; }
+    catch(e){ return 'all'; }
+})();
 let comfyInstanceCount = 1;
 let smartAgentOpen = true;
 let smartAgentConversationId = '';
@@ -1036,8 +1051,32 @@ function smartVideoNodeHtml(itemOrUrl, size=512, attrs=''){
 // 其余渲染成海报 <img data-preview-kind="video">；hover/点击时 smartActivateVideoPreview 会把海报升级为播放器，交互不变。
 const SMART_VIDEO_MOUNT_BUDGET = 12;
 let smartVideoMountUsed = 0;
+// 2026-10-15 刚上传/拖入的视频优先挂真 video：
+// 懒海报模式显示的是服务端抽帧图（/api/media-preview），而抽帧是首次请求才现场跑 ffmpeg，
+// 大视频要等几秒到几十秒 —— 期间节点就是个空白框（用户拖入 13MB 视频看不到画面的根因）。
+// 这里让「刚上传的视频」直接用 <video preload="metadata"> 由浏览器自己解首帧，不用等服务端。
+// 用时间窗而非「用一次就删」：渲染会反复重建 DOM，只删一次会导致第二次渲染又退回未就绪的海报。
+const SMART_FRESH_VIDEO_URLS = new Map();
+const SMART_FRESH_VIDEO_TTL_MS = 90 * 1000;
+const SMART_FRESH_VIDEO_MAX = 24;
+function markSmartFreshUploadedVideo(itemOrUrl){
+    const url = smartOriginalMediaUrl(itemOrUrl);
+    if(!url) return '';
+    SMART_FRESH_VIDEO_URLS.set(url, Date.now());
+    if(SMART_FRESH_VIDEO_URLS.size > SMART_FRESH_VIDEO_MAX){
+        const oldest = [...SMART_FRESH_VIDEO_URLS.entries()].sort((a, b) => a[1] - b[1])[0];
+        if(oldest) SMART_FRESH_VIDEO_URLS.delete(oldest[0]);
+    }
+    return url;
+}
 function smartVideoShouldMount(itemOrUrl){
     if(isInlineVideoActive(itemOrUrl)) return true;
+    const url = smartOriginalMediaUrl(itemOrUrl);
+    const freshAt = url ? SMART_FRESH_VIDEO_URLS.get(url) : 0;
+    if(freshAt){
+        if(Date.now() - freshAt <= SMART_FRESH_VIDEO_TTL_MS) return true;
+        SMART_FRESH_VIDEO_URLS.delete(url);
+    }
     if(smartVideoMountUsed >= SMART_VIDEO_MOUNT_BUDGET) return false;
     smartVideoMountUsed++;
     return true;
@@ -9399,12 +9438,123 @@ function renderUpscalePill(paramKey, current){
         </div>
     </div>`;
 }
+function comfyWorkflowCategoryKey(workflow){
+    const raw = String(workflow?.category || '').trim().toLowerCase();
+    return COMFY_WORKFLOW_CATEGORY_DEFS.some(def => def.key === raw) ? raw : 'other';
+}
+// i18n 没加载 / 缺键时退回中文兜底文案（tr() 缺键会原样返回 key）
+function smartI18nOr(key, fallback){
+    const text = tr(key);
+    return (text && text !== key) ? text : fallback;
+}
+function comfyWorkflowCategoryLabel(key){
+    const def = COMFY_WORKFLOW_CATEGORY_DEFS.find(item => item.key === key);
+    if(!def) return tr('smart.wfcatOther');
+    return smartI18nOr(def.i18n, def.fallback);
+}
+function comfyWorkflowCategoryCount(key){
+    const list = Array.isArray(comfyWorkflows) ? comfyWorkflows : [];
+    if(key === 'all') return list.length;
+    return list.filter(workflow => comfyWorkflowCategoryKey(workflow) === key).length;
+}
+function persistComfyWorkflowCategory(key){
+    try { localStorage.setItem(COMFY_WORKFLOW_CATEGORY_KEY, String(key || 'all')); } catch(e){}
+}
+function closeComfyWorkflowCategoryMenu(){
+    const menu = document.getElementById('comfyWfCatMenu');
+    if(!menu) return;
+    try { menu._cleanup?.(); } catch(e){}
+    menu.remove();
+}
+function openComfyWorkflowCategoryMenu(workflowName, clientX, clientY){
+    closeComfyWorkflowCategoryMenu();
+    const workflow = (comfyWorkflows || []).find(item => item.name === workflowName);
+    if(!workflow) return;
+    const activeKey = comfyWorkflowCategoryKey(workflow);
+    const isManual = String(workflow.category_source || '') === 'manual';
+    const menu = document.createElement('div');
+    menu.id = 'comfyWfCatMenu';
+    menu.className = 'comfy-wf-cat-menu';
+    menu.dataset.workflowName = workflowName;
+    menu.innerHTML = `
+        <div class="comfy-wf-cat-menu-title">${escapeHtml(tr('smart.wfcatMenu'))}</div>
+        ${COMFY_WORKFLOW_CATEGORY_DEFS.map(def => `<button type="button" class="${def.key === activeKey ? 'active' : ''}" data-comfy-wf-set="${escapeAttr(def.key)}"><span>${escapeHtml(comfyWorkflowCategoryLabel(def.key))}</span>${def.key === activeKey ? '<i data-lucide="check"></i>' : ''}</button>`).join('')}
+        <div class="comfy-wf-cat-menu-sep"></div>
+        <button type="button" class="auto${isManual ? '' : ' current'}" data-comfy-wf-set="auto" ${isManual ? '' : 'disabled'} title="${escapeAttr(tr('smart.wfcatAuto'))}"><i data-lucide="wand-2"></i><span>${escapeHtml(tr('smart.wfcatAuto'))}</span>${isManual ? '' : '<i data-lucide="check"></i>'}</button>`;
+    document.body.appendChild(menu);
+    refreshIcons();
+    const rect = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8));
+    const top = Math.max(8, Math.min(clientY, window.innerHeight - rect.height - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.querySelectorAll('[data-comfy-wf-set]').forEach(button => {
+        button.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const value = button.dataset.comfyWfSet;
+            closeComfyWorkflowCategoryMenu();
+            setComfyWorkflowCategory(workflowName, value);
+        };
+    });
+    // 点空白 / Esc 关闭；延后一拍注册，避免触发本次 contextmenu 的同一轮事件立刻把菜单关掉。
+    setTimeout(() => {
+        const onDown = event => { if(!event.target.closest('#comfyWfCatMenu')) closeComfyWorkflowCategoryMenu(); };
+        const onKey = event => { if(event.key === 'Escape') closeComfyWorkflowCategoryMenu(); };
+        const onScroll = () => closeComfyWorkflowCategoryMenu();
+        menu._cleanup = () => {
+            document.removeEventListener('mousedown', onDown, true);
+            document.removeEventListener('keydown', onKey, true);
+            window.removeEventListener('scroll', onScroll, true);
+        };
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey, true);
+        window.addEventListener('scroll', onScroll, true);
+    }, 0);
+}
+async function setComfyWorkflowCategory(workflowName, value){
+    const restoreAuto = value === 'auto';
+    try {
+        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowName)}/category`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(restoreAuto ? {category:'', source:'auto'} : {category:value, source:'manual'})
+        });
+        if(!res.ok){
+            let detail = '';
+            try { detail = (await res.json()).detail || ''; } catch(e){}
+            throw new Error(detail || tr('smart.wfcatFail'));
+        }
+        const data = await res.json();
+        const workflow = (comfyWorkflows || []).find(item => item.name === workflowName);
+        if(workflow){
+            workflow.category = data.category;
+            workflow.category_source = data.category_source;
+        }
+        renderDynamicParams();
+        toast(trf(restoreAuto ? 'smart.wfcatAutoDone' : 'smart.wfcatDone', {name: comfyWorkflowCategoryLabel(data.category)}));
+    } catch(e){
+        toast(`${tr('smart.wfcatFail')}：${e.message || e}`);
+    }
+}
 function renderComfyWorkflowControl(){
     if(!comfyWorkflows.length) return `<div class="muted-note">${escapeHtml(tr('smart.noWorkflow'))}</div>`;
     const current = comfyWorkflows.find(w => w.name === settings.comfyWorkflow) || comfyWorkflows[0];
     if(!settings.comfyWorkflow && current?.name) settings.comfyWorkflow = current.name;
     settings.comfyMode = 'custom';
     const title = comfyWorkflowDisplayTitle(current);
+    // 2026-10-15：popover 顶部加分类 tab（全部 / 生图 / 生视频 / 生音频 / 放大 / 其他），
+    // 以及每张卡片的右键归类菜单（contextmenu，见 bindDynamicParams）。
+    const activeCategory = comfyWorkflowCategory === 'all' || COMFY_WORKFLOW_CATEGORY_DEFS.some(def => def.key === comfyWorkflowCategory)
+        ? comfyWorkflowCategory
+        : 'all';
+    const categoryWorkflows = activeCategory === 'all'
+        ? comfyWorkflows
+        : comfyWorkflows.filter(workflow => comfyWorkflowCategoryKey(workflow) === activeCategory);
+    const categoryTabs = [
+        {key:'all', label: smartI18nOr('smart.tplAll', '全部')},
+        ...COMFY_WORKFLOW_CATEGORY_DEFS.map(def => ({key:def.key, label: comfyWorkflowCategoryLabel(def.key)}))
+    ].map(tab => `<button type="button" class="comfy-workflow-cat ${tab.key === activeCategory ? 'active' : ''}" data-comfy-wf-cat="${escapeAttr(tab.key)}" title="${escapeAttr(tab.label)}"><span>${escapeHtml(tab.label)}</span><small>${comfyWorkflowCategoryCount(tab.key)}</small></button>`).join('');
     return `<div class="smart-control comfy-workflow-control">
         <button class="smart-pill comfy-workflow-pill" type="button" title="${escapeAttr(title)}" aria-label="${escapeAttr(tr('smart.workflow'))}">
             <i data-lucide="workflow"></i><span>${escapeHtml(title)}</span><small>${comfyWorkflows.length}</small><i data-lucide="chevron-down" class="pill-caret"></i>
@@ -9412,10 +9562,13 @@ function renderComfyWorkflowControl(){
         <div class="smart-popover comfy-workflow-popover">
             <div class="comfy-workflow-head">
                 <div class="comfy-panel-title"><span class="comfy-panel-icon"><i data-lucide="workflow"></i></span><strong>${escapeHtml(tr('smart.workflow'))}</strong></div>
-                <div class="comfy-panel-count"><i data-lucide="list-filter"></i><span>${comfyWorkflows.length}</span></div>
+                <div class="comfy-panel-count"><i data-lucide="list-filter"></i><span>${categoryWorkflows.length}/${comfyWorkflows.length}</span></div>
             </div>
+            <div class="comfy-workflow-cats">${categoryTabs}</div>
             <div class="comfy-workflow-grid">
-                ${comfyWorkflows.map(w => `<button type="button" class="comfy-workflow-card ${w.name === settings.comfyWorkflow ? 'active' : ''}" data-smart-param="comfyWorkflow" data-smart-value="${escapeAttr(w.name)}" title="${escapeAttr(comfyWorkflowDisplayTitle(w))}"><span>${escapeHtml(comfyWorkflowDisplayTitle(w))}</span></button>`).join('')}
+                ${categoryWorkflows.length
+                    ? categoryWorkflows.map(w => `<button type="button" class="comfy-workflow-card ${w.name === settings.comfyWorkflow ? 'active' : ''}" data-smart-param="comfyWorkflow" data-smart-value="${escapeAttr(w.name)}" data-comfy-wf-card="${escapeAttr(w.name)}" title="${escapeAttr(`${comfyWorkflowDisplayTitle(w)} · ${comfyWorkflowCategoryLabel(comfyWorkflowCategoryKey(w))}（右键归类）`)}"><span>${escapeHtml(comfyWorkflowDisplayTitle(w))}</span></button>`).join('')
+                    : `<div class="comfy-workflow-empty">${escapeHtml(tr('smart.wfcatEmpty'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -10568,6 +10721,26 @@ function bindDynamicParams(){
             }
             if(smartParam === 'videoDuration') renderDynamicParams();
         };
+    });
+    // 2026-10-15 工作流分类 tab：切分类只重渲染参数面板（弹层靠 :hover / pinned 状态自动保持打开）
+    dynamicParams.querySelectorAll('[data-comfy-wf-cat]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const next = btn.dataset.comfyWfCat || 'all';
+            if(next === comfyWorkflowCategory) return;
+            comfyWorkflowCategory = next;
+            persistComfyWorkflowCategory(next);
+            renderDynamicParams();
+        };
+    });
+    // 2026-10-15 工作流卡片右键 → 归类菜单（手动分类入口，改完立刻重排 tab 计数）
+    dynamicParams.querySelectorAll('[data-comfy-wf-card]').forEach(card => {
+        card.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openComfyWorkflowCategoryMenu(card.dataset.comfyWfCard, event.clientX, event.clientY);
+        });
     });
     dynamicParams.querySelectorAll('[data-size-scope]').forEach(btn => {
         btn.onclick = event => {
@@ -14343,7 +14516,9 @@ function fileRefsOnly(refs){
 }
 function thumbMediaHtml(img){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="media-thumb file-thumb${isSpreadsheetMediaItem(img) ? ' is-spreadsheet' : ''}" data-media-url="${escapeAttr(img.url || '')}" data-media-kind="${escapeAttr(mediaKindForItem(img))}">${smartFileIconHtml(img)}<span>${escapeHtml(img.name || smartFileLabel(img))}</span></div>`;
-    if(isAudioMediaItem(img)) return `<div class="media-thumb audio-thumb" data-media-url="${escapeAttr(img.url || '')}" data-media-kind="audio"><i data-lucide="file-audio"></i><span>${escapeHtml(img.name || 'Audio')}</span></div>`;
+    // 2026-10-15（用户要求）：音频格子要有预览播放 + 每项下载，不再是死的文件卡片。
+    // 保留 data-media-url / data-media-kind（mediaSignaturePartFromElement 与移植配对依赖它们）。
+    if(isAudioMediaItem(img)) return `<div class="media-thumb audio-thumb has-player" data-media-url="${escapeAttr(img.url || '')}" data-media-kind="audio"><i data-lucide="file-audio"></i><span>${escapeHtml(img.name || 'Audio')}</span><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio><button class="mini-x audio-dl-btn" type="button" title="下载音频" aria-label="下载音频"><i data-lucide="download"></i></button></div>`;
     // 2026-10-11：截帧相机已并入控制条（.smart-video-canvas-controls），这里不再单独挂一个浮动按钮；
     // 2026-10-11（用户要求）：去掉「AI生成」角标（分辨率角标保留）。
     if(isVideoMediaItem(img)) return `<div class="media-thumb video-thumb">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img) : (smartVideoShouldMount(img) ? `${smartVideoNodeHtml(img, 512, 'draggable="false" alt=""')}${smartVideoCanvasControlsHtml()}` : smartVideoLazyPosterHtml(img, 512, 'draggable="false" alt=""'))}</div>`;
@@ -14462,7 +14637,7 @@ function updateImageResolutionBadgeElement(itemEl, img){
 }
 function singleMediaHtml(img, w, h){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="node-img media-card media-file-card${isSpreadsheetMediaItem(img) ? ' is-spreadsheet' : ''}" style="width:${w}px;height:${h}px"><div class="media-card-icon">${smartFileIconHtml(img)}</div><div class="media-card-title">${escapeHtml(img.name || smartFileLabel(img))}</div><div class="media-card-sub">${smartFileLabel(img)}</div></div>`;
-    if(isAudioMediaItem(img)) return `<div class="node-img media-card media-audio-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="file-audio"></i></div><div class="media-card-title">${escapeHtml(img.name || 'Audio')}</div><div class="media-card-sub">AUDIO</div><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio></div>`;
+    if(isAudioMediaItem(img)) return `<div class="node-img media-card media-audio-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="file-audio"></i></div><div class="media-card-title">${escapeHtml(img.name || 'Audio')}</div><div class="media-card-sub">AUDIO</div><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio><button class="mini-x audio-dl-btn" type="button" title="下载音频" aria-label="下载音频"><i data-lucide="download"></i></button></div>`;
     if(isVideoMediaItem(img)) return `<div class="node-img media-card media-video-card" style="width:${w}px;height:${h}px">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img) : (smartVideoShouldMount(img) ? `${smartVideoNodeHtml(img, 768, 'draggable="false" alt=""')}${smartVideoCanvasControlsHtml()}` : smartVideoLazyPosterHtml(img, 768, 'draggable="false" alt=""'))}</div>`;
     return smartPreviewImgHtml(img, SMART_CANVAS_IMAGE_PREVIEW_MAX, `class="node-img" draggable="false" loading="lazy" decoding="async" onload="smartNodeImgOnload(this)" style="width:${w}px;height:${h}px"`);
 }
@@ -17136,16 +17311,21 @@ function nodeBodyHtml(node, layout){
         const lp = node.localInpaintPlan?.enabled && imgs[0]?.url ? node.localInpaintPlan : null;
         const lpSW = Number(lp?.rect?.sourceW) || 0, lpSH = Number(lp?.rect?.sourceH) || 0;
         const lpRects = (Array.isArray(lp?.rects) && lp.rects.length ? lp.rects : (lpSW > 0 ? [lp.rect] : []));
-        const lpOverlay = lpRects.map(r => {
-            const sw = Number(r.sourceW) || lpSW, sh = Number(r.sourceH) || lpSH;
-            return (sw > 0 && sh > 0 && Number(r.w) > 0 && Number(r.h) > 0)
-                ? `<div class="local-inpaint-mask-overlay" style="left:${(r.x / sw * 100).toFixed(2)}%;top:${(r.y / sh * 100).toFixed(2)}%;width:${(r.w / sw * 100).toFixed(2)}%;height:${(r.h / sh * 100).toFixed(2)}%" title="遮罩范围：生成时只替换框内，框外无损保留原图"></div>`
-                : '';
-        }).join('');
+        // 遮罩改用位图覆盖层（形状与 plan.mask 完全一致，支持画笔/橡皮/套索涂出的不规则形状）。
+        // 2026-10-18 修复两连：① 工作台的 plan.rect 是整图尺寸，没保存选区前不能走矩形兜底（会满屏红）；
+        // ② 但 workspace 也必须渲染位图 canvas（空内容=全透明），否则首次涂抹没有任何可见反馈。
+        const lpOverlay = (lp && (lp.mask?.url || lp.workspace || node.maskTool || node.lpShape))
+            ? `<canvas class="local-inpaint-mask-bmp" data-lp-mask="${escapeAttr(node.id)}" aria-hidden="true"></canvas>`
+            : lpRects.map(r => {
+                    const sw = Number(r.sourceW) || lpSW, sh = Number(r.sourceH) || lpSH;
+                    return (sw > 0 && sh > 0 && Number(r.w) > 0 && Number(r.h) > 0)
+                        ? `<div class="local-inpaint-mask-overlay" style="left:${(r.x / sw * 100).toFixed(2)}%;top:${(r.y / sh * 100).toFixed(2)}%;width:${(r.w / sw * 100).toFixed(2)}%;height:${(r.h / sh * 100).toFixed(2)}%" title="遮罩范围：生成时只替换框内，框外无损保留原图"></div>`
+                        : '';
+                }).join('');
         const outsideResolution = mediaKindForItem(imgs[0]) === 'video'
             ? ''
             : imageResolutionBadgeHtml(imgs[0], {outside:true});
-        return smartNodeBodyWithNotice(node, `<div class="image-wrap has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === 0 ? 'image-selected' : ''}" data-image-index="0" data-media-signature="${escapeAttr(`${mediaKindForItem(imgs[0])}:${imgs[0]?.url || ''}`)}" style="--node-img-w:${layout.width}px;--node-img-h:${layout.height}px">${singleMediaHtml(imgs[0], layout.width, layout.height)}${lpOverlay}${imageNameBadgeHtml(imgs[0], {outside:true})}${runReplaceButtonHtml(0)}${mediaKindForItem(imgs[0]) === 'image' ? imageReferenceButtonHtml(0) : ''}${mediaDeleteButton(imgs[0])}${runCornerFabHtml()}</div>${outsideResolution}`);
+        return smartNodeBodyWithNotice(node, `<div class="image-wrap has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === 0 ? 'image-selected' : ''}${node.maskTool ? ' lp-mask-painting' : ''}" data-image-index="0" data-media-signature="${escapeAttr(`${mediaKindForItem(imgs[0])}:${imgs[0]?.url || ''}`)}" style="--node-img-w:${layout.width}px;--node-img-h:${layout.height}px">${singleMediaHtml(imgs[0], layout.width, layout.height)}${lpOverlay}${imageNameBadgeHtml(imgs[0], {outside:true})}${runReplaceButtonHtml(0)}${mediaKindForItem(imgs[0]) === 'image' ? imageReferenceButtonHtml(0) : ''}${mediaDeleteButton(imgs[0])}${runCornerFabHtml()}</div>${outsideResolution}`);
     }
     return smartNodeBodyWithNotice(node, `<div class="node-drop" data-upload-action="files">
         <span class="upload-node-main"><i data-lucide="upload-cloud"></i></span>
@@ -17528,6 +17708,1065 @@ function isGridSplitImageGroupNode(node){
     const isImageNode = node?.type === 'smart-image' || !node?.type;
     return Boolean(isImageNode && Array.isArray(node?.images) && node.images.some(img => img?.grid?.type === 'grid-split'));
 }
+// —— 局部编辑：节点内遮罩编辑（画笔 / 橡皮 / 羽化 / 撤销 / 完成 / 取消）——
+// 遮罩真源仍是 plan.mask（padding 尺寸的 PNG）。这里在内存里维护一份同尺寸画布：
+// 涂抹直接画在内存画布上（不落盘），点「完成」才导出 PNG 上传替换 plan.mask；
+// 点「取消」丢掉内存画布，覆盖层回落到 plan.mask 原图。
+// 内存画布加载时会把 alpha 二值化（>8→255），所以羽化永远是导出时现算，不会越涂越糊。
+const lpMaskEditState = new Map();   // nodeId -> {canvas, loaded, strokes, undos, redos}
+const lpMaskImageCache = new Map();  // url -> HTMLImageElement
+let lpMaskEscBound = false;
+
+function lpPlanForNode(node){
+    return node?.localInpaintPlan?.enabled ? node.localInpaintPlan : null;
+}
+function lpMaskToolActive(node){
+    return Boolean(lpPlanForNode(node) && ['brush', 'eraser', 'lasso', 'free', 'rect'].includes(node.maskTool));
+}
+function lpMaskCanvasSize(plan){
+    const pad = plan?.pad || null;
+    const w = Math.max(1, Math.round(Number(pad?.w) || Number(plan?.rect?.sourceW) || Number(plan?.rect?.w) || 0));
+    const h = Math.max(1, Math.round(Number(pad?.h) || Number(plan?.rect?.sourceH) || Number(plan?.rect?.h) || 0));
+    return {w: w || 1, h: h || 1};
+}
+function lpMaskDefaultFeather(plan){
+    try{ return Math.max(4, Math.round(localEditFeatherSize(plan?.rect) * 0.6)); }catch(err){ return 8; }
+}
+// 2026-10-18（用户要求）：羽化「记住上次手动调的值」——滑杆动过就写进 localStorage（全局一份），
+// 新节点 / 新派生的遮罩工作台没有自己的 featherPx 时直接沿用它；从没手动调过才回落到尺寸默认值。
+const LP_FEATHER_MEM_KEY = 'gbz.lp.featherPx';
+function lpClampFeather(v){
+    const n = Math.round(Number(v));
+    if(!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(48, n));
+}
+function lpRememberedFeather(){
+    try{
+        const raw = localStorage.getItem(LP_FEATHER_MEM_KEY);
+        return raw == null ? null : lpClampFeather(raw);
+    }catch(err){ return null; }
+}
+function lpSetRememberedFeather(v){
+    const n = lpClampFeather(v);
+    if(n == null) return null;
+    try{ localStorage.setItem(LP_FEATHER_MEM_KEY, String(n)); }catch(err){ }
+    return n;
+}
+// 优先级：本节点显式调过 > 上次手动调过的记忆值 > 按图片短边算的默认值
+function lpResolveFeather(plan){
+    const own = plan?.featherPx;
+    if(own != null && own !== ''){
+        const v = lpClampFeather(own);
+        if(v != null) return v;
+    }
+    const mem = lpRememberedFeather();
+    if(mem != null) return mem;
+    return lpMaskDefaultFeather(plan);
+}
+// 旧版全屏局部编辑链路（没有 plan 对象）同样沿用记忆值，保证两条链路羽化手感一致
+function lpFeatherFor(rect){
+    const mem = lpRememberedFeather();
+    if(mem != null) return mem;
+    return Math.max(4, Math.round(localEditFeatherSize(rect) * 0.6));
+}
+function lpMaskBinarize(canvas){
+    const ctx = canvas?.getContext?.('2d');
+    if(!ctx) return;
+    let data = null;
+    try{ data = ctx.getImageData(0, 0, canvas.width, canvas.height); }catch(err){ return; }
+    const d = data.data;
+    for(let i = 0; i < d.length; i += 4){
+        const on = d[i + 3] > 8;
+        d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+        d[i + 3] = on ? 255 : 0;
+    }
+    ctx.putImageData(data, 0, 0);
+}
+function lpEnsureMaskState(node){
+    if(!node?.id) return null;
+    const plan = lpPlanForNode(node);
+    if(!plan) return null;
+    const existing = lpMaskEditState.get(node.id);
+    // 2026-10-18 修复：boot 失败的空画布状态不能永久缓存（否则该节点遮罩编辑永远无响应）——
+    // 画布还没起来就删掉旧状态，允许重试
+    if(existing && existing.canvas) return existing;
+    if(existing) lpMaskEditState.delete(node.id);
+    const st = {canvas:null, loaded:false, strokes:0, undos:[], redos:[]};
+    lpMaskEditState.set(node.id, st);
+    const boot = (w, h) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w));
+        canvas.height = Math.max(1, Math.round(h));
+        st.canvas = canvas;
+        const url = plan.mask?.url || '';
+        if(!url){ st.loaded = true; lpPaintMaskOverlay(node.id); return; }
+        const drawMask = img => {
+            const ctx = canvas.getContext('2d');
+            if(!ctx){ st.loaded = true; return; }
+            // 2026-10-18：用户已经下笔（strokes>0）说明内存内容比磁盘上的旧遮罩新，
+            // 这时再贴旧图会把刚烘焙的选区冲掉（表现同样是「选区是空的」）
+            if(st.strokes > 0){ st.loaded = true; lpPaintMaskOverlay(node.id); return; }
+            try{ ctx.drawImage(img, 0, 0, canvas.width, canvas.height); }catch(err){ st.loaded = true; return; }
+            lpMaskBinarize(canvas);
+            st.loaded = true;
+            lpPaintMaskOverlay(node.id);
+        };
+        const cached = lpMaskImageCache.get(url);
+        if(cached?.complete && cached.naturalWidth){ drawMask(cached); }
+        else {
+            const img = new Image();
+            img.onload = () => { lpMaskImageCache.set(url, img); drawMask(img); };
+            img.onerror = () => { st.loaded = true; };
+            img.src = url;
+            lpMaskImageCache.set(url, img);
+        }
+    };
+    const size = lpMaskCanvasSize(plan);
+    if(size.w > 1 && size.h > 1){ boot(size.w, size.h); }
+    else {
+        // 遮罩工作台刚派生、plan.rect 还没写入自然尺寸：用原图的加载结果定画布尺寸
+        const srcUrl = plan.source?.url || '';
+        const bootFrom = img => boot(img.naturalWidth || 512, img.naturalHeight || 512);
+        const cached = srcUrl ? lpMaskImageCache.get(srcUrl) : null;
+        if(cached?.complete && cached.naturalWidth){ bootFrom(cached); }
+        else if(srcUrl){
+            const im = new Image();
+            im.onload = () => { lpMaskImageCache.set(srcUrl, im); bootFrom(im); };
+            // 2026-10-18 修复：原图加载失败也不能让引擎瘫痪（否则画布永远为 null，画什么都不显示）——
+            // 兜底用 1024x1024 起画布，编辑/烘焙/提交照常工作
+            im.onerror = () => { if(!st.canvas) boot(1024, 1024); st.loaded = true; };
+            im.src = srcUrl;
+            setTimeout(() => { if(!st.canvas) boot(Number(plan.rect?.w) || 1024, Number(plan.rect?.h) || 1024); }, 2500);
+        } else { boot(1024, 1024); st.loaded = true; }
+    }
+    return st;
+}
+// 覆盖层几何：node 卡片里的图片是 object-fit:cover 显示的，遮罩画布是「垫底尺寸」，
+// 所以要用 cover 缩放 + 垫底偏移把遮罩精确贴到显示位置。
+function lpMaskGeometry(node){
+    const plan = lpPlanForNode(node);
+    if(!plan || !node?.id) return null;
+    const sel = `.image-node[data-id="${String(node.id).replace(/"/g, '')}"]`;
+    const wrap = document.querySelector(`${sel} .image-wrap`);
+    if(!wrap) return null;
+    const w = wrap.clientWidth || 0;
+    const h = wrap.clientHeight || 0;
+    if(w <= 0 || h <= 0) return null;
+    const natW = Math.max(1, Number(plan.rect?.sourceW) || w);
+    const natH = Math.max(1, Number(plan.rect?.sourceH) || h);
+    const scale = Math.max(w / natW, h / natH);
+    // 2026-10-18：鼠标事件是屏幕坐标，clientWidth 是世界坐标，两者差一个画布缩放系数。
+    // 不算上它，缩放≠100% 时所有落点都会偏移（框选起点偏移的根因）。
+    const domRect = wrap.getBoundingClientRect();
+    const zoom = domRect.width > 0 && w > 0 ? domRect.width / w : 1;
+    return {
+        wrap, w, h, scale, zoom, rect: domRect,
+        ox: (w - natW * scale) / 2,
+        oy: (h - natH * scale) / 2,
+        padX: Number(plan.pad?.x) || 0,
+        padY: Number(plan.pad?.y) || 0
+    };
+}
+// 拖拽进行中标记：rectDraft / 进行中的 lassoPts 只在拖拽时才画，
+// 防止中断的拖拽（mouseup 在窗口外）留下"幽灵草稿"，点一下面板就冒出来
+let lpDragActive = false;
+// 选区自动提交（用户要求：不要保存按钮，有色块=有选区）：每笔结束后延迟落盘
+const lpCommitTimers = new Map();
+function lpScheduleMaskCommit(nodeId, delay){
+    if(lpCommitTimers.has(nodeId)) clearTimeout(lpCommitTimers.get(nodeId));
+    lpCommitTimers.set(nodeId, setTimeout(() => {
+        lpCommitTimers.delete(nodeId);
+        lpCommitMaskEdit(nodeId, {silent:true}).catch(() => {});
+    }, delay == null ? 500 : delay));
+}
+// 屏幕坐标 → 遮罩画布坐标：每次事件都现场取几何（节点重建 / 画布平移缩放都不会漂移）
+function lpMaskCanvasPoint(node, clientX, clientY, stRef){
+    const st = stRef || lpMaskEditState.get(node.id);
+    if(!st?.canvas) return null;
+    const geo = lpMaskGeometry(node);
+    if(!geo) return null;
+    const rect = geo.rect || geo.wrap.getBoundingClientRect();
+    if(!(rect.width > 0) || !(rect.height > 0)) return null;
+    const k = geo.scale * geo.zoom;
+    return {
+        x: Math.max(0, Math.min(st.canvas.width, (clientX - rect.left) / k + geo.padX)),
+        y: Math.max(0, Math.min(st.canvas.height, (clientY - rect.top) / k + geo.padY)),
+        st, geo
+    };
+}
+function lpPaintMaskOverlay(nodeId, nodeRef, canvasRef, retried){
+    const node = nodeRef || nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    const plan = lpPlanForNode(node);
+    if(!plan) return;
+    const sel = `.image-node[data-id="${String(node.id).replace(/"/g, '')}"]`;
+    const cv = canvasRef || document.querySelector(`${sel} canvas[data-lp-mask]`);
+    if(!cv) return;
+    const geo = lpMaskGeometry(node);
+    if(!geo){
+        // 2026-10-18 修复：页面刚加载时节点可能还没完成布局（clientWidth=0），
+        // 只重试 1 帧经常不够 → 刷新后已保存的遮罩永远不显示（canvas 停留在默认 300x150）。
+        // 改成最多重试 ~20 帧（约 0.3s），布局就绪后自然画出来。
+        const tries = Number(retried) || 0;
+        if(tries < 20) requestAnimationFrame(() => lpPaintMaskOverlay(node.id, node, canvasRef, tries + 1));
+        return;
+    }
+    const st = lpMaskEditState.get(node.id) || null;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Math.max(1, Math.round(geo.w * dpr));
+    const ph = Math.max(1, Math.round(geo.h * dpr));
+    if(cv.width !== pw || cv.height !== ph){
+        cv.width = pw;
+        cv.height = ph;
+    }
+    const ctx = cv.getContext('2d');
+    if(!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pw, ph);
+    if(!st?.canvas) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const s = geo.scale;
+    const dx = geo.ox - geo.padX * s;
+    const dy = geo.oy - geo.padY * s;
+    ctx.drawImage(st.canvas, dx, dy, st.canvas.width * s, st.canvas.height * s);
+    // 遮罩 alpha → 红色覆盖（source-in 只保留遮罩形状内的填充）
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = 'rgba(255,72,96,.55)';
+    ctx.fillRect(0, 0, geo.w, geo.h);
+    ctx.globalCompositeOperation = 'source-over';
+    // 活动形状（矢量层，未烘焙 / 编辑中）：只画蚂蚁线 + 锚点，内部保持透明
+    // —— 与「已保存」的红色色块形成明确区分：蚂蚁线=正在编辑，色块=已落盘
+    if(node.lpShape && Array.isArray(node.lpShape.pts) && node.lpShape.pts.length >= 3){
+        const s = geo.scale, bx = geo.ox - geo.padX * s, by = geo.oy - geo.padY * s;
+        ctx.save();
+        ctx.beginPath();
+        node.lpShape.pts.forEach((p, i) => {
+            const px = bx + p.x * s, py = by + p.y * s;
+            if(i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+        });
+        ctx.closePath();
+        // 蚂蚁线：黑白两段虚线错位流动（统一描边）
+        lpStrokeAnts(ctx, 1.1);
+        // 减选角标：蓝点跟首锚点，提示这一圈是从遮罩里抠掉（不引入第二套颜色语言）
+        if(node.lpShape.mode === 'sub'){
+            const p0 = node.lpShape.pts[0];
+            const cxp = bx + p0.x * s, cyp = by + p0.y * s;
+            ctx.beginPath();
+            ctx.fillStyle = 'rgba(64,140,255,.95)';
+            ctx.arc(cxp, cyp, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,.9)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+        // 锚点：白底黑边小方块（仅钢笔工具显示，便于拖动微调）
+        if(node.maskTool === 'lasso'){
+            node.lpShape.pts.forEach(p => {
+                const px = bx + p.x * s, py = by + p.y * s;
+                ctx.fillStyle = '#fff';
+                ctx.strokeStyle = 'rgba(0,0,0,.75)';
+                ctx.lineWidth = 1;
+                ctx.fillRect(px - 3, py - 3, 6, 6);
+                ctx.strokeRect(px - 3, py - 3, 6, 6);
+            });
+        }
+        ctx.restore();
+    }
+    if(lpDragActive){
+        // 自由套索拖动轨迹（蚂蚁线，松手闭合）
+        if(node.maskTool === 'free' && Array.isArray(node.freePts) && node.freePts.length > 1){
+            const s = geo.scale, bx = geo.ox - geo.padX * s, by = geo.oy - geo.padY * s;
+            ctx.save();
+            ctx.beginPath();
+            node.freePts.forEach((p, i) => {
+                const px = bx + p.x * s, py = by + p.y * s;
+                if(i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+            });
+            ctx.closePath();
+            lpStrokeAnts(ctx, 1.2, 0.8);
+            ctx.restore();
+        }
+        // 套索路径预览（蚂蚁线 + 白底锚点，首锚点带圆环表示可闭合）——只在拖拽进行中画
+        if(node.maskTool === 'lasso' && Array.isArray(node.lassoPts) && node.lassoPts.length){
+            const s = geo.scale, bx = geo.ox - geo.padX * s, by = geo.oy - geo.padY * s;
+            ctx.save();
+            ctx.beginPath();
+            node.lassoPts.forEach((p, i) => {
+                const px = bx + p.x * s, py = by + p.y * s;
+                if(i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+            });
+            if(node.lassoPts.length > 2) ctx.closePath();
+            lpStrokeAnts(ctx, 1.2, 0.85);
+            node.lassoPts.forEach((p, i) => {
+                const px = bx + p.x * s, py = by + p.y * s;
+                if(i === 0){
+                    ctx.beginPath();
+                    ctx.fillStyle = 'rgba(255,255,255,.85)';
+                    ctx.arc(px, py, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(0,0,0,.8)';
+                    ctx.lineWidth = 1.2;
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = 'rgba(0,0,0,.75)';
+                    ctx.lineWidth = 1;
+                    ctx.fillRect(px - 3, py - 3, 6, 6);
+                    ctx.strokeRect(px - 3, py - 3, 6, 6);
+                }
+            });
+            ctx.restore();
+        }
+        // 框选拖动中的矩形预览（蚂蚁线）
+        if(node.maskTool === 'rect' && node.rectDraft){
+            const s = geo.scale, bx = geo.ox - geo.padX * s, by = geo.oy - geo.padY * s;
+            const d = node.rectDraft;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(
+                bx + Math.min(d.x0, d.x1) * s,
+                by + Math.min(d.y0, d.y1) * s,
+                Math.abs(d.x1 - d.x0) * s,
+                Math.abs(d.y1 - d.y0) * s
+            );
+            lpStrokeAnts(ctx, 1.2, 0.85);
+            ctx.restore();
+        }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    cv.style.opacity = lpMaskToolActive(node) ? '0.92' : '0.55';
+}
+function syncLocalMaskOverlays(){
+    if(typeof lpSweepWorkspaceNodes === 'function') lpSweepWorkspaceNodes();
+    let needsDeferred = false;
+    document.querySelectorAll('canvas[data-lp-mask]').forEach(cv => {
+        const node = nodes.find(n => n.id === cv.dataset.lpMask);
+        if(!node) return;
+        // 首次渲染时先把已保存的遮罩图读进内存画布，否则覆盖层是空的（重启/刷新后也靠这里恢复显示）
+        if(lpPlanForNode(node) && !lpMaskEditState.has(node.id)) lpEnsureMaskState(node);
+        lpPaintMaskOverlay(node.id, node, cv);
+        // 2026-10-18：仍是默认尺寸 = 从未成功绘制过（布局未就绪）→ 稍后补画一次
+        if(cv.width === 300 && cv.height === 150) needsDeferred = true;
+    });
+    if(needsDeferred && !syncLocalMaskOverlays._deferred){
+        syncLocalMaskOverlays._deferred = true;
+        setTimeout(() => {
+            syncLocalMaskOverlays._deferred = false;
+            document.querySelectorAll('canvas[data-lp-mask]').forEach(cv => {
+                if(cv.width !== 300 || cv.height !== 150) return;
+                const n = nodes.find(x => x.id === cv.dataset.lpMask);
+                if(n) lpPaintMaskOverlay(n.id, n, cv);
+            });
+        }, 800);
+    }
+}
+function lpMaskPointFromEvent(node, ev){
+    return lpMaskCanvasPoint(node, ev.clientX, ev.clientY);
+}
+// —— PS 式套索支持：活动形状（矢量层）→ 烘焙进遮罩（位图层）——
+// 活动形状刚闭合仍可编辑（拖锚点/加删点/整体平移），取消选中（开始新形状/切工具/点空白/Esc/生成）时烘焙。
+function lpPointInPolygon(px, py, pts){
+    let inside = false;
+    for(let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+        const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+        if(((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
+    }
+    return inside;
+}
+// Douglas-Peucker 抽稀：自由套索松手后把几百个轨迹点压到可编辑的规模
+function lpRdpSimplify(pts, eps){
+    if(!Array.isArray(pts) || pts.length < 3) return pts;
+    const keep = new Array(pts.length).fill(false);
+    keep[0] = keep[pts.length - 1] = true;
+    const stack = [[0, pts.length - 1]];
+    while(stack.length){
+        const seg = stack.pop();
+        const a = seg[0], b = seg[1];
+        let maxD = -1, idx = -1;
+        const ax = pts[a].x, ay = pts[a].y, dx = pts[b].x - ax, dy = pts[b].y - ay;
+        const len = Math.hypot(dx, dy) || 1e-6;
+        for(let i = a + 1; i < b; i++){
+            const d = Math.abs((pts[i].x - ax) * dy - (pts[i].y - ay) * dx) / len;
+            if(d > maxD){ maxD = d; idx = i; }
+        }
+        if(maxD > eps && idx > 0){ keep[idx] = true; stack.push([a, idx], [idx, b]); }
+    }
+    return pts.filter((_, i) => keep[i]);
+}
+let lpAntsOffset = 0, lpAntsTimer = null;
+// 统一蚂蚁线描边：黄色主段 + 暗色衬底（三工具共用同一套视觉语言）
+// 2026-10-18（用户要求）：蚂蚁线改黄色；暗衬底解决黄线在亮发/亮背景上看不见的问题
+function lpStrokeAnts(ctx, width, alpha){
+    const w = width || 1.2;
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    if(alpha != null) ctx.globalAlpha = alpha;
+    ctx.lineWidth = w + 1.4;
+    ctx.lineDashOffset = -lpAntsOffset;
+    ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    ctx.stroke();
+    ctx.lineWidth = w;
+    ctx.lineDashOffset = -lpAntsOffset;
+    ctx.strokeStyle = 'rgba(255,214,64,.98)';
+    ctx.stroke();
+    ctx.restore();
+}
+function lpEnsureAnts(){
+    const has = nodes.some(n => n?.lpShape && Array.isArray(n.lpShape.pts) && n.lpShape.pts.length >= 3);
+    if(has && !lpAntsTimer){
+        lpAntsTimer = setInterval(() => {
+            lpAntsOffset = (lpAntsOffset + 1) % 10;
+            nodes.forEach(n => {
+                if(n?.lpShape && Array.isArray(n.lpShape.pts) && n.lpShape.pts.length >= 3) lpPaintMaskOverlay(n.id, n);
+            });
+        }, 100);
+    } else if(!has && lpAntsTimer){
+        clearInterval(lpAntsTimer);
+        lpAntsTimer = null;
+    }
+}
+// 把活动形状烘进遮罩位图（mode: add=并入 / sub=减去），记一步撤销
+function lpBakeActiveShape(node){
+    const shape = node?.lpShape;
+    if(!shape || !Array.isArray(shape.pts) || shape.pts.length < 3){
+        if(node) node.lpShape = null;
+        return false;
+    }
+    let st = lpMaskEditState.get(node.id);
+    // 2026-10-18：状态里挂着死画布（canvas 被回收/重建失败）时重建一次再烘焙，否则烘焙静默失败 → 误报「选区是空的」
+    if(!st?.canvas){
+        lpMaskEditState.delete(node.id);
+        st = lpEnsureMaskState(node);
+    }
+    const ctx = st?.canvas ? st.canvas.getContext('2d') : null;
+    if(!ctx){ return false; }
+    try{
+        st.undos.push(ctx.getImageData(0, 0, st.canvas.width, st.canvas.height));
+        if(st.undos.length > 20) st.undos.shift();
+    }catch(err){}
+    st.redos.length = 0;
+    st.strokes += 1;
+    ctx.save();
+    ctx.globalCompositeOperation = shape.mode === 'sub' ? 'destination-out' : 'source-over';
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    shape.pts.forEach((p, i) => { if(i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    node.lpShape = null;
+    node.maskDirty = true;
+    lpEnsureAnts();
+    lpPaintMaskOverlay(node.id, node);
+    lpScheduleMaskCommit(node.id);
+    return true;
+}
+// 2026-10-18（bug）：退出工具 / 切工具 / 点空白 / 生成前统一收尾——
+// 之前只处理已闭合的 lpShape，钢笔「画完没点回起点」的 lassoPts 会被整段丢弃，
+// 用户再点一次工具键本想保存，结果遮罩为空 → 提示「选区是空的」。
+// 这里把未闭合路径自动闭合成活动形状再烘焙，返回是否真的落了选区。
+function lpApplyPendingSelection(node, opts={}){
+    if(!node) return false;
+    if(node.lpShape && Array.isArray(node.lpShape.pts) && node.lpShape.pts.length >= 3){
+        return lpBakeActiveShape(node);
+    }
+    const pts = Array.isArray(node.lassoPts) ? node.lassoPts : [];
+    if(pts.length >= 3){
+        lpCloseLasso(node, node.lassoAlt ? 'sub' : 'add', {silent:true});
+        return node.lpShape ? lpBakeActiveShape(node) : false;
+    }
+    return false;
+}
+// 绘制完成的路径 → 活动形状（不立即烘焙，保持可编辑）
+function lpActivateShapeFromPts(node, mode){
+    // 2026-10-18：过滤非有限坐标（NaN/Infinity 会产生空填充，烘焙后静默丢选区）
+    const pts = (Array.isArray(node?.lassoPts) ? node.lassoPts : [])
+        .map(p => ({x:p.x, y:p.y}))
+        .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+    if(node) node.lassoPts = [];
+    if(!node || pts.length < 3){ lpPaintMaskOverlay(node?.id, node); return; }
+    node.lpShape = {pts, mode: mode === 'sub' ? 'sub' : 'add'};
+    lpPaintMaskOverlay(node.id, node);
+    lpEnsureAnts();
+}
+function lpBeginMaskPaint(node, ev){
+    if(!lpMaskToolActive(node)) return false;
+    if(!ev?.target?.closest?.('.image-wrap')) return false;
+    if(node.maskTool === 'lasso') return lpBeginLassoPath(node, ev);
+    if(node.maskTool === 'free') return lpBeginFreehand(node, ev);
+    if(node.maskTool === 'rect') return lpBeginRectDraft(node, ev);
+    const pt = lpMaskCanvasPoint(node, ev.clientX, ev.clientY);
+    if(!pt?.st?.canvas) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const st = pt.st;
+    const ctx = st.canvas.getContext('2d');
+    if(!ctx) return true;
+    // 笔刷半径按屏幕像素感受换算（含画布缩放）
+    const radius = Math.max(2, 14 / Math.max(0.001, pt.geo.scale * pt.geo.zoom));
+    try{
+        st.undos.push(ctx.getImageData(0, 0, st.canvas.width, st.canvas.height));
+        if(st.undos.length > 20) st.undos.shift();
+    }catch(err){}
+    st.redos.length = 0;
+    st.strokes += 1;
+    const composite = node.maskTool === 'eraser' ? 'destination-out' : 'source-over';
+    const dab = (x, y) => {
+        ctx.save();
+        ctx.globalCompositeOperation = composite;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    };
+    let last = pt;
+    dab(pt.x, pt.y);
+    lpDragActive = true;
+    lpPaintMaskOverlay(node.id, node);
+    const onMove = moveEvent => {
+        const p = lpMaskCanvasPoint(node, moveEvent.clientX, moveEvent.clientY, st);
+        if(!p) return;
+        const c2 = st.canvas.getContext('2d');
+        if(c2){
+            c2.save();
+            c2.globalCompositeOperation = composite;
+            c2.strokeStyle = '#fff';
+            c2.lineWidth = radius * 2;
+            c2.lineCap = 'round';
+            c2.lineJoin = 'round';
+            c2.beginPath();
+            c2.moveTo(last.x, last.y);
+            c2.lineTo(p.x, p.y);
+            c2.stroke();
+            c2.restore();
+        }
+        last = p;
+        lpPaintMaskOverlay(node.id, node);
+    };
+    const onUp = () => {
+        lpDragActive = false;
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        node.maskDirty = true;
+        lpScheduleMaskCommit(node.id);
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    return true;
+}
+// —— 套索（PS 式）：
+//   钢笔：点锚点勾轮廓 → 点回首锚点 / 双击 / Enter 闭合为「活动形状」；
+//   活动形状（矢量层，未烘焙）：锚点可拖（≤10px）、Alt+点锚点删除（最少 3 个）、
+//   点边上插入锚点并拖动、点形状内部整体移动、点形状外部烘焙进遮罩。
+//   烘焙时机：切工具 / 点外部 / Esc / 生图前（lpFlushWorkspaceMask）。
+function lpMaskScreenScale(geo){
+    return geo.scale * geo.zoom;
+}
+function lpCloseLasso(node, mode, opts={}){
+    let pts = Array.isArray(node?.lassoPts) ? node.lassoPts : [];
+    if(pts.length < 3) return;
+    // 去重：双击闭合会先经由 mousedown 打出连续同位锚点；首尾重合同理
+    const dedup = [];
+    pts.forEach(p => {
+        const prev = dedup[dedup.length - 1];
+        if(!prev || Math.hypot(p.x - prev.x, p.y - prev.y) >= 1) dedup.push(p);
+    });
+    if(dedup.length > 2 && Math.hypot(dedup[0].x - dedup[dedup.length - 1].x, dedup[0].y - dedup[dedup.length - 1].y) < 1) dedup.pop();
+    node.lassoPts = dedup;
+    if(dedup.length < 3){ node.lassoPts = []; lpPaintMaskOverlay(node?.id, node); return; }
+    lpDragActive = false;
+    lpActivateShapeFromPts(node, mode);
+    node.lassoAlt = false;
+    if(!opts.silent) toast('选区已闭合：拖内部整体移动，点锚点微调，Alt+点删除锚点，点空白处应用');
+}
+function lpBeginLassoPath(node, ev){
+    const st = lpEnsureMaskState(node);
+    if(!st?.canvas) return false;
+    const geo = lpMaskGeometry(node);
+    if(!geo) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const k = lpMaskScreenScale(geo);
+    const rect = geo.rect || geo.wrap.getBoundingClientRect();
+    if(!(rect.width > 0)) return false;
+    const toCanvas = (cx, cy) => ({
+        x: Math.max(0, Math.min(st.canvas.width, (cx - rect.left) / k + geo.padX)),
+        y: Math.max(0, Math.min(st.canvas.height, (cy - rect.top) / k + geo.padY))
+    });
+    const dispOf = p => ({
+        x: rect.left + (p.x - geo.padX) * k,
+        y: rect.top + (p.y - geo.padY) * k
+    });
+    const trackDrag = onMove => {
+        lpDragActive = true;
+        const cleanup = () => {
+            lpDragActive = false;
+            window.removeEventListener('mousemove', onMove, true);
+            window.removeEventListener('mouseup', cleanup, true);
+        };
+        window.addEventListener('mousemove', onMove, true);
+        window.addEventListener('mouseup', cleanup, true);
+    };
+    // —— 活动形状编辑（矢量层已闭合）——
+    const shape = node.lpShape;
+    if(shape && Array.isArray(shape.pts) && shape.pts.length >= 3){
+        const pts = shape.pts;
+        let hitIdx = -1, hitD = Infinity;
+        pts.forEach((p, i) => {
+            const d = Math.hypot(dispOf(p).x - ev.clientX, dispOf(p).y - ev.clientY);
+            if(d < hitD){ hitD = d; hitIdx = i; }
+        });
+        // Alt+点锚点 → 删除锚点（少于 3 个直接取消选区）
+        if(hitIdx >= 0 && hitD <= 10 && ev.altKey){
+            if(pts.length > 3){ pts.splice(hitIdx, 1); }
+            else { node.lpShape = null; lpEnsureAnts(); }
+            lpPaintMaskOverlay(node.id, node);
+            return true;
+        }
+        // 点锚点 → 拖动微调
+        if(hitIdx >= 0 && hitD <= 10){
+            trackDrag(e2 => {
+                const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+                if(!p) return;
+                pts[hitIdx] = {x:p.x, y:p.y};
+                lpPaintMaskOverlay(node.id, node);
+            });
+            return true;
+        }
+        // 点在边上（非锚点）→ 插入锚点并立即拖动
+        const cp = toCanvas(ev.clientX, ev.clientY);
+        let segIdx = -1, segD = Infinity, segPt = null;
+        for(let i = 0; i < pts.length; i++){
+            const a = pts[i], b = pts[(i + 1) % pts.length];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len2 = dx * dx + dy * dy || 1e-6;
+            const t = Math.max(0, Math.min(1, ((cp.x - a.x) * dx + (cp.y - a.y) * dy) / len2));
+            const qx = a.x + t * dx, qy = a.y + t * dy;
+            const d = Math.hypot(dispOf({x:qx, y:qy}).x - ev.clientX, dispOf({x:qx, y:qy}).y - ev.clientY);
+            if(d < segD){ segD = d; segIdx = i; segPt = {x:qx, y:qy}; }
+        }
+        if(segIdx >= 0 && segD <= 8){
+            pts.splice(segIdx + 1, 0, segPt);
+            const newIdx = segIdx + 1;
+            trackDrag(e2 => {
+                const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+                if(!p) return;
+                pts[newIdx] = {x:p.x, y:p.y};
+                lpPaintMaskOverlay(node.id, node);
+            });
+            lpPaintMaskOverlay(node.id, node);
+            return true;
+        }
+        // 点在形状内部 → 整体移动
+        if(lpPointInPolygon(cp.x, cp.y, pts)){
+            const orig = pts.map(p => ({x:p.x, y:p.y}));
+            trackDrag(e2 => {
+                const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+                if(!p) return;
+                pts.forEach((q, i) => { q.x = orig[i].x + (p.x - cp.x); q.y = orig[i].y + (p.y - cp.y); });
+                lpPaintMaskOverlay(node.id, node);
+            });
+            return true;
+        }
+        // 点在形状外部 → 烘焙进遮罩，本次点击不再画新路径
+        lpBakeActiveShape(node);
+        return true;
+    }
+    // —— 钢笔绘制中（未闭合路径）——
+    const pts = Array.isArray(node.lassoPts) ? node.lassoPts : (node.lassoPts = []);
+    let hitIdx = -1, hitD = Infinity;
+    pts.forEach((p, i) => {
+        const d = Math.hypot(dispOf(p).x - ev.clientX, dispOf(p).y - ev.clientY);
+        if(d < hitD){ hitD = d; hitIdx = i; }
+    });
+    // 点回首锚点（≥3 点）→ 闭合为活动形状（Shift=加选 / Alt=减选）
+    if(pts.length >= 3 && hitIdx === 0 && hitD <= 10){
+        lpCloseLasso(node, ev.altKey ? 'sub' : 'add');
+        return true;
+    }
+    pts.push(toCanvas(ev.clientX, ev.clientY));
+    node.lassoAlt = !!ev.altKey;   // 记住最后一击是否按住 Alt，收尾自动闭合时按减选处理
+    lpDragActive = true;
+    lpPaintMaskOverlay(node.id, node);
+    // 允许按住微调最后一个锚点
+    const onMove = e2 => {
+        const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+        if(!p) return;
+        pts[pts.length - 1] = {x:p.x, y:p.y};
+        lpPaintMaskOverlay(node.id, node);
+    };
+    const onUp = () => {
+        lpDragActive = false;
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    return true;
+}
+// —— 自由套索（PS 式）：按住拖一圈，松手自动闭合为活动形状；Alt 松手=减选 ——
+function lpBeginFreehand(node, ev){
+    const st = lpEnsureMaskState(node);
+    if(!st?.canvas) return false;
+    const geo = lpMaskGeometry(node);
+    if(!geo) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const p0 = lpMaskCanvasPoint(node, ev.clientX, ev.clientY, st);
+    if(!p0) return false;
+    if(node.lpShape) lpBakeActiveShape(node);   // 新一笔前先应用已有选区
+    lpDragActive = true;
+    const trail = [{x:p0.x, y:p0.y}];
+    node.freePts = trail;
+    lpPaintMaskOverlay(node.id, node);
+    const onMove = e2 => {
+        const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+        if(!p) return;
+        const last = trail[trail.length - 1];
+        if(Math.hypot(p.x - last.x, p.y - last.y) >= 2) trail.push({x:p.x, y:p.y});
+        lpPaintMaskOverlay(node.id, node);
+    };
+    const onUp = e2 => {
+        lpDragActive = false;
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        node.freePts = null;
+        const raw = trail.slice();
+        const pts = raw.length >= 3 ? lpRdpSimplify(raw, 2) : raw;
+        if(pts.length >= 3){
+            node.lassoPts = pts;
+            lpActivateShapeFromPts(node, e2?.altKey ? 'sub' : 'add');
+        } else {
+            lpPaintMaskOverlay(node.id, node);
+        }
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    return true;
+}
+// —— 框选：拖一个矩形直接填入遮罩 ——
+function lpBeginRectDraft(node, ev){
+    const st = lpEnsureMaskState(node);
+    if(!st?.canvas) return false;
+    const geo = lpMaskGeometry(node);
+    if(!geo) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const p0 = lpMaskCanvasPoint(node, ev.clientX, ev.clientY, st);
+    if(!p0) return false;
+    lpDragActive = true;
+    node.rectDraft = {x0:p0.x, y0:p0.y, x1:p0.x, y1:p0.y};
+    const onMove = e2 => {
+        const p = lpMaskCanvasPoint(node, e2.clientX, e2.clientY, st);
+        if(!p) return;
+        node.rectDraft = {x0:p0.x, y0:p0.y, x1:p.x, y1:p.y};
+        lpPaintMaskOverlay(node.id, node);
+    };
+    const onUp = e2 => {
+        lpDragActive = false;
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        const d = node.rectDraft;
+        node.rectDraft = null;
+        if(d && Math.abs(d.x1 - d.x0) >= 4 && Math.abs(d.y1 - d.y0) >= 4){
+            // 2026-10-18（用户要求）：框选与套索统一——松手先成为活动形状（只剩蚂蚁线），
+            // 点空白 / 切工具 / 再点按钮保存 / 生图前才烘焙成红色色块
+            const x0 = Math.min(d.x0, d.x1), y0 = Math.min(d.y0, d.y1);
+            const x1 = Math.max(d.x0, d.x1), y1 = Math.max(d.y0, d.y1);
+            if(node.lpShape) lpBakeActiveShape(node);
+            node.lassoPts = [{x:x0, y:y0}, {x:x1, y:y0}, {x:x1, y:y1}, {x:x0, y:y1}];
+            lpActivateShapeFromPts(node, (e2 && e2.altKey) ? 'sub' : 'add');
+        } else {
+            lpPaintMaskOverlay(node.id, node);
+        }
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    return true;
+}
+// —— 遮罩工作台派生：点「局部编辑」直接在右侧建工作台节点（原图快照 + 自动连线 + 进入画笔态）——
+async function deriveLocalInpaintWorkspace(nodeId, index){
+    const node = nodes.find(n => n.id === nodeId);
+    const image = imageForDisplay(node?.images?.[index]);
+    if(!node || !image?.url || mediaKindForItem(image) !== 'image') return false;
+    pushUndo();
+    const srcImage = {
+        ...image,
+        derivedFrom:{nodeId:node.id, imageIndex:index, operation:'local-workspace'}
+    };
+    const created = createImageNodeAt(derivedImageNodePoint(node, [srcImage]), [srcImage], {select:true, skipUndo:true});
+    if(!created) return false;
+    created.title = '遮罩工作台';
+    created.localInpaintPlan = {
+        enabled:true,
+        workspace:true,
+        source:{url:image.url, name:image.name || 'image', kind:'image'},
+        padded:null, pad:null, boxed:null, mask:null, preview:null,
+        rect:null, rects:[]
+    };
+    created.inputNodeIds = Array.from(new Set([...(created.inputNodeIds || []), node.id]));
+    addConnection(node.id, created.id, 'input');
+    // 读原图自然尺寸：遮罩画布、输出尺寸（强制与原图同比，保证贴回零形变）都依赖它
+    try{
+        const img = await loadImageForCanvas(created.localInpaintPlan.source);
+        const w = img.naturalWidth || 512, h = img.naturalHeight || 512;
+        created.localInpaintPlan.rect = {x:0, y:0, w, h, sourceW:w, sourceH:h};
+        created.outpaintSize = {width:w, height:h};
+        created.runSettings = withOutpaintDisplaySettings(created, cloneSmartSettings(node.runSettings || settings));
+    }catch(err){}
+    ensureLocalEditPromptDraft(created);
+    created.maskTool = 'brush';
+    lpEnsureMaskState(created);
+    selectedId = created.id;
+    selectedIds = [];
+    selectedImage = {nodeId:created.id, index:0};
+    if(promptInput?.dataset) promptInput.dataset.preserveDraftOnce = '1';
+    render();
+    updateComposer();
+    scheduleSave();
+    toast('遮罩工作台已创建：直接在图上涂抹 / 框选 / 套索，色块就是选区，涂完点下方「生图」');
+    return true;
+}
+function lpMaskHistory(nodeId, dir){
+    const node = nodes.find(n => n.id === nodeId);
+    const st = lpMaskEditState.get(nodeId);
+    if(!node || !st) return;
+    const ctx = st.canvas.getContext('2d');
+    if(!ctx) return;
+    if(dir === 'undo'){
+        const prev = st.undos.pop();
+        if(!prev) return;
+        try{ st.redos.push(ctx.getImageData(0, 0, st.canvas.width, st.canvas.height)); }catch(err){}
+        ctx.putImageData(prev, 0, 0);
+    } else {
+        const next = st.redos.pop();
+        if(!next) return;
+        try{ st.undos.push(ctx.getImageData(0, 0, st.canvas.width, st.canvas.height)); }catch(err){}
+        ctx.putImageData(next, 0, 0);
+    }
+    node.maskDirty = true;
+    lpPaintMaskOverlay(nodeId);
+    lpScheduleMaskCommit(nodeId);
+    render();
+}
+function lpClearMask(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    const st = lpEnsureMaskState(node);
+    if(!st) return;
+    const ctx = st.canvas ? st.canvas.getContext('2d') : null;
+    if(!ctx) return;
+    try{
+        st.undos.push(ctx.getImageData(0, 0, st.canvas.width, st.canvas.height));
+        if(st.undos.length > 20) st.undos.shift();
+    }catch(err){}
+    st.redos.length = 0;
+    ctx.clearRect(0, 0, st.canvas.width, st.canvas.height);
+    node.lassoPts = [];
+    node.rectDraft = null;
+    node.freePts = null;
+    node.lpShape = null;
+    lpEnsureAnts();
+    node.maskDirty = true;
+    lpPaintMaskOverlay(nodeId);
+    lpScheduleMaskCommit(nodeId);
+    render();
+    toast('遮罩已清空');
+}
+async function lpCommitMaskEdit(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    const st = lpMaskEditState.get(nodeId) || lpEnsureMaskState(node);
+    const plan = lpPlanForNode(node);
+    if(!node || !st || !plan) return plan;
+    if(!st.canvas) return plan;
+    // 空选区：清掉 plan.mask（生成守卫会拦住空选区，防止白跑一次模型）
+    let hasMask = false;
+    try{
+        const d = st.canvas.getContext('2d').getImageData(0, 0, st.canvas.width, st.canvas.height).data;
+        for(let i = 3; i < d.length; i += 4){ if(d[i] > 8){ hasMask = true; break; } }
+    }catch(err){ hasMask = Boolean(plan.mask); }
+    if(!hasMask){
+        if(plan.mask) plan.mask = null;
+        node.maskDirty = false;
+        if(!opts.silent) toast('选区是空的：先涂抹 / 框选 / 套索');
+        return plan;
+    }
+    const feather = lpResolveFeather(plan);
+    const out = document.createElement('canvas');
+    out.width = st.canvas.width;
+    out.height = st.canvas.height;
+    const octx = out.getContext('2d');
+    if(!octx) return plan;
+    octx.drawImage(st.canvas, 0, 0);
+    if(feather > 0) kraiFeatherCanvasMask(out, feather);
+    const blob = await new Promise(resolve => out.toBlob(resolve, 'image/png'));
+    if(!blob){ if(!opts.silent) toast('遮罩导出失败'); return plan; }
+    const base = (plan.source?.name || 'image').replace(/\.[^.]+$/, '');
+    const file = await uploadCroppedBlob(blob, `${base}_local_mask.png`);
+    if(file?.url){
+        plan.mask = {url:file.url, name:file.name || `${base}_local_mask.png`, role:'mask'};
+        plan.maskPainted = true;
+        // 只有「本节点手动调过」才把值固化进 plan；沿用的记忆值 / 尺寸默认值不固化，
+        // 这样之后改记忆值时这些节点还能跟着走
+        if(plan.featherPx != null && plan.featherPx !== '') plan.featherPx = feather;
+        lpMaskImageCache.delete(file.url);
+    }
+    node.maskDirty = false;
+    lpPaintMaskOverlay(node.id, node);
+    scheduleSave();
+    if(!opts.silent) toast(file?.url ? '选区已更新，直接点「生成图像」即可' : '遮罩保存失败，请重试');
+    return plan;
+}
+// 生成前冲刷：把未落盘的涂抹先提交，避免用旧遮罩生成
+async function lpFlushWorkspaceMask(node){
+    const plan = lpPlanForNode(node);
+    if(!plan) return plan;   // 旧 plan 节点（非 workspace）同样要冲刷，别用旧遮罩出图
+    lpApplyPendingSelection(node, {silent:true});   // 未应用的活动形状 / 未闭合的钢笔路径先落到遮罩再生成
+    const st = lpMaskEditState.get(node.id);
+    if(!st?.canvas) return plan;
+    if(!node.maskDirty && plan.mask) return plan;
+    return await lpCommitMaskEdit(node.id, {silent:true});
+}
+// Esc = 退出当前工具（不回滚内容，回滚用撤销）；有未落盘的笔触先自动提交
+function lpCancelMaskEdit(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    node.lassoPts = [];
+    node.rectDraft = null;
+    node.freePts = null;
+    if(node.maskTool) node.maskTool = null;
+    lpDragActive = false;
+    if(node.maskDirty) lpScheduleMaskCommit(nodeId, 0);
+    render();
+}
+// 窗口失焦：清掉进行中的草稿，防止幽灵虚线框
+window.addEventListener('blur', () => {
+    lpDragActive = false;
+    nodes.forEach(n => {
+        if(n?.maskTool === 'rect') n.rectDraft = null;
+        if(n?.maskTool === 'free') n.freePts = null;
+        if(n?.maskTool === 'lasso' && Array.isArray(n.lassoPts)) n.lassoPts = [];
+    });
+});
+if(!lpMaskEscBound){
+    lpMaskEscBound = true;
+    document.addEventListener('keydown', event => {
+        const isKey = ['Escape', 'Enter', 'Backspace'].includes(event.key);
+        if(!isKey) return;
+        if(!document.querySelector('canvas[data-lp-mask]')) return;
+        const typing = event.target && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable);
+        if(typing) return;
+        const toolNode = nodes.find(n => n.maskTool === 'brush' || n.maskTool === 'eraser' || n.maskTool === 'lasso' || n.maskTool === 'free' || n.maskTool === 'rect');
+        if(!toolNode) return;
+        if(event.key === 'Backspace'){
+            // Backspace：回退钢笔最后一个锚点 / 自由套索最后一段轨迹
+            let trimmed = false;
+            if(toolNode.maskTool === 'lasso' && Array.isArray(toolNode.lassoPts) && toolNode.lassoPts.length){
+                toolNode.lassoPts.pop();
+                trimmed = true;
+            } else if(toolNode.maskTool === 'free' && Array.isArray(toolNode.freePts) && toolNode.freePts.length > 1){
+                toolNode.freePts.pop();
+                trimmed = true;
+            }
+            if(trimmed){
+                event.preventDefault();
+                event.stopPropagation();
+                lpPaintMaskOverlay(toolNode.id, toolNode);
+            }
+            return;
+        }
+        if(event.key === 'Enter'){
+            // Enter：闭合当前套索路径为活动形状
+            if(toolNode.maskTool === 'lasso' && Array.isArray(toolNode.lassoPts) && toolNode.lassoPts.length >= 3){
+                event.preventDefault();
+                event.stopPropagation();
+                lpCloseLasso(toolNode);
+            }
+            return;
+        }
+        // Esc 分层：进行中的草稿 → 清掉；已闭合的活动形状 → 烘焙应用；否则退出工具
+        if((toolNode.maskTool === 'lasso' && Array.isArray(toolNode.lassoPts) && toolNode.lassoPts.length)
+            || (toolNode.maskTool === 'rect' && toolNode.rectDraft)
+            || (toolNode.maskTool === 'free' && Array.isArray(toolNode.freePts))){
+            event.preventDefault();
+            event.stopPropagation();
+            toolNode.lassoPts = [];
+            toolNode.rectDraft = null;
+            toolNode.freePts = null;
+            lpPaintMaskOverlay(toolNode.id, toolNode);
+            return;
+        }
+        if(toolNode.lpShape && Array.isArray(toolNode.lpShape.pts) && toolNode.lpShape.pts.length >= 3){
+            event.preventDefault();
+            event.stopPropagation();
+            lpBakeActiveShape(toolNode);
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        lpCancelMaskEdit(toolNode.id);
+    }, true);
+}
+// 双击（套索钢笔工具）：闭合路径 / 删除锚点（同 Alt+点）
+let lpMaskDblBound = false;
+if(!lpMaskDblBound){
+    lpMaskDblBound = true;
+    document.addEventListener('dblclick', event => {
+        const wrap = event.target?.closest?.('.image-wrap');
+        if(!wrap) return;
+        const card = wrap.closest('.image-node');
+        const id = card?.dataset?.id;
+        const node = id ? nodes.find(n => n.id === id) : null;
+        if(!node || !lpPlanForNode(node)) return;
+        if(node.maskTool === 'lasso' && Array.isArray(node.lassoPts) && node.lassoPts.length >= 3){
+            event.preventDefault();
+            event.stopPropagation();
+            lpCloseLasso(node);
+            return;
+        }
+        if(node.maskTool === 'lasso' && node.lpShape && Array.isArray(node.lpShape.pts) && node.lpShape.pts.length >= 3){
+            const st = lpMaskEditState.get(node.id);
+            const geo = lpMaskGeometry(node);
+            if(!st?.canvas || !geo) return;
+            const k = geo.scale * geo.zoom;
+            const rect = geo.rect || geo.wrap.getBoundingClientRect();
+            let hitIdx = -1, hitD = Infinity;
+            node.lpShape.pts.forEach((p, i) => {
+                const d = Math.hypot(rect.left + (p.x - geo.padX) * k - event.clientX, rect.top + (p.y - geo.padY) * k - event.clientY);
+                if(d < hitD){ hitD = d; hitIdx = i; }
+            });
+            if(hitIdx >= 0 && hitD <= 10){
+                event.preventDefault();
+                event.stopPropagation();
+                if(node.lpShape.pts.length > 3) node.lpShape.pts.splice(hitIdx, 1);
+                else { node.lpShape = null; lpEnsureAnts(); }
+                lpPaintMaskOverlay(node.id, node);
+            }
+        }
+    }, true);
+}
+// 点空白处应用选区：任意工具下的活动形状，点到图片外 / 工具栏外的空白即烘焙成色块
+let lpMaskOutsideBound = false;
+if(!lpMaskOutsideBound){
+    lpMaskOutsideBound = true;
+    document.addEventListener('mousedown', event => {
+        if(event.button !== 0) return;
+        const pendingOf = n => (n?.lpShape && Array.isArray(n.lpShape.pts) && n.lpShape.pts.length >= 3)
+            || (Array.isArray(n?.lassoPts) && n.lassoPts.length >= 3);   // 未闭合的钢笔路径也算待应用
+        if(!nodes.some(pendingOf)) return;
+        const t = event.target;
+        if(t?.closest?.('.smart-node-floating-menu')) return;   // 工具栏按钮各自处理（撤销/切工具等）
+        const wrap = t?.closest?.('.image-wrap');
+        const clickedId = wrap?.closest?.('.image-node')?.dataset?.id || '';
+        nodes.forEach(n => {
+            if(!pendingOf(n)) return;
+            if(wrap && n.id === clickedId) return;   // 点在本图内：交给各工具自己处理
+            lpApplyPendingSelection(n);
+        });
+    }, true);
+}
+
 function smartNodeToolbarHtml(node){
     const isImageNode = node?.type === 'smart-image' || !node?.type;
     const images = (node?.images || []).filter(img => img?.url);
@@ -17587,6 +18826,25 @@ function smartNodeToolbarHtml(node){
             {key:'download-all', icon:'archive', label:'批量下载', enabled:mediaCount > 0},
             {key:'ungroup', icon:'ungroup', label:'解开组件', enabled:mediaCount > 1}
         ];
+    } else if(kind === 'image' && lpPlanForNode(node)){
+        // 2026-10-18（用户要求）遮罩工作台精简版：不要保存按钮（色块=选区，自动落盘）、
+        // 不要预览 / 生成图像 / 下载，橡皮放在框选右边。选区每笔自动提交，生成走下方「生图」。
+        const lpPlan = lpPlanForNode(node);
+        const lpState = lpMaskEditState.get(node.id);
+        actions = [
+            {key:'mask-brush', icon:'paintbrush', label:'遮罩画笔：在图上涂抹要重绘的区域', enabled:true, active:node.maskTool === 'brush'},
+            {key:'mask-free', icon:'lasso', label:'自由套索：按住拖一圈，松手自动闭合；Alt=减选', enabled:true, active:node.maskTool === 'free'},
+            {key:'mask-lasso', icon:'pen-tool', label:'套索钢笔：点锚点勾轮廓，点回起点 / 双击 / Enter 闭合；闭合后锚点可拖可删', enabled:true, active:node.maskTool === 'lasso'},
+            {key:'mask-rect', icon:'square', label:'框选：拖一个矩形填入遮罩', enabled:true, active:node.maskTool === 'rect'},
+            {key:'mask-eraser', icon:'eraser', label:'橡皮：涂掉多余的遮罩', enabled:true, active:node.maskTool === 'eraser'},
+            {key:'mask-undo', icon:'undo-2', label:'撤销一笔', enabled:Boolean(lpState?.undos?.length)},
+            {key:'mask-redo', icon:'redo-2', label:'恢复一笔', enabled:Boolean(lpState?.redos?.length)},
+            {key:'mask-clear', icon:'trash-2', label:'清空遮罩', enabled:true},
+            ...(!lpPlan.workspace ? [
+                {key:'local', icon:'scan', label:'打开遮罩编辑器（精细框选）', enabled:true},
+                {key:'download', icon:'download', label:'下载', enabled:true}
+            ] : [])
+        ];
     } else {
         actions = [
             {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image'},
@@ -17607,10 +18865,16 @@ function smartNodeToolbarHtml(node){
     // 2026-10-12（用户要求）多图 Group 的顶部面板与智能分组面板完全同款：
     // 同类名 smart-group-menu（36px 高 / 26px 按钮 / 暗底细白边 / 选中才显示），不再用 compact-icon-menu。
     const menuClass = isMultiImageGroup ? 'smart-group-menu' : 'compact-icon-menu';
+    // 遮罩模式下工具条右侧挂一个羽化滑杆（导出遮罩时才生效，不会越涂越糊）
+    const lpPlanForBar = (!isMultiImageGroup && kind === 'image') ? lpPlanForNode(node) : null;
+    const lpFeatherPill = lpPlanForBar ? (() => {
+        const v = lpResolveFeather(lpPlanForBar);
+        return `<span class="lp-feather" title="羽化半径：越大遮罩边缘越柔"><span>羽化</span><input type="range" min="0" max="48" step="2" value="${v}" data-lp-feather="1" data-node-id="${escapeAttr(node.id)}" aria-label="羽化半径"><b>${v}</b></span>`;
+    })() : '';
     return `<div class="smart-node-floating-menu ${menuClass}${keepDisabled ? ' keep-disabled' : ''}" data-smart-node-menu="1">${actions.map(action => `
-        <button type="button" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
+        <button type="button" class="${action.active ? 'active' : ''}" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i>
-        </button>`).join('')}${colorPicker}</div>`;
+        </button>`).join('')}${colorPicker}${lpFeatherPill}</div>`;
 }
 function gridSplitGroupToolbarHtml(node){
     if(!isGridSplitImageGroupNode(node)) return '';
@@ -17830,6 +19094,54 @@ function runSmartNodeToolbarAction(nodeId, action){
         clearGeneratedOutputForRerun(nodeId);
         return;
     }
+    // 2026-10-17/18：遮罩编辑条（局部编辑节点 / 遮罩工作台）
+    // 2026-10-18（用户要求）：去掉保存/取消/生成图像/下载/预览按钮——色块即选区，
+    // 每笔自动提交；生成走下方「生图」（runGeneration 里会先冲刷未落盘的涂抹）。
+    if(action === 'mask-brush' || action === 'mask-eraser' || action === 'mask-lasso' || action === 'mask-free' || action === 'mask-rect'){
+        if(!lpPlanForNode(node)) return;
+        const want = action === 'mask-brush' ? 'brush' : action === 'mask-eraser' ? 'eraser' : action === 'mask-lasso' ? 'lasso' : action === 'mask-free' ? 'free' : 'rect';
+        if(node.maskTool === want){
+            // 2026-10-18（用户要求）：再次点击同一工具 = 保存遮罩并退出编辑状态
+            // 2026-10-18（bug）：未闭合的钢笔路径也要收尾，否则整段选区被丢弃 → 误报「选区是空的」
+            const applied = lpApplyPendingSelection(node);
+            node.maskTool = null;
+            node.rectDraft = null;
+            node.freePts = null;
+            if(lpCommitTimers.has(nodeId)){ clearTimeout(lpCommitTimers.get(nodeId)); lpCommitTimers.delete(nodeId); }
+            render();
+            // 真的一点选区都没有（没涂抹、也没旧遮罩）时静默退出，不弹「选区是空的」吓人
+            lpCommitMaskEdit(nodeId, {silent: !applied && !lpPlanForNode(node)?.mask}).then(() => render());
+            return;
+        }
+        // 切工具前先应用未烘焙的活动形状 / 未闭合的钢笔路径（选区不丢）
+        if(node.maskTool) lpApplyPendingSelection(node);
+        node.maskTool = want;
+        if(node.maskTool){
+            // 新一轮编辑从干净草稿开始：清掉上一轮遗留的路径点（否则新钢笔会接在旧路径后面）
+            node.lassoPts = [];
+            node.rectDraft = null;
+            node.freePts = null;
+            lpEnsureMaskState(node);
+            const hints = {
+                brush:'遮罩画笔已开启：直接在图上涂抹要重绘的区域',
+                eraser:'橡皮已开启：涂抹减掉多余的遮罩',
+                free:'自由套索已开启：按住拖一圈松手闭合，Alt=减选；Backspace 回退轨迹',
+                lasso:'套索钢笔已开启：依次点锚点，点回起点 / 双击 / Enter 闭合；画完直接再点此键也能应用',
+                rect:'框选已开启：拖一个矩形，松手显示蚂蚁线，点空白或再点此键应用'
+            };
+            toast(hints[want]);
+        }
+        render();
+        return;
+    }
+    if(action === 'mask-undo' || action === 'mask-redo'){
+        lpMaskHistory(nodeId, action === 'mask-undo' ? 'undo' : 'redo');
+        return;
+    }
+    if(action === 'mask-clear'){
+        lpClearMask(nodeId);
+        return;
+    }
     if(kind !== 'image' && action !== 'preview'){
         toast('当前素材不支持该操作');
         return;
@@ -17844,6 +19156,14 @@ function runSmartNodeToolbarAction(nodeId, action){
     }
     if(['rotate-left','rotate-right','flip-horizontal','flip-vertical'].includes(action)){
         applyImageTransform(nodeId, index, action);
+        return;
+    }
+    // 2026-10-18（用户要求）：点「局部编辑」直接在右侧派生遮罩工作台（原图快照 + 自动连线 + 进入画笔态），
+    // 不再强制先过全屏编辑器；派生失败（视频 / 异常）时回退旧的全屏编辑器路径。
+    if(action === 'local'){
+        Promise.resolve(deriveLocalInpaintWorkspace(nodeId, index)).then(ok => {
+            if(!ok){ openImageEditor(nodeId, index); setImageEditMode('local', true); }
+        }).catch(() => { openImageEditor(nodeId, index); setImageEditMode('local', true); });
         return;
     }
     const modeMap = {crop:'crop', resize:'resize', outpaint:'outpaint', local:'local', mask:'mask', brush:'brush', annotate:'brush', grid:'grid'};
@@ -18950,6 +20270,8 @@ function measureSmartNodeImages(){
         else imgEl.addEventListener('load', apply, {once:true});
         imgEl.addEventListener('loadedmetadata', apply, {once:true});
     });
+    // 遮罩位图覆盖层要在 DOM 就位后按 cover 几何绘制一次
+    syncLocalMaskOverlays();
 }
 function bindConnectionEvents(){
     const setConnectionHover = (edge, active) => {
@@ -20447,6 +21769,20 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 runSmartNodeToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartNodeAction);
             });
         });
+        // 遮罩工具条上的羽化滑杆：只记参数，点「完成」导出遮罩时才真正羽化
+        el.querySelectorAll('[data-lp-feather]').forEach(range => {
+            range.addEventListener('input', () => {
+                const targetNode = nodes.find(n => n.id === range.dataset.nodeId);
+                const plan = lpPlanForNode(targetNode);
+                if(!plan) return;
+                const v = Math.max(0, Math.round(Number(range.value) || 0));
+                plan.featherPx = v;
+                lpSetRememberedFeather(v);   // 记住这次手动值，新节点默认沿用它
+                const label = range.parentElement ? range.parentElement.querySelector('b') : null;
+                if(label) label.textContent = String(v);
+                scheduleSave();
+            });
+        });
         el.querySelectorAll('[data-smart-transform-action]').forEach(btn => {
             btn.addEventListener('mousedown', e => {
                 e.preventDefault();
@@ -20576,6 +21912,25 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 const targetNodeId = item?.dataset.refNodeId || id;
                 const targetImageIndex = Number(item?.dataset.refImageIndex ?? item?.dataset.imageIndex ?? btn.dataset.imageIndex);
                 deleteImage(targetNodeId, targetImageIndex);
+            });
+        });
+        // 2026-10-15 音频格子/卡片上的「下载音频」按钮（thumbMediaHtml / singleMediaHtml 渲染）。
+        // 走与工具条下载相同的 downloadPreviewFile 链路（/api/download-output 代理，不暴露本机路径）。
+        el.querySelectorAll('.audio-dl-btn').forEach(btn => {
+            if(btn.dataset.audioDlBound === '1') return;
+            btn.dataset.audioDlBound = '1';
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                const nodeEl = btn.closest('.image-node[data-id]');
+                const targetNode = nodes.find(n => n.id === nodeEl?.dataset?.id);
+                const scope = btn.closest('[data-ref-node-id], [data-image-index]');
+                const index = Number(scope?.dataset.refImageIndex ?? scope?.dataset.imageIndex ?? 0) || 0;
+                const item = imageForDisplay(
+                    targetNode?.images?.[index]
+                    || (Array.isArray(targetNode?.manualInputRefs) ? targetNode.manualInputRefs.filter(i => i?.url)[index] : null)
+                );
+                if(item?.url) downloadPreviewFile(item);
+                else toast('音频不存在或已删除');
             });
         });
         el.querySelectorAll('.image-reference').forEach(btn => {
@@ -21091,6 +22446,10 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
             if(promptTextTarget && promptTextTarget.dataset.promptEditing === '1') return;
             let node = nodes.find(n => n.id === id);
             if(!node) return;
+            // 2026-10-17：遮罩画笔 / 橡皮激活时，图上的按下是涂抹，不是拖节点
+            if(lpMaskToolActive(node) && e.target.closest('.image-wrap')){
+                if(lpBeginMaskPaint(node, e)) return;
+            }
             const thumbDragSurface = e.target.closest('.thumb-item,.smart-group-single-thumb,.image-wrap');
             const blockedControl = e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button');
             if(blockedControl && !promptTextTarget){
@@ -24528,7 +25887,7 @@ async function stitchLocalInpaintResult(sourceRef, patchRef, rect, maskRef=null,
             for(let i = 0; i < W * H; i++){
                 alphaMap[i] = Math.max(md[i*4], md[i*4+1], md[i*4+2]) / 255;
             }
-            alphaMap = kraiBlurAlpha(alphaMap, W, H, Math.max(2, Math.round(localEditFeatherSize(rect) * 0.6)));
+            alphaMap = kraiBlurAlpha(alphaMap, W, H, lpFeatherFor(rect));
         }
     }
     const pdata = patchData.data, odata = origData.data;
@@ -24550,29 +25909,181 @@ function localInpaintPlanForNode(node){
     if(!plan?.enabled || !plan?.source?.url || !plan?.rect) return null;
     return plan;
 }
+// 局部编辑结果输出目标：画布上「编辑节点 → X」的输入/流程连线（X 是普通图片节点）。
+// 结果写到 X 里并追加，编辑节点自身保留遮罩计划可以反复迭代；没有可用连线时由调用方派生新节点。
+function localInpaintResultTargetFor(node){
+    if(!node?.id) return null;
+    const conns = Array.isArray(canvas?.connections) ? canvas.connections : [];
+    for(const conn of conns){
+        if(!conn || conn.from !== node.id || !conn.to || conn.to === node.id) continue;
+        if(!['input', 'flow'].includes(conn.kind || 'flow')) continue;
+        // 不往自己的上游回写，避免把结果灌回原图节点
+        if(Array.isArray(node.inputNodeIds) && node.inputNodeIds.includes(conn.to)) continue;
+        const target = nodes.find(n => n.id === conn.to);
+        if(!target || target.type !== 'smart-image') continue;
+        if(target.uploadEntry === true) continue;
+        if(isMinimaxH3Node(target)) continue;
+        if(isSmartGroupNode(target) || isWorkflowGroupNode(target)) continue;
+        if(target.localInpaintPlan?.enabled) continue;
+        if(target.running || Number(target.pending) > 0) continue;
+        return target;
+    }
+    return null;
+}
+// 把贴回结果追加进输出节点：空占位节点直接填入（清掉占位宽高，按图片比例自适应），
+// 已有内容的节点原地追加，不改标题（用户可能重命名过）。
+function pushLocalInpaintResultTo(target, imageRef, editorNode){
+    if(!target || !imageRef?.url) return false;
+    const hasContent = (target.images || []).some(img => img?.url);
+    pushUndo();
+    if(hasContent){
+        target.images = [...(target.images || []).filter(img => img?.url), {...imageRef}];
+    } else {
+        target.images = [{...imageRef}];
+        delete target.w;
+        delete target.h;
+        target.title = '局部编辑结果';
+        target.scale = mediaNodeDefaultScale(target);
+    }
+    target.sourcePlanNodeId = editorNode?.id || '';
+    if(typeof markSmartNodeImagesEdited === 'function') markSmartNodeImagesEdited(target);
+    return true;
+}
+// 2026-10-18（用户要求「遮罩工作台不变，不要把结果填进工作台」）：
+// 工作台节点永远只显示干净原图 + 遮罩色块。任何路径（旧数据兜底 / 恢复运行 /
+// 未来改动）只要把生成产物落到了计划持有节点上，这里把产物改写到下游
+// 「局部编辑结果」节点（没有就现建一个并连线），工作台本体复位回干净原图。
+function lpRedirectWorkspaceOutputs(node, additions, kind='image'){
+    const plan = node?.localInpaintPlan;
+    if(!plan?.workspace || !Array.isArray(additions) || !additions.length) return false;
+    const liveAdditions = additions.filter(img => img?.url);
+    if(!liveAdditions.length) return false;
+    let target = typeof localInpaintResultTargetFor === 'function' ? localInpaintResultTargetFor(node) : null;
+    if(!target){
+        target = createImageNodeAt(derivedImageNodePoint(node, liveAdditions), liveAdditions.map(img => ({...img})), {select:false, skipUndo:true});
+        if(target){
+            target.title = '局部编辑结果';
+            target.sourcePlanNodeId = node.id;
+            addConnection(node.id, target.id, 'flow');
+        }
+    }
+    if(!target) return false;
+    target.images = [...(target.images || []).filter(img => img?.url), ...liveAdditions.map(img => ({...img}))];
+    if(target.localInpaintOutputNode !== true && (target.title === 'Group' || !String(target.title || '').trim())) target.title = '局部编辑结果';
+    target.sourcePlanNodeId = node.id;
+    if(typeof scheduleLocalInpaintStitch === 'function') scheduleLocalInpaintStitch(target, kind);
+    // 工作台本体复位：干净原图（贴回 / 遮罩几何都依赖 plan.source 的原始尺寸）
+    node.images = plan.source?.url ? [{
+        ...plan.source,
+        kind:'image',
+        natural_w:Number(plan.rect?.sourceW) || undefined,
+        natural_h:Number(plan.rect?.sourceH) || undefined
+    }] : [];
+    if(node.title === 'Group' || !String(node.title || '').trim()) node.title = '遮罩工作台';
+    delete node.appendGeneratedLayout;
+    delete node.outputKind;
+    return true;
+}
+// 渲染时自愈：历史数据里可能已有被灌入结果的工作台节点（标题被覆盖成 Group、
+// images 里躺着模型原始输出）。每次渲染轻量巡检，发现污染立即复位。
+function lpSweepWorkspaceNodes(){
+    nodes.forEach(node => {
+        const plan = node?.localInpaintPlan;
+        if(!plan?.workspace) return;
+        const srcUrl = plan.source?.url || '';
+        const imgs = (node.images || []).filter(img => img?.url);
+        const polluted = imgs.length !== 1 || imgs[0]?.url !== srcUrl;
+        if(!polluted) return;
+        node.images = srcUrl ? [{
+            ...plan.source,
+            kind:'image',
+            natural_w:Number(plan.rect?.sourceW) || undefined,
+            natural_h:Number(plan.rect?.sourceH) || undefined
+        }] : [];
+        if(node.title === 'Group' || !String(node.title || '').trim()) node.title = '遮罩工作台';
+        delete node.appendGeneratedLayout;
+        delete node.outputKind;
+    });
+}
+// 遮罩计划持有者：优先节点自身；否则沿「编辑节点 → 本节点」连线找上游编辑节点。
+// （2026-10-17 分流后，原始模型输出与生成中占位都在下游输出节点上，而 localInpaintPlan 仍在编辑节点上。）
+function localInpaintPlanHolderFor(node){
+    if(localInpaintPlanForNode(node)) return node;
+    if(!node?.id) return null;
+    const conns = Array.isArray(canvas?.connections) ? canvas.connections : [];
+    for(const conn of conns){
+        if(!conn || conn.to !== node.id || conn.from === node.id) continue;
+        if(!['input', 'flow'].includes(conn.kind || 'flow')) continue;
+        const upstream = nodes.find(n => n?.id === conn.from);
+        if(localInpaintPlanForNode(upstream)) return upstream;
+    }
+    return null;
+}
 function scheduleLocalInpaintStitch(node, kind='image'){
-    const plan = localInpaintPlanForNode(node);
-    if(!plan || kind !== 'image' || !(node.images || []).some(img => img?.url)) return false;
-    const keepSize = smartNodeSizeSnapshot(node);
-    const containingGroup = nodes.find(group => isWorkflowGroupNode(group) && workflowGroupMembers(group).some(member => member.id === node.id)) || null;
+    if(kind !== 'image') return false;
+    const planNode = localInpaintPlanHolderFor(node);
+    if(!planNode) return false;
+    const plan = planNode.localInpaintPlan;
+    const patches = (node.images || []).filter(img => img?.url);
+    if(!patches.length) return false;
+    // 取最新一张做贴回源（并发/多轮时 images 里可能同时有旧结果与本轮原始输出）
+    const patch = patches[patches.length - 1];
+    const onEditor = node.id === planNode.id;
+    const keepSize = onEditor ? smartNodeSizeSnapshot(node) : null;
+    const containingGroup = onEditor ? nodes.find(group => isWorkflowGroupNode(group) && workflowGroupMembers(group).some(member => member.id === node.id)) || null : null;
     const keepFrame = keepSize ? {x:Math.round(Number(node.x || 0)), y:Math.round(Number(node.y || 0)), w:keepSize.w, h:keepSize.h} : null;
     const token = ++localInpaintStitchToken;
     node.localInpaintStitching = true;
     node.localInpaintStitchToken = token;
-    const patch = (node.images || []).find(img => img?.url);
     stitchLocalInpaintResult(plan.source, patch, plan.rect, plan.mask, plan.pad).then(file => {
         const live = nodes.find(n => n.id === node.id);
+        const livePlanNode = nodes.find(n => n.id === planNode.id);
         if(!live || live.localInpaintStitchToken !== token || !file) return;
-        live.images = [{url:file.url, name:file.name || 'local-inpaint-stitch.png', kind:'image', generatedResult:true, localInpaintStitched:true}];
-        keepSmartNodeSize(live, keepSize);
-        const liveGroup = containingGroup ? nodes.find(group => group.id === containingGroup.id) : null;
-        if(liveGroup && keepFrame) restoreWorkflowGroupMemberFrame(live, liveGroup, keepFrame);
-        live.title = '局部编辑';
-        delete live.localInpaintPlan;
-        if(Array.isArray(live.manualInputRefs)) live.manualInputRefs = live.manualInputRefs.filter(ref => !ref.localInpaintRef && !ref.localInpaintReplace);
+        const resultImage = {
+            url:file.url,
+            name:file.name || 'local-inpaint-stitch.png',
+            kind:'image',
+            generatedResult:true,
+            localInpaintStitched:true,
+            derivedFrom:{nodeId:livePlanNode?.id || '', imageIndex:0, operation:'local-inpaint'}
+        };
+        if(!onEditor){
+            // 常规路径：原始输出落在下游输出节点上 → 就地替换为贴回成图（保持追加顺序）
+            const idx = (live.images || []).findIndex(img => img === patch || (img?.url && img.url === patch.url));
+            if(idx >= 0) live.images[idx] = resultImage;
+            else live.images = [...(live.images || []).filter(img => img?.url), resultImage];
+            if(live.localInpaintOutputNode === true) live.title = '局部编辑结果';
+            if(livePlanNode) live.sourcePlanNodeId = livePlanNode.id;
+        } else {
+            // 兜底（旧数据/刷新恢复）：原始输出落在了编辑节点自身 → 写到下游目标，编辑节点复位
+            const target = localInpaintResultTargetFor(live);
+            if(target){
+                pushLocalInpaintResultTo(target, resultImage, live);
+            } else {
+                const created = createImageNodeAt(derivedImageNodePoint(live, [resultImage]), [resultImage], {select:false, skipUndo:false});
+                if(created){
+                    created.title = '局部编辑结果';
+                    created.sourcePlanNodeId = live.id;
+                    addConnection(live.id, created.id, 'input');
+                }
+            }
+            live.images = [{
+                ...plan.source,
+                kind:'image',
+                natural_w:Number(plan.rect?.sourceW) || undefined,
+                natural_h:Number(plan.rect?.sourceH) || undefined
+            }];
+            keepSmartNodeSize(live, keepSize);
+            const liveGroup = containingGroup ? nodes.find(group => group.id === containingGroup.id) : null;
+            if(liveGroup && keepFrame) restoreWorkflowGroupMemberFrame(live, liveGroup, keepFrame);
+            live.title = '局部编辑';
+            // 只清掉自动生成的遮罩引用；替换图（localInpaintReplace）保留，方便下次重跑
+            if(Array.isArray(live.manualInputRefs)) live.manualInputRefs = live.manualInputRefs.filter(ref => !ref.localInpaintRef);
+            delete live.outpaintSize;
+        }
+        // 编辑节点（分流路径）不做任何改动：干净原图 + 遮罩红框 + plan 常驻，可改提示词反复迭代
         delete live.localInpaintStitching;
         delete live.localInpaintStitchToken;
-        delete live.outpaintSize;
         render();
         scheduleSave();
     }).catch(err => {
@@ -24866,7 +26377,7 @@ async function applyImageLocalInpaint(){
     const baseImage = planSource ? {...image, url:planSource.url, name:planSource.name || image.name} : image;
     // 整图尺寸 mask（和原图同宽高）：生成后按它把遮罩范围外无损贴回
     const fullMaskCanvas = maskCanvasFromDrawCanvas(editDrawCanvas());
-    kraiFeatherCanvasMask(fullMaskCanvas, Math.max(4, Math.round(localEditFeatherSize(rect) * 0.6)));
+    kraiFeatherCanvasMask(fullMaskCanvas, lpFeatherFor(rect));
     const base = (baseImage.name || 'image').replace(/\.[^.]+$/, '');
     const srcW = img.naturalWidth, srcH = img.naturalHeight;
     const pad = localInpaintStandardPadPlan(srcW, srcH);
@@ -26131,10 +27642,13 @@ async function uploadFiles(files){
         if(!r.ok) throw new Error((await r.text()) || tr('smart.toastUploadFail'));
         return r.json();
     });
-    return (data.files || []).map((file, index) => ({
-        ...file,
-        kind:file.kind || mediaKindForFile(supported[index])
-    }));
+    return (data.files || []).map((file, index) => {
+        const kind = file.kind || mediaKindForFile(supported[index]);
+        const item = {...file, kind};
+        // 2026-10-15 刚上传的视频走真 <video> 首帧，不等服务端抽帧海报
+        if(kind === 'video') markSmartFreshUploadedVideo(item);
+        return item;
+    });
 }
 function createLinkedDocumentLlmNodeForSource(sourceNode){
     if(!sourceNode || !nodeHasDocumentMedia(sourceNode)) return null;
@@ -26262,6 +27776,10 @@ async function importSmartLocalImages(paths){
     });
     if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.toastUploadFail')));
     const data = await response.json();
+    // 2026-10-15 刚导入的视频同样优先挂真 <video>（首帧由浏览器解，不等服务端抽帧）
+    (data.files || []).forEach(file => {
+        if((file.kind || mediaKindForItem(file)) === 'video') markSmartFreshUploadedVideo(file);
+    });
     return data.files || [];
 }
 async function handleSmartImageDropPayload(payload, targetId='', opts={}){
@@ -26272,7 +27790,12 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
             appendImagesToSmartNode(await importSmartLocalImages(payload.localPaths), targetId, opts);
         } else if(payload.type === 'url') {
             if(!opts.skipUndo) pushUndo();
-            appendImagesToSmartNode([{url:payload.url, name:smartImageNameFromUrl(payload.url), kind:'image'}], targetId, opts);
+            // 2026-10-15 修复：原来硬编码 kind:'image'，从网页拖视频/音频链接进来会被当图片处理
+            // （节点里塞 <img src=....mp4> 永远加载不出来）。按 URL 后缀推断真实类型。
+            const urlItem = {url:payload.url, name:smartImageNameFromUrl(payload.url)};
+            urlItem.kind = mediaKindForItem(urlItem);
+            if(urlItem.kind === 'video') markSmartFreshUploadedVideo(urlItem);
+            appendImagesToSmartNode([urlItem], targetId, opts);
         }
     } catch(e) {
         toast(e.message || tr('smart.toastUploadFail'));
@@ -28394,6 +29917,8 @@ function createPendingOutputFromSource(sourceNode, expectedCount, meta, options=
         created_at:Date.now()
     };
     if(options.singleI2I === true) output.singleI2IPendingOutput = true;
+    // 局部编辑输出节点：完成收尾与贴回后标题保持「局部编辑结果」，不被通用标题覆盖
+    if(options.localInpaintOutput === true) output.localInpaintOutputNode = true;
     if(options.multiImageGroup === true){
         output.multiImageGroupOutput = true;
         // 溯源标记：finalize 转正为智能分组后仍保留，供"分组存活期间持续隐藏源节点"判定
@@ -28407,7 +29932,9 @@ function createPendingOutputFromSource(sourceNode, expectedCount, meta, options=
     else connectInputNode(sourceNode.id, output.id);
     // 2026-10-09（用户要求）：多图分流占位期间，源生成节点立即从画布隐藏（不等下一次
     // 全量渲染），避免"空素材框"闪现；完成/取消后 finalize 清标记，渲染自动恢复显示。
-    try {
+    // 2026-10-17（局部编辑）：hideSource:false 时源节点保持可见——编辑节点要一直显示
+    // 「干净原图 + 遮罩红框」，不能像多图分流那样被隐藏。
+    if(options.hideSource !== false) try {
         const hiddenSrcEl = (typeof world !== 'undefined' && world) ? world.querySelector('[data-id="' + sourceNode.id + '"]') : null;
         if(hiddenSrcEl) hiddenSrcEl.style.display = 'none';
     } catch(_) {}
@@ -29053,7 +30580,13 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
     // 2026-10-11（用户要求）：视频也走追加——appendPendingOutput 对 video 同样生效，
     // 新视频追加进节点，不再替换上一个视频（与等待态的「旧视频+占位格」预览一致）。
     const appendOutput = Boolean(pendingNode.appendPendingOutput);
-    if(appendOutput){
+    // 2026-10-18（用户要求）：遮罩工作台不收结果——替换/覆盖路径同样先改写到下游结果节点
+    const lpRedirect = imgs.length && pendingNode.localInpaintPlan?.workspace
+        ? lpRedirectWorkspaceOutputs(pendingNode, imgs, kind)
+        : false;
+    if(lpRedirect){
+        // 产物已改写：跳过对本节点 images 的写入
+    } else if(appendOutput){
         appendOutputsToNode(pendingNode, imgs, kind, {meta, limit:SMART_APPEND_OUTPUT_MAX, skipShift:true, baseBox});
     } else {
         removeHistoryGroupForNode(pendingNode);
@@ -29062,6 +30595,7 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
         markSmartNodeComplete(pendingNode, meta);
         pendingNode.outputKind = kind;
         pendingNode.title = smartOutputTitleForNode(pendingNode, kind, imgs.length);
+        if(pendingNode.localInpaintOutputNode === true) pendingNode.title = '局部编辑结果';
         if(pendingNode.genSize3000 === true && kind === 'image'){
             // 2026-10-10（用户要求：尺寸按 3000 版）——完成后清掉显式 w/h，尺寸交回 singleImageLayout / 宫格布局。
             pendingNode.scale = imgs.length > 1 && (!Number.isFinite(Number(pendingNode.scale)) || Number(pendingNode.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(pendingNode.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)
@@ -29084,7 +30618,7 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
     pendingNode.images = (pendingNode.images || []).map(img => stripImageGenerationMeta(img));
     // 2026-10-10（用户要求：回到 9-09「干净分享版」的生成方式）：多图结果不再“原地转正”
     // 为智能分组（smart-group），节点保持普通多图节点（宫格）外观，与旧版一致。
-    scheduleLocalInpaintStitch(pendingNode, kind);
+    if(!lpRedirect) scheduleLocalInpaintStitch(pendingNode, kind);
     clearSourceBusyStateIfDownstreamDone(nodes.find(n => n.id === meta?.sourceNodeId));
     // 生成完成不抢占选择:仅当用户仍停留在该生成节点上(或当前无选择)时才切换选择;
     // 否则保留用户当前选择 —— 支持并发生成时去调整/编辑别的卡片,A 节点的参数栏不被打断。
@@ -29671,6 +31205,8 @@ function replaceOutputsToNodeWithHistory(node, additions, kind='image', meta=nul
 function appendOutputsToNode(node, additions, kind='image', options={}){
     if(!node || !additions?.length) return [];
     node = liveSmartNode(node);
+    // 2026-10-18（用户要求）：遮罩工作台不收结果——产物改写到下游结果节点，本节点按空追加处理
+    if(node.localInpaintPlan?.workspace && lpRedirectWorkspaceOutputs(node, additions, kind)) return [];
     const keepSize = smartNodeSizeSnapshot(node);
     const baseBox = pendingBaseBoxForStorage({node, baseBox:options.baseBox || node.pendingBaseBox});
     const beforeRight = (Number(node.x) || 0) + nodeRect(node).width;
@@ -30931,6 +32467,20 @@ async function runGeneration(){
     const previousSettings = cloneSmartSettings(settings);
     settings = {...settings, ...cloneSmartSettings(runSettings || {}), count:visibleCount};
     sanitizePromptInputForNode(node);
+    // 2026-10-18 修复「结果原样返回」：遮罩工作台的冲刷必须在构建请求之前——
+    // 套索闭合后选区停在活动形状（矢量层）不落盘，plan.mask 还是 null；
+    // 若先构建 refs 再冲刷，refs 里只有原图没有遮罩，模型拿不到遮罩只能照抄原图。
+    {
+        const lpEarlyPlan = node?.type === 'smart-image' ? localInpaintPlanForNode(node) : null;
+        if(lpEarlyPlan?.workspace){
+            const lpEarlyReady = await lpFlushWorkspaceMask(node);
+            if(!lpEarlyReady?.mask){
+                settings = previousSettings;
+                toast('遮罩工作台还没有选区：先涂抹 / 框选 / 套索再生成');
+                return;
+            }
+        }
+    }
     const request = buildPromptRequestForRun(node, null, smartLoopContext);
     const prompt = request.prompt.trim();
     const refs = request.refs;
@@ -31004,14 +32554,66 @@ async function runGeneration(){
     const apiConcurrentRun = isApiLikeEngine(settings.engine) || settings.engine === 'runninghub' || settings.engine === 'modelscope' || settings.engine === 'comfy' || settings.engine === 'h3';
     const shouldCreateSingleBranchOutput = shouldBranchSingleImageToImageRun(node, refs, settings, {videoApiRun, audioApiRun, concurrentImageRun}) && expectedCount <= 1;
     const shouldCreateMultiBranchOutput = shouldBranchMultiImageGenerationRun(node, expectedCount, settings, {videoApiRun, audioApiRun, concurrentImageRun});
-    const shouldCreateBranchOutput = shouldCreateSingleBranchOutput || shouldCreateMultiBranchOutput;
+    // 2026-10-17（局部编辑）：带遮罩计划的编辑节点点运行时，占位与结果一律显示在下游输出节点上
+    //（用户要求：编辑框内不再出现「生成中」，直接拉出连线和输出框）。已有连线目标则复用（追加），
+    // 没有就右侧新建并自动连线。编辑节点始终保持「干净原图 + 遮罩红框」，可改提示词继续迭代。
+    const localInpaintEditorRun = node?.type === 'smart-image' && !videoApiRun && !audioApiRun && Boolean(localInpaintPlanForNode(node));
+    // 2026-10-18：遮罩工作台生成前先冲刷未落盘的涂抹（自动提交），再检查有没有选区
+    // （上方已在构建请求前冲刷过；这里是兜底，正常情况 plan.mask 已就位、直接跳过）
+    const lpActivePlan = localInpaintEditorRun ? localInpaintPlanForNode(node) : null;
+    if(lpActivePlan?.workspace && !lpActivePlan.mask){
+        const lpReady = await lpFlushWorkspaceMask(node);
+        if(!lpReady?.mask){
+            settings = previousSettings;
+            toast('遮罩工作台还没有选区：先涂抹 / 框选 / 套索再生成');
+            return;
+        }
+    }
+    let shouldCreateLocalInpaintBranch = false;
+    let branchNode = null;
+    if(localInpaintEditorRun){
+        shouldCreateLocalInpaintBranch = true;
+        const reuseTarget = localInpaintResultTargetFor(node);
+        if(reuseTarget){
+            branchNode = reuseTarget;
+            const phCount = Math.max(1, Number(expectedCount) || 1);
+            const livePlaceholders = Array.isArray(branchNode.pendingPlaceholders) ? branchNode.pendingPlaceholders.filter(item => item && !item.failed && !item.querying) : [];
+            branchNode.pendingPlaceholders = [
+                ...livePlaceholders,
+                ...Array.from({length:phCount}).map((_, index) => ({
+                    id:uid('pending'),
+                    runToken:'',
+                    index:livePlaceholders.length + index,
+                    startedAt:nowMs(),
+                    outputW:submittedOutputW,
+                    outputH:submittedOutputH,
+                    ratio:submittedOutputRatio
+                }))
+            ];
+            branchNode.pending = Math.max(1, (Number(branchNode.pending) || 0) + phCount);
+            branchNode.appendPendingOutput = true;
+            delete branchNode.replacePendingOutput;
+            delete branchNode.replacePendingOutputs;
+            delete branchNode.replacePendingResults;
+            branchNode.runStartedAt = nowMs();
+            delete branchNode.runFinishedAt;
+            delete branchNode.runElapsedMs;
+            branchNode.runTimerHidden = false;
+            branchNode.genSize3000 = true;
+            try { applyAppendPendingPreviewBox(branchNode); } catch(_) {}
+        }
+    }
+    const shouldCreateBranchOutput = shouldCreateSingleBranchOutput || shouldCreateMultiBranchOutput || shouldCreateLocalInpaintBranch;
     const sourceVisualState = null;
     pushUndo();
     let extracted = null;
-    let branchNode = null;
     const pendingMeta = shouldCreateBranchOutput ? stripRunInputMeta(meta) : meta;
     undoSuppressed = true;
-    if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, settings, singleI2I:shouldCreateSingleBranchOutput, multiImageGroup:shouldCreateMultiBranchOutput, title:shouldCreateMultiBranchOutput ? '智能分组' : '图片节点1', outputW:submittedOutputW, outputH:submittedOutputH, outputRatio:submittedOutputRatio});
+    if(shouldCreateBranchOutput && !branchNode){
+        branchNode = shouldCreateLocalInpaintBranch
+            ? createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, settings, title:'局部编辑结果', outputW:submittedOutputW, outputH:submittedOutputH, outputRatio:submittedOutputRatio, hideSource:false, localInpaintOutput:true})
+            : createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, settings, singleI2I:shouldCreateSingleBranchOutput, multiImageGroup:shouldCreateMultiBranchOutput, title:shouldCreateMultiBranchOutput ? '智能分组' : '图片节点1', outputW:submittedOutputW, outputH:submittedOutputH, outputRatio:submittedOutputRatio});
+    }
     undoSuppressed = false;
     const pendingNode = branchNode || node;
     const pendingKeepSize = branchNode ? null : smartNodeSizeSnapshot(pendingNode);
@@ -32190,7 +33792,11 @@ function finalizeJimengPending(node, urls, kind='image'){
     }).filter(item => item.url), baseBox);
     if(!additions.length) return false;
     delete node.jimengPending;
-    if(node.appendPendingOutput){
+    // 2026-10-18（用户要求）：遮罩工作台不收结果——改写到下游结果节点
+    const lpRedirected = node.localInpaintPlan?.workspace ? lpRedirectWorkspaceOutputs(node, additions, kind) : false;
+    if(lpRedirected){
+        // 产物已改写：跳过本节点图片写入，仅完成收尾状态清理
+    } else if(node.appendPendingOutput){
         appendOutputsToNode(node, additions, kind, {limit:SMART_APPEND_OUTPUT_MAX, skipShift:true, baseBox});
         delete node.replacePendingOutput;
         delete node.replacePendingOutputs;
@@ -32446,18 +34052,23 @@ function finalizeSmartPendingTask(node, taskId, images, kind='image', options={}
         });
         if(dupDownstreamGroup) additions.length = 0;
     }
-    node.images = [...existing, ...additions];
-    if(appendOutput && node.images.length > SMART_APPEND_OUTPUT_MAX) node.images = node.images.slice(-SMART_APPEND_OUTPUT_MAX);
+    // 2026-10-18（用户要求）：遮罩工作台不收结果——产物落到计划持有节点时改写到下游结果节点
+    const lpRedirected = additions.length && node.localInpaintPlan?.workspace
+        ? lpRedirectWorkspaceOutputs(node, additions, kind)
+        : false;
+    if(!lpRedirected) node.images = [...existing, ...additions];
+    if(appendOutput && !lpRedirected && node.images.length > SMART_APPEND_OUTPUT_MAX) node.images = node.images.slice(-SMART_APPEND_OUTPUT_MAX);
+    if(lpRedirected) delete node.appendGeneratedLayout;
     if(replaceOutput) {
         delete node.appendGeneratedLayout;
         node.replacePendingResults = cleanHistoryImages(node.images);
         node.replacePendingOutputs = [];
         removeHistoryGroupForNode(node);
-    } else if(appendOutput && kind === 'image' && additions.length) {
+    } else if(appendOutput && kind === 'image' && additions.length && !lpRedirected) {
         node.appendGeneratedLayout = true;
     }
-    if(additions.length) node.outputKind = kind;
-    if(additions.length) scheduleLocalInpaintStitch(node, kind);
+    if(additions.length && !lpRedirected) node.outputKind = kind;
+    if(additions.length && !lpRedirected) scheduleLocalInpaintStitch(node, kind);
     if(!node.pending && smartPendingTasks(node).length === 0){
         delete node.pendingTasks;
         delete node.pendingPlaceholders;
@@ -32470,7 +34081,8 @@ function finalizeSmartPendingTask(node, taskId, images, kind='image', options={}
         node.runElapsedMs = Math.max(0, node.runFinishedAt - Number(node.runStartedAt || node.runFinishedAt));
         node.runTimerHidden = false;
         node.running = false;
-        node.title = smartOutputTitleForNode(node, kind, node.images.length);
+        if(!lpRedirected) node.title = smartOutputTitleForNode(node, kind, node.images.length);
+        else if(node.title === 'Group' || !String(node.title || '').trim()) node.title = '遮罩工作台';
         if(node.genSize3000 === true){
             // 2026-10-10（用户要求：尺寸按 3000 版）——完成后清掉显式 w/h，尺寸交回布局。
             if(node.images.length > 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)) node.scale = MEDIA_GROUP_DEFAULT_SCALE;

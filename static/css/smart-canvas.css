@@ -17749,3 +17749,111 @@ body.smart-node-resize .image-node .smart-video-canvas-download.smart-video-down
     margin: 2px 0;
     background: rgba(154, 154, 154, .28);
 }
+
+/* ===== 2026-10-15 音频预览与下载（用户要求：画布里生成的音频要能播、能下载） =====
+   覆盖两条渲染路径：
+   1) thumbMediaHtml 音频格子（多产物网格 / 追加宫格 / 智能分组缩略图共用）—— .media-thumb.audio-thumb.has-player
+   2) singleMediaHtml 音频卡（单产物铺满节点）—— .media-audio-card
+   下载按钮复用 .mini-x 的 hover 显隐体系（.thumb-item/.image-wrap 的 :hover 规则已覆盖它），
+   只需改定位：格子里放左上角（右上角被删除按钮占了），单卡放右上角（与删除按钮同位约定一致）。 */
+.media-thumb.audio-thumb.has-player { gap:6px; padding:8px 7px 7px; }
+.media-thumb.audio-thumb.has-player > i,
+.media-thumb.audio-thumb.has-player > svg { flex:0 0 auto; }
+.media-thumb.audio-thumb.has-player > span { flex:0 0 auto; max-width:100%; }
+.media-thumb.audio-thumb.has-player audio {
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    height:28px;
+    flex:0 0 auto;
+    border-radius:999px;
+    color-scheme:light;
+    background:var(--card);
+    box-shadow:0 1px 4px rgba(16,16,16,.10);
+}
+.theme-dark .media-thumb.audio-thumb.has-player audio {
+    color-scheme:dark;
+    background:#111111;
+    filter:brightness(.9) contrast(1.08);
+}
+.media-audio-card { position:relative; }
+.media-audio-card .audio-dl-btn { position:absolute; right:7px; top:7px; z-index:7; }
+.thumb-item .mini-x.audio-dl-btn,
+.image-wrap .mini-x.audio-dl-btn { right:auto; left:7px; }
+/* 播放器区域屏蔽节点拖动（beginNodeDrag / 缩略图 click 已有 video,audio,button 排除，这里兜底手势） */
+.media-thumb.audio-thumb.has-player audio { pointer-events:auto; }
+
+/* ===== 2026-10-15 ComfyUI 工作流分类（生图/生视频/生音频/放大/其他） =====
+   composer 工作流弹层顶部的分类 tab + 卡片右键归类菜单。
+   取值全部用现有主题变量，深浅色自动跟随。 */
+.comfy-workflow-cats { display:flex; flex-wrap:wrap; gap:5px; margin:0 0 10px; }
+.comfy-workflow-cat {
+    display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 9px;
+    border:1px solid var(--line); border-radius:999px; background:var(--soft);
+    color:var(--muted); font-size:11.5px; font-weight:800; line-height:1; cursor:pointer;
+    transition:background .14s ease, color .14s ease, border-color .14s ease;
+}
+.comfy-workflow-cat small { font-size:10px; font-weight:700; opacity:.72; font-variant-numeric:tabular-nums; }
+.comfy-workflow-cat:hover { color:var(--text); border-color:var(--strong); }
+.comfy-workflow-cat.active { background:#7c3aed; border-color:#8b5cf6; color:#fff; }
+.comfy-workflow-cat.active small { opacity:.85; }
+.comfy-workflow-empty { padding:12px 4px; font-size:12px; color:var(--muted); text-align:center; }
+.comfy-wf-cat-menu {
+    position:fixed; z-index:2147483000; min-width:158px; padding:6px;
+    border:1px solid var(--line); border-radius:12px; background:var(--panel);
+    box-shadow:0 18px 44px var(--shadow); backdrop-filter:blur(18px);
+}
+.comfy-wf-cat-menu-title {
+    padding:4px 9px 6px; color:var(--muted); font-size:10.5px; font-weight:800;
+    letter-spacing:.08em; text-transform:uppercase;
+}
+.comfy-wf-cat-menu button {
+    display:flex; align-items:center; gap:8px; width:100%; height:28px; padding:0 9px;
+    border:0; border-radius:8px; background:transparent; color:var(--text);
+    font-size:12.5px; font-weight:700; text-align:left; cursor:pointer;
+}
+.comfy-wf-cat-menu button span { flex:1; }
+.comfy-wf-cat-menu button i, .comfy-wf-cat-menu button svg { width:13px; height:13px; flex:0 0 auto; }
+.comfy-wf-cat-menu button:hover { background:var(--soft); }
+.comfy-wf-cat-menu button.active { color:#8b5cf6; }
+.comfy-wf-cat-menu button.auto { color:var(--muted); font-weight:700; }
+.comfy-wf-cat-menu button.auto.current { color:var(--muted); }
+.comfy-wf-cat-menu button[disabled] { opacity:.42; cursor:default; }
+.comfy-wf-cat-menu button[disabled]:hover { background:transparent; }
+.comfy-wf-cat-menu-sep { height:1px; margin:5px 4px; background:var(--line); }
+
+/* —— 2026-10-17 局部编辑：节点内遮罩编辑（位图覆盖层 + 遮罩工具条） —— */
+.local-inpaint-mask-bmp{
+    position:absolute;left:0;top:0;width:100%;height:100%;
+    pointer-events:none;z-index:3;border-radius:inherit;
+    transition:opacity .18s ease;
+}
+.image-wrap.lp-mask-painting{cursor:crosshair;}
+.image-wrap.lp-mask-painting img,.image-wrap.lp-mask-painting video{pointer-events:none;}
+.smart-node-floating-menu .lp-feather{
+    display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;margin-left:2px;
+    border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
+    font-size:11px;color:#c8c8c8;white-space:nowrap;user-select:none;
+}
+.smart-node-floating-menu .lp-feather input{width:74px;height:14px;accent-color:#7db4ff;}
+.smart-node-floating-menu .lp-feather b{font-weight:500;color:#e8e8e8;min-width:14px;text-align:right;}
+/* 2026-10-18 修复：图像节点工具栏是 compact-icon-menu，其 background:transparent !important
+   特异性更高，会盖掉下面的通用 .active 规则 —— 这里用同源高特异性选择器压回去。
+   2026-10-18 三改（用户要求）：选中态改为「按下」物理键效果——深底 + 内阴影，图标纯白，悬停不上浮 */
+.image-node .smart-node-floating-menu.compact-icon-menu button.active,
+.smart-node-floating-menu button.active{
+    background:#0d0d0f !important;
+    color:#fff !important;
+    /* box-shadow 会被 .world ×10 全局封杀，内凹用 outline 表达（skin css 有同款高特异性规则） */
+    outline:1px solid rgba(255,255,255,.18) !important;
+    outline-offset:-1px !important;
+    transform:translateY(1px) !important;
+}
+.image-node .smart-node-floating-menu.compact-icon-menu button.active:hover,
+.smart-node-floating-menu button.active:hover{
+    background:#101013 !important;
+    color:#fff !important;
+    outline:1px solid rgba(255,255,255,.24) !important;
+    outline-offset:-1px !important;
+    transform:translateY(1px) !important;
+}

@@ -34,7 +34,7 @@ from threading import Lock, Thread, Event
 import httpx
 from PIL import Image, ImageOps
 from io import BytesIO
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
@@ -348,7 +348,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "V26.10.15.4"
+APP_VERSION = "V26.10.18.1"
 # === GBZ智能画布 更新源（发布地址绑定作者账号；换账号/仓库名只改这里） ===
 GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认）
 GITHUB_REPO_NAME = "GBZ-Canvas"
@@ -6974,6 +6974,49 @@ def generate_video_preview_image(path: str, width: int) -> Image.Image:
         except OSError:
             pass
 
+def build_media_preview_sync(path: str, width: int) -> Tuple[str, str]:
+    """同步生成预览图并落盘，返回 (文件路径, media_type)。
+
+    2026-10-15：从 /api/media-preview 的闭包里提出来，供上传时预热复用
+    （新上传的大视频首次请求要现场 ffmpeg 抽帧，期间前端节点是空白框）。
+    """
+    os.makedirs(MEDIA_PREVIEW_DIR, exist_ok=True)
+    webp_path, png_path = media_preview_cache_paths(path, width)
+    if is_video_preview_file(path):
+        img = generate_video_preview_image(path, width)
+    else:
+        with Image.open(path) as source:
+            img = ImageOps.exif_transpose(source)
+            img.thumbnail((width, width), Image.LANCZOS)
+            img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
+    try:
+        img.save(webp_path, format="WEBP", quality=92, method=4)
+        return webp_path, "image/webp"
+    except Exception:
+        img.save(png_path, format="PNG")
+        return png_path, "image/png"
+
+# 前端视频节点会用到这两个宽度的海报：单节点 768、缩略图 512（smartMediaPreviewUrl 的 size）
+MEDIA_PREVIEW_PREWARM_WIDTHS = (512, 768)
+
+
+def prewarm_media_previews(path: str, widths=MEDIA_PREVIEW_PREWARM_WIDTHS) -> int:
+    """上传后预热预览图缓存（失败静默，不影响主流程）。返回预热成功的数量。"""
+    if not path or not os.path.isfile(path):
+        return 0
+    done = 0
+    for width in widths:
+        try:
+            webp_path, png_path = media_preview_cache_paths(path, width)
+            if os.path.exists(webp_path) or os.path.exists(png_path):
+                continue
+            build_media_preview_sync(path, width)
+            done += 1
+        except Exception:
+            continue
+    return done
+
+
 @app.get("/api/media-preview")
 async def media_preview(url: str, w: int = 512):
     path = output_file_from_url(url)
@@ -6988,25 +7031,9 @@ async def media_preview(url: str, w: int = 512):
     if os.path.exists(png_path):
         return FileResponse(png_path, media_type="image/png")
 
-    def _build_preview():
-        # 同步 PIL 处理 + 落盘，放到线程里执行，避免阻塞事件循环（几十张首次生成会卡死整个 loop → 缩略图全空白）
-        os.makedirs(MEDIA_PREVIEW_DIR, exist_ok=True)
-        if is_video_preview_file(path):
-            img = generate_video_preview_image(path, width)
-        else:
-            with Image.open(path) as source:
-                img = ImageOps.exif_transpose(source)
-                img.thumbnail((width, width), Image.LANCZOS)
-                img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
-        try:
-            img.save(webp_path, format="WEBP", quality=92, method=4)
-            return webp_path, "image/webp"
-        except Exception:
-            img.save(png_path, format="PNG")
-            return png_path, "image/png"
-
     try:
-        out_path, media_type = await asyncio.to_thread(_build_preview)
+        # 同步 PIL 处理 + 落盘，放到线程里执行，避免阻塞事件循环（几十张首次生成会卡死整个 loop → 缩略图全空白）
+        out_path, media_type = await asyncio.to_thread(build_media_preview_sync, path, width)
         return FileResponse(out_path, media_type=media_type)
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法生成预览图：{exc}") from exc
@@ -7022,6 +7049,53 @@ def playable_video_cache_path(path: str) -> Tuple[str, str]:
 def is_faststart_video_source(path: str) -> bool:
     return os.path.splitext(str(path or "").split("?", 1)[0])[1].lower() in {".mp4", ".m4v", ".mov"}
 
+def build_playable_video_sync(path: str) -> str:
+    """同步生成 faststart 视频缓存，返回缓存路径。
+
+    2026-10-15：从 /api/playable-video 的闭包里提出来，供上传时预热复用
+    （前端挂真 <video> 时会请求这个接口，首次要现场 ffmpeg 转封装）。
+    """
+    cache_path, _public_url = playable_video_cache_path(path)
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        return cache_path
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("未找到 ffmpeg，无法生成可播放视频缓存")
+    os.makedirs(PLAYABLE_VIDEO_DIR, exist_ok=True)
+    tmp_path = cache_path + ".tmp.mp4"
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    except OSError:
+        pass
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", path,
+        "-map", "0",
+        "-c", "copy",
+        "-f", "mp4",
+        "-movflags", "+faststart",
+        tmp_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if proc.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) <= 0:
+        raise RuntimeError((proc.stderr or "ffmpeg 未能生成 faststart 视频").strip()[:500])
+    os.replace(tmp_path, cache_path)
+    return cache_path
+
+
+def prewarm_playable_video(path: str) -> bool:
+    """上传后预热可播放视频缓存（失败静默）。"""
+    if not path or not os.path.isfile(path) or not is_faststart_video_source(path):
+        return False
+    try:
+        build_playable_video_sync(path)
+        return True
+    except Exception:
+        return False
+
+
+
 @app.api_route("/api/playable-video", methods=["GET", "HEAD"])
 async def playable_video(url: str):
     path = output_file_from_url(url)
@@ -7034,34 +7108,8 @@ async def playable_video(url: str):
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
         return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
 
-    def _build_faststart():
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            raise RuntimeError("未找到 ffmpeg，无法生成可播放视频缓存")
-        os.makedirs(PLAYABLE_VIDEO_DIR, exist_ok=True)
-        tmp_path = cache_path + ".tmp.mp4"
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            pass
-        cmd = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-i", path,
-            "-map", "0",
-            "-c", "copy",
-            "-f", "mp4",
-            "-movflags", "+faststart",
-            tmp_path,
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        if proc.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) <= 0:
-            raise RuntimeError((proc.stderr or "ffmpeg 未能生成 faststart 视频").strip()[:500])
-        os.replace(tmp_path, cache_path)
-        return cache_path
-
     try:
-        await asyncio.to_thread(_build_faststart)
+        await asyncio.to_thread(build_playable_video_sync, path)
         return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法生成可播放视频：{exc}") from exc
@@ -12076,7 +12124,7 @@ async def upload_image(files: List[UploadFile] = File(...)):
     return {"files": uploaded_files}
 
 @app.post("/api/ai/upload")
-async def upload_ai_reference(files: List[UploadFile] = File(...)):
+async def upload_ai_reference(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
     uploaded = []
     image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     video_exts = {".mp4", ".webm", ".mov", ".m4v", ".flv"}
@@ -12117,6 +12165,12 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
         with open(path, "wb") as f:
             f.write(content)
         uploaded.append({"url": output_url_for(filename, "input"), "name": file.filename or filename, "kind": kind, "mime": content_type})
+        # 2026-10-15 上传即预热：前端节点显示的是「服务端抽帧海报」或「faststart 视频」，
+        # 两者首次请求都要现场跑 ffmpeg —— 期间画布节点是空白框（用户拖入 13MB 视频后
+        # 看到空节点的根因）。这里在响应返回后于后台线程把两种缓存都先生成好。
+        background_tasks.add_task(prewarm_media_previews, path)
+        if kind == "video":
+            background_tasks.add_task(prewarm_playable_video, path)
     return {"files": uploaded}
 
 class Base64UploadRequest(BaseModel):
@@ -20010,6 +20064,14 @@ class WorkflowConfig(BaseModel):
     title: str = ""
     fields: List[WorkflowField] = []
     mini_cards: Dict[str, Any] = {}
+    # 2026-10-15 工作流分类（生图/生视频/生音频/放大/其他）。空串 = 未手动分类（列表按输出节点自动推断）。
+    category: str = ""
+    category_source: str = ""
+
+class WorkflowCategoryRequest(BaseModel):
+    """手动归类请求：category 留空 或 source='auto' 表示恢复自动推断。"""
+    category: str = ""
+    source: str = "manual"
 
 class WorkflowUploadRequest(BaseModel):
     name: str
@@ -20031,6 +20093,105 @@ def workflow_path_from_name(name: str) -> str:
 
 def workflow_config_path(name: str) -> str:
     return workflow_path_from_name(name).replace(".json", ".config.json")
+
+# ===== ComfyUI 工作流分类（2026-10-15，用户要求：生图 / 生视频 / 生音频 / 放大 / 其他）=====
+# 设计口径：
+#   · 分类是"单值"的，key 固定 5 个，顺序即 UI 展示顺序。
+#   · 手动分类写进工作流自己的 .config.json（category + category_source='manual'），
+#     跟着工作流 zip 导出/导入走，局域网多端一致；只要 config 里有 category 就以它为准，
+#     手动设置永不被自动推断覆盖。
+#   · 没有 category 的工作流：每次按工作流 JSON 的输出节点实时推断（带 mtime 缓存，未落盘），
+#     这样新导入的工作流自动有合理分类，且不会因为推断而往仓库里写 config 文件。
+WORKFLOW_CATEGORY_KEYS = ("image", "video", "audio", "upscale", "other")
+WORKFLOW_CATEGORY_ALIASES = {
+    "image": "image", "video": "video", "audio": "audio", "upscale": "upscale", "other": "other",
+    "生图": "image", "生视频": "video", "生音频": "audio", "放大": "upscale", "其他": "other",
+}
+# 优先级：视频 > 音频 > 放大 > 生图 > 其他。
+# 判定顺序很关键——seedvr/upscale 这类工作流同时带 SaveImage，先判 upscale 才不会被当成生图；
+# H3 这类视频工作流带 MiniMaxH3* 采样链，先判 video 才不会被当成音频。
+_WORKFLOW_CATEGORY_MARKERS = (
+    ("video", ("videocombine", "savewebm", "savevideo", "savemp4", "saveanimated", "vhs_", "wanvideo",
+               "ltxv", "cogvideo", "hunyuanvideo", "svd_", "animatediff", "minimaxh3", "feihoueasyh3")),
+    ("audio", ("saveaudio", "previewaudio", "vaedecodeaudio", "audioencoder", "audioconcat",
+               "saveflac", "saveaudioflac", "tts")),
+    # ⚠ 这里只放"真放大"节点。ImageScaleBy / ImageScaleByAspectRatio 是"缩放到指定尺寸"的工具节点，
+    #   几乎每个工作流都有（实测把它们当放大标志会把 18 个工作流里的 14 个误判成放大）。
+    ("upscale", ("seedvr", "upscalemodel", "imageupscalewithmodel", "supir", "ultimatesdupscale",
+                 "sdupscale", "upscale")),
+    # 只认 SaveImage（真正落盘出图）；PreviewImage 是纯预览，单独出现时归"其他"更准
+    # （例如"改尺寸工作流"只有 PreviewImage，它就是工具而不是生成器）。
+    ("image", ("saveimage",)),
+)
+_WORKFLOW_CATEGORY_CACHE: Dict[str, Any] = {}
+
+def normalize_workflow_category(value) -> str:
+    """把外部传入的分类值归一成 5 个 key 之一；无法识别（含空值）返回空串表示"未分类/自动"。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return WORKFLOW_CATEGORY_ALIASES.get(text, WORKFLOW_CATEGORY_ALIASES.get(text.lower(), ""))
+
+def workflow_class_types(workflow) -> List[str]:
+    """兼容两种工作流格式：API 格式（{id: {class_type}} 扁平）与 UI 格式（{nodes: [{type}]}）。"""
+    out: List[str] = []
+    if not isinstance(workflow, dict):
+        return out
+    ui_nodes = workflow.get("nodes")
+    if isinstance(ui_nodes, list):
+        for node in ui_nodes:
+            if isinstance(node, dict):
+                label = node.get("type") or node.get("class_type")
+                if label:
+                    out.append(str(label))
+        return out
+    for value in workflow.values():
+        if isinstance(value, dict) and value.get("class_type"):
+            out.append(str(value["class_type"]))
+    return out
+
+def cached_workflow_class_types(name: str) -> List[str]:
+    """按 (路径, mtime, 大小) 缓存工作流节点类型，避免列表接口反复解析大 JSON。"""
+    try:
+        path = workflow_path_from_name(name)
+        stat = os.stat(path)
+    except Exception:
+        _WORKFLOW_CATEGORY_CACHE.pop(name, None)
+        return []
+    cache_key = (os.path.abspath(path), stat.st_mtime_ns, stat.st_size)
+    hit = _WORKFLOW_CATEGORY_CACHE.get(name)
+    if hit and hit[0] == cache_key:
+        return hit[1]
+    classes: List[str] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            classes = workflow_class_types(json.load(f))
+    except Exception:
+        classes = []
+    _WORKFLOW_CATEGORY_CACHE[name] = (cache_key, classes)
+    return classes
+
+def infer_workflow_category(name: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+    """推断工作流分类：config 里显式写过的优先，否则按输出节点判，兜底 other。"""
+    explicit = normalize_workflow_category((cfg or {}).get("category"))
+    if explicit:
+        return explicit
+    classes = cached_workflow_class_types(name)
+    if not classes:
+        return "other"
+    text = " ".join(classes).lower()
+    for category, markers in _WORKFLOW_CATEGORY_MARKERS:
+        if any(marker in text for marker in markers):
+            return category
+    return "other"
+
+def workflow_category_payload(name: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """给前端用的分类信息：category 恒为 5 个 key 之一，category_source 说明这个值是人定的还是推断的。"""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    stored = normalize_workflow_category(cfg.get("category"))
+    if stored:
+        return {"category": stored, "category_source": "manual"}
+    return {"category": infer_workflow_category(name, cfg), "category_source": "auto"}
 
 def is_builtin_workflow(name: str) -> bool:
     normalized = str(name or "").replace("\\", "/")
@@ -20527,6 +20688,8 @@ def list_workflows():
                 "title": cfg.get("title") or fn.replace(".json", ""),
                 "builtin": is_builtin_workflow(rel),
                 "field_count": len(cfg.get("fields") or []),
+                # 2026-10-15：生图/生视频/生音频/放大/其他（手动优先，否则按输出节点推断）
+                **workflow_category_payload(rel, cfg),
             })
     items.sort(key=lambda item: (0 if item.get("builtin") else 1, 0 if item["name"].startswith(f"{CUSTOM_WORKFLOW_FOLDER}/") else 1, item["title"]))
     return {"workflows": items}
@@ -20747,6 +20910,44 @@ def save_workflow_config(name: str, payload: WorkflowConfig):
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(payload.dict(), f, ensure_ascii=False, indent=2)
     return {"config": payload.dict()}
+
+@app.put("/api/workflows/{name:path}/category")
+def set_workflow_category(name: str, payload: WorkflowCategoryRequest):
+    """手动给 ComfyUI 工作流归类（2026-10-15）。
+
+    只改工作流自己的 .config.json 里的 category/category_source，不碰工作流 JSON 本身，
+    所以不影响出图、不需要重新配置字段。category='' 或 source='auto' = 恢复自动归类
+    （删除这两个键，列表接口会重新按输出节点推断）。
+    """
+    if not WORKFLOW_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid workflow name")
+    workflow_path = workflow_path_from_name(name)
+    if not os.path.exists(workflow_path):
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    cfg: Dict[str, Any] = {}
+    cfg_path = workflow_config_path(name)
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+            if isinstance(stored, dict):
+                cfg = stored
+        except Exception:
+            cfg = {}
+    restore_auto = str(payload.source or "").strip().lower() == "auto" or not str(payload.category or "").strip()
+    if restore_auto:
+        cfg.pop("category", None)
+        cfg.pop("category_source", None)
+    else:
+        category = normalize_workflow_category(payload.category)
+        if not category:
+            raise HTTPException(status_code=400, detail="无效的分类")
+        cfg["category"] = category
+        cfg["category_source"] = "manual"
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    result = workflow_category_payload(name, cfg)
+    return {"name": name, **result}
 
 class WorkflowContentRequest(BaseModel):
     workflow: Dict[str, Any]

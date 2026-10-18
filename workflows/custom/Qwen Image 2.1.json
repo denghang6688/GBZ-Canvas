@@ -84,18 +84,6 @@
         "472",
         0
       ],
-      "images.image_2": [
-        "473",
-        0
-      ],
-      "images.image_3": [
-        "474",
-        0
-      ],
-      "images.image_4": [
-        "475",
-        0
-      ],
       "vae": [
         "197",
         0
@@ -103,7 +91,7 @@
     },
     "class_type": "TextEncodeQwenImage21",
     "_meta": {
-      "title": "Text Encode Qwen Image 2.1"
+      "title": "文本编码 Qwen 图像 2.1"
     }
   },
   "419": {
@@ -187,37 +175,10 @@
     },
     "class_type": "QwenImage21Cache",
     "_meta": {
-      "title": "Qwen Image 2.1 Cache"
+      "title": "Qwen Image 2.1 缓存"
     }
   },
   "472": {
-    "inputs": {
-      "image": "..simple.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "473": {
-    "inputs": {
-      "image": "..simple.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "474": {
-    "inputs": {
-      "image": "..simple.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "475": {
     "inputs": {
       "image": "..simple.png"
     },

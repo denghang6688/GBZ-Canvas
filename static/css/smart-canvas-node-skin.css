@@ -1805,6 +1805,24 @@ html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-f
     opacity: .36 !important;
     cursor: not-allowed !important;
 }
+
+/* 2026-10-18（用户要求）：遮罩工具选中态 = 按下去的物理键。
+   注意：smart-canvas.css 里有 .world ×10 { box-shadow:none !important } 的全局封杀，
+   box-shadow 在世界内永远无效 —— 用 outline（细亮边）+ 深底 + 下沉 1px 表达内凹 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu > button.active:not(.batch-resize-action) {
+    background: #0d0d0f !important;
+    color: #ffffff !important;
+    outline: 1px solid rgba(255, 255, 255, .18) !important;
+    outline-offset: -1px !important;
+    transform: translateY(1px) !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu > button.active:not(.batch-resize-action):hover {
+    background: #101013 !important;
+    color: #ffffff !important;
+    outline: 1px solid rgba(255, 255, 255, .24) !important;
+    outline-offset: -1px !important;
+    transform: translateY(1px) !important;
+}
 /* 颜色触发按钮（多图组调色板）同口径：36 方块、暗底上的浅色字 */
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger {
     width: 36px !important;

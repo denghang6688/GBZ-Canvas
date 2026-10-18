@@ -619,3 +619,13 @@ body.comfy-native-fs{ overflow:hidden; }
         max-height:none;
     }
 }
+
+/* 2026-10-15 工作流分类下拉（生图/生视频/生音频/放大/其他；「自动」= 恢复按输出节点推断） */
+.workflow-card .wf-cat-select {
+    flex:0 0 auto; max-width:74px; height:24px; padding:0 4px;
+    border:1px solid var(--line); border-radius:7px; background:var(--card);
+    color:var(--muted); font-size:11px; font-weight:700; cursor:pointer;
+    appearance:none; text-align:center; text-align-last:center;
+}
+.workflow-card:hover .wf-cat-select { color:var(--text); border-color:var(--strong); }
+.workflow-card .wf-cat-select:focus { outline:none; border-color:var(--accent); color:var(--text); }
