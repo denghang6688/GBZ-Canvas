@@ -95,8 +95,10 @@ const promptLlmInstruction = document.getElementById('promptLlmInstruction');
 const promptLlmProvider = document.getElementById('promptLlmProvider');
 const promptLlmModel = document.getElementById('promptLlmModel');
 const promptLlmRun = document.getElementById('promptLlmRun');
-const promptLlmCancel = document.getElementById('promptLlmCancel');
 const promptLlmSkillChipRow = document.getElementById('promptLlmSkillChipRow');
+const promptLlmOptToggle = document.getElementById('promptLlmOptimizeToggle');
+const promptLlmOptRule = document.getElementById('promptLlmOptimizeRule');
+const promptLlmOptRuleName = document.getElementById('promptLlmOptimizeRuleName');
 const promptLlmSkillPicker = document.getElementById('promptLlmSkillPicker');
 const promptLlmSkillList = document.getElementById('promptLlmSkillList');
 const minimap = document.getElementById('minimap');
@@ -5970,13 +5972,14 @@ function syncPromptLlmComposer(node=activePromptLlmComposerNode()){
     }
     syncPromptLlmRefs(node);
     renderPromptLlmSkillChip(node);
+    syncPromptLlmOptimizeUI(node);
     const running = node.running === true;
     if(promptLlmRun){
-        promptLlmRun.disabled = running;
+        // 2026-10-19（用户要求简化）：一个按钮两种状态 —— 生成中再点一次 = 取消
         promptLlmRun.classList.toggle('is-running', running);
+        promptLlmRun.title = running ? '生成中，点击取消' : '生成';
         promptLlmRun.innerHTML = `<i data-lucide="${running ? 'loader-2' : 'arrow-up'}"></i><span>${running ? '生成中' : '生成'}</span>`;
     }
-    if(promptLlmCancel) promptLlmCancel.hidden = !running;
     positionPromptLlmComposer(node);
     setPromptLlmComposerOpen(true);
     refreshIcons();
@@ -15574,7 +15577,14 @@ function promptNodeTitleText(node){
     return node?.llmEnabled === true ? 'LLM' : 'Text';
 }
 function promptNodeKindBadgeHtml(node){
-    return '';
+    // 2026-10-19（用户要求）：节点上直接显示当前规则智能体（对应编辑里的「节点上显示」）
+    try{
+        if(node?.llmEnabled !== true || node.llmPromptOptimize !== true) return '';
+        const rule = getCurrentLlmRule();
+        if(!rule || rule.showOnNode === false) return '';
+        const ico = LLM_RULE_TYPE_ICONS[rule.type] || '◇';
+        return `<span class="prompt-node-rule-badge" title="当前规则智能体：${escapeAttr(rule.name)}（${llmRuleMode(rule) === 'agent' ? '整段系统提示词' : '只改写指令'}）"><b>${escapeHtml(ico)}</b><span>${escapeHtml(rule.name)}</span></span>`;
+    }catch(err){ return ''; }
 }
 function promptNodeTitleHtml(node){
     // 2026-09-28（用户要求）去掉 LLM 标题前的星星图标（sparkles），只留文字
@@ -17872,6 +17882,35 @@ function lpMaskGeometry(node){
 let lpDragActive = false;
 // 选区自动提交（用户要求：不要保存按钮，有色块=有选区）：每笔结束后延迟落盘
 const lpCommitTimers = new Map();
+// 2026-10-19（用户反馈"羽化给 0 遮罩还是比框选大"）：羽化滑杆以前只改数值不重烘，
+// 已保存的 mask PNG 仍带上次的晕边 → 生成时照样糊一圈。改成停手 350ms 后按新羽化重导一次。
+const lpRefeatherTimers = new Map();
+function lpScheduleRefeather(nodeId, delay){
+    if(lpRefeatherTimers.has(nodeId)) clearTimeout(lpRefeatherTimers.get(nodeId));
+    lpRefeatherTimers.set(nodeId, setTimeout(() => {
+        lpRefeatherTimers.delete(nodeId);
+        lpRefeatherMask(nodeId).catch(() => {});
+    }, delay == null ? 350 : delay));
+}
+async function lpRefeatherMask(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    const plan = lpPlanForNode(node);
+    if(!node || !plan) return;
+    if(node.maskDirty) return;   // 有未落盘笔触：常规提交会带上新羽化，别抢
+    const st = lpMaskEditState.get(node.id) || lpEnsureMaskState(node);
+    if(!st?.canvas) return;
+    // 遮罩图还在异步加载时导出会得到空图 → 等它 loaded（最多 2s）
+    for(let i = 0; i < 40 && !st.loaded; i++) await new Promise(r => setTimeout(r, 50));
+    if(!st.loaded || !st.canvas) return;
+    let has = false;
+    try{
+        const d = st.canvas.getContext('2d').getImageData(0, 0, st.canvas.width, st.canvas.height).data;
+        for(let i = 3; i < d.length; i += 4){ if(d[i] > 8){ has = true; break; } }
+    }catch(err){ has = Boolean(plan.mask); }
+    if(!has) return;             // 还没画过选区：不重烘，免得把 plan.mask 清掉
+    await lpCommitMaskEdit(node.id, {silent:true});
+    lpPaintMaskOverlay(node.id, node);
+}
 function lpScheduleMaskCommit(nodeId, delay){
     if(lpCommitTimers.has(nodeId)) clearTimeout(lpCommitTimers.get(nodeId));
     lpCommitTimers.set(nodeId, setTimeout(() => {
@@ -21782,6 +21821,7 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 const label = range.parentElement ? range.parentElement.querySelector('b') : null;
                 if(label) label.textContent = String(v);
                 scheduleSave();
+                lpScheduleRefeather(targetNode.id, 350);   // 停手后按新羽化重导遮罩，立即生效
             });
         });
         el.querySelectorAll('[data-smart-transform-action]').forEach(btn => {
@@ -25826,7 +25866,8 @@ function applyMaskToPatchCanvas(patchCanvas, maskImg, feather=18){
     }
     ctx.putImageData(img, 0, 0);
 }
-async function stitchLocalInpaintResult(sourceRef, patchRef, rect, maskRef=null, pad=null){
+// feather 传入时以它为准（节点自己的羽化设置），否则退回记忆值/尺寸默认
+async function stitchLocalInpaintResult(sourceRef, patchRef, rect, maskRef=null, pad=null, feather=null){
     if(!sourceRef?.url || !patchRef?.url) return null;
     const [sourceImg, patchImg, maskImg] = await Promise.all([loadImageForCanvas(sourceRef), loadImageForCanvas(patchRef), maskRef?.url ? loadImageForCanvas(maskRef).catch(() => null) : Promise.resolve(null)]);
     const canvasEl = document.createElement('canvas');
@@ -25888,7 +25929,10 @@ async function stitchLocalInpaintResult(sourceRef, patchRef, rect, maskRef=null,
             for(let i = 0; i < W * H; i++){
                 alphaMap[i] = Math.max(md[i*4], md[i*4+1], md[i*4+2]) / 255;
             }
-            alphaMap = kraiBlurAlpha(alphaMap, W, H, lpFeatherFor(rect));
+            // 2026-10-19（用户反馈）：以前这里写死 lpFeatherFor(rect)，只认记忆值/尺寸默认，
+            // 节点滑杆调到 0 也照样按 29 糊一圈 → 成图变化区比框选大。改成以节点羽化为准。
+            const featherPx = feather == null ? lpFeatherFor(rect) : Math.max(0, Math.round(Number(feather) || 0));
+            alphaMap = kraiBlurAlpha(alphaMap, W, H, featherPx);
         }
     }
     const pdata = patchData.data, odata = origData.data;
@@ -26122,7 +26166,7 @@ function scheduleLocalInpaintStitch(node, kind='image'){
         jobs.add(patch.url);
         const token = ++localInpaintStitchToken;
         if(onEditor) node.localInpaintStitchToken = token;
-        stitchLocalInpaintResult(plan.source, patch, plan.rect, plan.mask, plan.pad).then(file => {
+        stitchLocalInpaintResult(plan.source, patch, plan.rect, plan.mask, plan.pad, lpResolveFeather(plan)).then(file => {
             jobs.delete(patch.url);
             const live = nodes.find(n => n.id === node.id);
             const livePlanNode = nodes.find(n => n.id === planNode.id);
@@ -33034,7 +33078,24 @@ async function runPromptLLMNode(nodeId, options={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'smart-prompt') return;
     ensurePromptNodeLlmDefaults(node);
-    const message = promptNodeLLMInputText(node).trim();
+    // 2026-10-19（用户要求）：开关打开 = 按规则执行。
+    // 智能体规则 → 规则内容整段作为系统提示词；润色规则 → 先按规则改写指令，再走节点原系统词。
+    const llmRule = getCurrentLlmRule();
+    const useLlmRule = node.llmPromptOptimize === true && Boolean(String(llmRule?.content || '').trim());
+    const llmRuleModeNow = useLlmRule ? llmRuleMode(llmRule) : '';
+    let llmRunInstructionOverride = '';
+    if(useLlmRule && llmRuleModeNow === 'polish' && options.skipOptimize !== true){
+        try { llmRunInstructionOverride = await ensureLlmOptimizedInstruction(node); }
+        catch(err){ toast('指令优化失败，已按原文发送'); }
+    }
+    const message = (() => {
+        if(!llmRunInstructionOverride) return promptNodeLLMInputText(node).trim();
+        const originalInstruction = node.llmInstruction;
+        node.llmInstruction = llmRunInstructionOverride;
+        const merged = promptNodeLLMInputText(node).trim();
+        node.llmInstruction = originalInstruction;
+        return merged;
+    })();
     if(!message){ toast(tr('smart.promptLlmNeedText')); return; }
     const runDownstream = options.runDownstream === true;
     const writeMode = options.writeMode === 'append' ? 'append' : 'overwrite';
@@ -33050,10 +33111,13 @@ async function runPromptLLMNode(nodeId, options={}){
         const model = resolveChatModel(node.llmModel || '', provider);
         // 技能包：选中时整个 SKILL.md 作为系统提示词前缀（与 AI 助手面板行为一致）
         const skillContent = await fetchPromptLlmSkillContent(node.llmSkillId);
-        const systemParts = [
-            skillContent,
-            node.llmSystemEnabled ? (systemPrompt || 'You are a helpful prompt assistant.') : ''
-        ].filter(Boolean);
+        // 智能体规则：规则内容就是系统提示词（技能包仍作前缀叠加）
+        const systemParts = (useLlmRule && llmRuleModeNow === 'agent')
+            ? [skillContent, String(llmRule.content || '').trim()].filter(Boolean)
+            : [
+                skillContent,
+                node.llmSystemEnabled ? (systemPrompt || 'You are a helpful prompt assistant.') : ''
+            ].filter(Boolean);
         const mediaRefs = promptNodeInputMediaForLLM(node);
         const images = imageRefsOnly(mediaRefs).map(img => img.url).filter(Boolean);
         const videos = videoRefsOnly(mediaRefs).map(video => video.url).filter(Boolean);
@@ -33090,6 +33154,7 @@ async function runPromptLLMNode(nodeId, options={}){
             node.text = generatedText;
         }
         delete node.textHtml;
+        delete node.llmOptimizePrevText;   // 生成结果已覆盖节点文本，「已优化」状态随之失效
         node.llmComposerCollapsed = true;
         node.llmProvider = provider;
         node.llmModel = model;
@@ -33403,6 +33468,390 @@ function h3OptimizerModelId(runSettings, providerId){
     return resolveChatModel(String(raw || ''), providerId || h3OptimizerProviderId(runSettings));
 }
 // 模型偶尔会带出包裹：``` 代码块、"优化后的提示词：" 前缀、整段引号 —— 都去掉。
+// ===== 2026-10-19（用户要求）：LLM 节点的「提示词优化规则智能体」 =====
+// 与 H3 那套分开：优化对象是"你写给 LLM 的指令"，L1 规范是角色/任务/输入/约束/输出格式；
+// 结果写回输入框并保留原文可还原；绝不改动技能包与系统词。
+const LLM_RULE_KEY = 'smart_llm_optimize_rules';
+const LLM_RULE_CURRENT_KEY = 'smart_llm_optimize_rule_current';
+// 规则类型（决定图标与默认分类）｜分类（菜单分组）
+const LLM_RULE_TYPES = ['视频反推', '图像反推', '提示词扩写', '通用润色', '自定义'];
+const LLM_RULE_CATS = ['反推', '扩写', '润色', '未分类'];
+const LLM_RULE_TYPE_ICONS = {'视频反推':'▣', '图像反推':'◨', '提示词扩写':'⇢', '通用润色':'✦', '自定义':'◇'};
+const LLM_RULE_TYPE_CATS = {'视频反推':'反推', '图像反推':'反推', '提示词扩写':'扩写', '通用润色':'润色', '自定义':'未分类'};
+// 内置「智能体」规则：内容就是完整系统提示词（像截图里的 Role 写法），原文是喂给它的材料
+const LLM_AGENT_VIDEO = [
+    'Role',
+    '你是一位拥有法医级视觉解析力与顶级创意重组能力的 AI 视频导演。你的任务是分析用户提供的视频关键帧或序列，并根据用户是否给出附加指令，自动选择“精准复刻”或“创意重构”模式，输出可直接交给通义万相（Wan 2.1/2.2）执行的高质量提示词。',
+    '',
+    '最高指令 · 分支判定',
+    '- 只有素材、没有附加指令 → 模式 A「全量复刻」：对主体、动作、环境、镜头进行逐帧还原。',
+    '- 有附加指令（例如“男人换成女人”“改成雨夜”）→ 模式 B「语义重组」：保留原视频的动态框架与镜头语言，只替换指令指定的元素。',
+    '',
+    '输出格式',
+    'integrated_multimodal_description: 一段连贯英文描述，覆盖主体、场景、镜头、光线、色彩、时长。',
+    '用 [shot] 标注分镜与时间区间（如 [shot] 00:00–00:05），每段写明景别、机位运动、主体动作。',
+    '末尾补 Lens / Color / Audio 三行。',
+    '',
+    '约束',
+    '- 只输出提示词本身，不要解释、标题或代码块。',
+    '- 不新增素材里没有的人物、道具、场景；不确定的细节宁可省略。',
+    '- 时长与素材一致；没有素材时用用户给定值，未给定按 5 秒。'
+].join('\n');
+const LLM_AGENT_IMAGE = [
+    'Role',
+    '你是一位图像提示词反推专家。读取用户提供的图片，输出一段可直接用于文生图 / 图生图模型的英文提示词。',
+    '',
+    '工作方式',
+    '1. 主体：先判断类型（人物 / 产品 / 场景 / 建筑 / 插画），写清可观察的特征——年龄、服饰、材质、状态。',
+    '2. 环境与光线：时间、天气、光源方向与色温、阴影软硬。',
+    '3. 镜头语言：景别、焦段、光圈、景深、机位高度、构图。',
+    '4. 风格与质感：色彩倾向、胶片或数字、颗粒、后期调性。',
+    '',
+    '输出格式',
+    '一段连续英文（60–120 词），逗号分隔的短语式写法，顺序为：主体 → 环境 → 光线 → 镜头 → 风格。',
+    '不要分点、不要编号、不要中文解释，不要出现“这张图片显示”这类前缀。',
+    '',
+    '约束',
+    '- 只描述画面里能看到的东西，不臆造人物身份、品牌、地点。',
+    '- 用户附加了要求（例如“只反推光线”“换成电商风”）时，优先满足附加要求。'
+].join('\n');
+const LLM_AGENT_EXPAND = [
+    'Role',
+    '你是一位提示词扩写专家。用户给你一句简短的想法，你把它扩写成结构完整、可直接执行的提示词。',
+    '',
+    '扩写规则',
+    '- 补齐主体与场景的具体特征：外形、材质、服饰、环境细节。',
+    '- 把抽象形容词换成可执行描述：不写“高级感”，写“低饱和暖灰调、柔光、浅景深”。',
+    '- 明确镜头：景别、焦段、机位、运动。',
+    '- 明确光线：光源位置、色温、明暗对比。',
+    '- 保留用户原意与关键主体，不新增用户没提到的人物或情节。',
+    '',
+    '输出格式',
+    '- 原文是中文就输出中文，是英文就输出英文。',
+    '- 一段连续提示词，中文 200 字以内 / 英文 120 词以内。',
+    '- 只输出提示词，不解释扩写思路。'
+].join('\n');
+const BUILTIN_LLM_RULES = [
+    // —— 润色型（默认）：只改写指令，生成仍走节点自己的系统词 ——
+    {name:'指令清晰化', type:'通用润色', cat:'润色', mode:'polish', content:'把粗略需求改写成结构清晰的指令：补角色与目标；把模糊形容词展开成可判定的约束（尺寸/时长/数量/风格）；明确输入与输出格式；保留原意，不新增未提及的需求。'},
+    {name:'极简去冗余', type:'通用润色', cat:'润色', mode:'polish', content:'只保留任务、必要输入和输出格式三部分，删掉所有客套、重复和解释性文字；总长度不超过原文。'},
+    {name:'结构化输出 JSON', type:'通用润色', cat:'润色', mode:'polish', content:'要求输出严格 JSON：先给出字段定义（名称/类型/是否必填），再给一个示例；禁止输出 JSON 以外的任何文字；不确定的字段用 null，不要编造。'},
+    {name:'分步推理', type:'通用润色', cat:'润色', mode:'polish', content:'把任务拆成有序步骤（1→2→3），每步写明输入与产出的中间结果；要求先给分析过程再给结论，最终答案单独成段。'},
+    {name:'文案写作', type:'通用润色', cat:'润色', mode:'polish', content:'明确目标人群、平台与字数；给出标题/正文/标签三段结构；语气具体到可感知（不写"高级感"这类空词）；附一个示例句子。'},
+    {name:'视频提示词生成', type:'通用润色', cat:'润色', mode:'polish', content:'产出可直接交给视频模型执行的提示词：主体与场景具体、动作按时间顺序、镜头运动可执行、时长明确；不要写心理活动与旁白总结。'},
+    // —— 智能体型：规则内容整段作为系统提示词，直接产出结果 ——
+    {name:'视频复刻与重构', type:'视频反推', cat:'反推', mode:'agent', content:LLM_AGENT_VIDEO},
+    {name:'图像反推提示词', type:'图像反推', cat:'反推', mode:'agent', content:LLM_AGENT_IMAGE},
+    {name:'提示词扩写', type:'提示词扩写', cat:'扩写', mode:'agent', content:LLM_AGENT_EXPAND}
+];
+// 统一字段：mode(agent|polish) / type / cat / showOnNode / showOnAssistant / enabled
+// 兼容旧数据：mode 的 replace→agent、append→polish
+function normalizeLlmRule(raw, base){
+    const src = raw || {};
+    const mode = (src.mode === 'agent' || src.mode === 'replace') ? 'agent' : 'polish';
+    const type = LLM_RULE_TYPES.includes(src.type) ? src.type : (base?.type || '自定义');
+    const cat = LLM_RULE_CATS.includes(src.cat) ? src.cat : (base?.cat || LLM_RULE_TYPE_CATS[type] || '未分类');
+    return {
+        name: String(src.name || base?.name || '').trim(),
+        content: String(src.content != null ? src.content : (base?.content || '')),
+        mode, type, cat,
+        showOnNode: src.showOnNode !== undefined ? src.showOnNode !== false : (base ? base.showOnNode !== false : true),
+        showOnAssistant: src.showOnAssistant !== undefined ? src.showOnAssistant !== false : (base ? base.showOnAssistant !== false : true),
+        enabled: src.enabled !== false,
+        provider: src.provider || '',
+        model: src.model || ''
+    };
+}
+let llmRulesCache = null;
+let llmCurrentRuleCache;
+function getLlmUserRules(){
+    try{
+        const arr = JSON.parse(localStorage.getItem(LLM_RULE_KEY) || '[]');
+        return Array.isArray(arr) ? arr.filter(r => r && r.name) : [];
+    }catch(err){ return []; }
+}
+function getLlmRules(){
+    if(llmRulesCache) return llmRulesCache;
+    const user = getLlmUserRules();
+    const merged = BUILTIN_LLM_RULES.map(base => {
+        const override = user.find(u => u.name === base.name);
+        return normalizeLlmRule(override ? {...base, ...override} : {...base, enabled:true}, base);
+    });
+    user.forEach(u => {
+        if(!merged.some(m => m.name === u.name)) merged.push(normalizeLlmRule({...u, enabled:u.enabled !== false}, null));
+    });
+    llmRulesCache = merged.filter(r => r.name);
+    return llmRulesCache;
+}
+function saveLlmRules(rules){
+    localStorage.setItem(LLM_RULE_KEY, JSON.stringify(Array.isArray(rules) ? rules : []));
+    llmRulesCache = null;
+    llmCurrentRuleCache = undefined;
+}
+function getCurrentLlmRule(){
+    if(llmCurrentRuleCache !== undefined) return llmCurrentRuleCache;
+    const rules = getLlmRules();
+    const cur = localStorage.getItem(LLM_RULE_CURRENT_KEY) || '';
+    llmCurrentRuleCache = rules.find(r => r.name === cur) || rules.find(r => r.enabled !== false) || rules[0] || null;
+    return llmCurrentRuleCache;
+}
+function setCurrentLlmRule(name){
+    const rule = getLlmRules().find(r => r.name === name);
+    if(!rule) return false;
+    if(rule.enabled === false) return false;
+    localStorage.setItem(LLM_RULE_CURRENT_KEY, name);
+    llmCurrentRuleCache = rule;
+    syncPromptLlmOptimizeUI(activePromptLlmComposerNode());
+    render();   // 节点上的规则徽标要跟着换
+    return true;
+}
+function llmRuleMode(rule){ return rule?.mode === 'agent' ? 'agent' : 'polish'; }
+// L0：输出契约，任何模式都生效
+const LLM_OPT_CONTRACT = [
+    '【输出契约】只输出改写后的指令本身；不要解释、前言、标题或代码块包裹；保留原文语言（中文进→中文出）。'
+].join('\n');
+// L1：指令质量规范（replace 模式下整层丢弃）
+const LLM_OPT_BASE = [
+    '你是提示词改写器（不是聊天助手）。唯一任务：把用户给的粗略需求，改写成结构清晰、可直接执行的 LLM 指令。',
+    '',
+    '—— 好指令的六要素 ——',
+    '1. 角色：一句话说明执行者身份与专长。',
+    '2. 任务：动词开头，说清要产出什么；一次只做一件事。',
+    '3. 输入：用户提供了哪些信息；缺失的关键参数写“未指定”，不要编造。',
+    '4. 约束：篇幅、语言、风格、必须包含 / 必须避免的内容。',
+    '5. 输出格式：段落 / 列表 / JSON / 表格，字段名写清楚，必要时给一个示例。',
+    '6. 边界：信息不足时怎么处理（追问 or 按最近似理解执行）。',
+    '',
+    '—— 改写硬性原则 ——',
+    'A. 不新增用户没提到的需求、人物、数据；可以把模糊词展开成可判定标准，但不能替换原意。',
+    'B. 长度控制在原文 1–2 倍；原文已结构化的保留结构、只补缺口。',
+    'C. 原文中的对白、代码、JSON 片段原样保留。',
+    'D. 不要输出“优化后的提示词：”这类前缀。'
+].join('\n');
+// L3：画布拓扑——下游若是 H3，自动补“可被视频模型执行”的约束
+function llmDownstreamHint(node){
+    try{
+        const conns = Array.isArray(canvas?.connections) ? canvas.connections : [];
+        const targets = conns.filter(c => c && c.from === node?.id && c.to && c.to !== node.id)
+            .map(c => nodes.find(n => n.id === c.to))
+            .filter(Boolean);
+        const hit = targets.some(t => (typeof isMinimaxH3Node === 'function' && isMinimaxH3Node(t))
+            || (t && t.comfyWorkflow === H3_COMFY_WORKFLOW));
+        if(!hit) return '';
+        return '该指令的产出会直接作为视频提示词交给 MiniMax H3：请让输出可被视频模型直接执行（主体具体、动作按时间顺序、镜头运动明确、时长可判定）。';
+    }catch(err){ return ''; }
+}
+// 系统提示词：智能体模式=纯规则（不注入任何内置规范）；润色模式=内置规范 + 规则
+function llmRuleSystemPrompt(rule, node, {polish=true}={}){
+    const custom = String(rule?.content || '').trim();
+    if(llmRuleMode(rule) === 'agent') return custom;
+    if(!polish) return custom;
+    const hint = llmDownstreamHint(node);
+    return [LLM_OPT_CONTRACT, LLM_OPT_BASE, custom ? `—— 当前生效的规则（${rule.name}）：优先级最高，冲突时一律以本规则为准 ——\n${custom}` : '', hint]
+        .filter(Boolean).join('\n\n');
+}
+// 润色模式下的「发送前改写指令」：规则只改指令，生成仍走节点自己的系统词。
+// 同一段原文命中缓存就不重复请求（连点生成不会越改越走样）。
+async function ensureLlmOptimizedInstruction(node){
+    if(!node || node.llmPromptOptimize !== true) return '';
+    const rule = getCurrentLlmRule();
+    if(!rule || llmRuleMode(rule) !== 'polish') return '';
+    const cur = String(node.llmInstruction || '').trim();
+    if(!cur) return '';
+    if(String(node.llmOptimizeOriginal || '') === cur && node.llmOptimizeResult) return node.llmOptimizeResult;
+    const optimized = await rewriteInstructionWithRule(node, cur, rule);
+    if(!optimized || optimized === cur) return '';
+    node.llmOptimizeOriginal = cur;
+    node.llmOptimizeResult = optimized;
+    return optimized;
+}
+async function rewriteInstructionWithRule(node, text, rule){
+    const raw = String(text || '').trim();
+    if(!raw) throw new Error('没有可改写的指令');
+    const provider = resolveChatProviderId(rule?.provider || node?.llmProvider || '');
+    if(!provider) throw new Error('没有可用的聊天模型，请先在 API 设置里配置');
+    const model = resolveChatModel(rule?.model || node?.llmModel || '', provider);
+    const res = await fetch('/api/llm/canvas', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            message:raw, messages:[], images:[], videos:[], files:[],
+            model, provider,
+            ms_model: provider === 'modelscope' ? model : '',
+            system_prompt: llmRuleSystemPrompt(rule, node),
+            skill_id: node?.llmSkillId || ''
+        })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return cleanOptimizedPromptText(data?.text || '');
+}
+function syncPromptLlmOptimizeUI(node){
+    if(promptLlmOptToggle){
+        const on = node?.llmPromptOptimize === true;
+        promptLlmOptToggle.classList.toggle('active', on);
+        promptLlmOptToggle.title = on ? '按规则智能体执行：开（关 = 走节点原系统词）' : '按规则智能体执行：关';
+    }
+    const rule = getCurrentLlmRule();
+    if(promptLlmOptRuleName) promptLlmOptRuleName.textContent = rule?.name || '指令清晰化';
+    if(promptLlmOptRule) promptLlmOptRule.title = `当前规则：${rule?.name || '指令清晰化'}（${llmRuleMode(rule) === 'agent' ? '智能体' : '润色'}）`;
+}
+// —— 规则菜单 ——
+let llmOptMenuEl = null;
+function closeLlmOptMenu(){
+    if(llmOptMenuEl){ llmOptMenuEl.remove(); llmOptMenuEl = null; }
+}
+function openLlmOptMenu(){
+    closeLlmOptMenu();
+    if(!promptLlmOptRule) return;
+    const rules = getLlmRules();
+    const cur = getCurrentLlmRule();
+    const cats = [];
+    rules.forEach(r => { if(!cats.includes(r.cat)) cats.push(r.cat); });
+    cats.sort((a, b) => {
+        const ai = LLM_RULE_CATS.indexOf(a), bi = LLM_RULE_CATS.indexOf(b);
+        return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+    const el = document.createElement('div');
+    el.className = 'llm-opt-menu';
+    const groupHtml = cats.map(cat => `<div class="llm-opt-menu-group">${escapeHtml(cat)}</div>`
+        + rules.filter(r => r.cat === cat).map(r => `<button type="button" class="llm-opt-menu-row ${r.name === cur?.name ? 'active' : ''} ${r.enabled === false ? 'is-off' : ''}" data-rule="${escapeAttr(r.name)}">
+            <span class="llm-opt-menu-ico">${escapeHtml(LLM_RULE_TYPE_ICONS[r.type] || '◇')}</span>
+            <span class="llm-opt-menu-name">${escapeHtml(r.name)}</span>
+            ${r.enabled === false ? '<em class="off">已停用</em>' : `<em class="${llmRuleMode(r)}">${llmRuleMode(r) === 'agent' ? '智能体' : '润色'}</em>`}
+        </button>`).join('')).join('');
+    el.innerHTML = `<div class="llm-opt-menu-head"><span>规则智能体 · 系统提示词</span><span data-close>收起</span></div>`
+        + groupHtml
+        + `<div class="llm-opt-menu-foot"><button type="button" class="llm-opt-menu-add" data-edit>编辑当前规则</button><button type="button" class="llm-opt-menu-add new" data-new>+ 新建规则</button></div>`;
+    document.body.appendChild(el);
+    llmOptMenuEl = el;
+    const rect = promptLlmOptRule.getBoundingClientRect();
+    el.style.left = Math.max(12, Math.min(window.innerWidth - 316, rect.left - 12)) + 'px';
+    el.style.top = Math.max(12, rect.top - el.offsetHeight - 8) + 'px';
+    el.addEventListener('mousedown', e => e.stopPropagation());
+    el.addEventListener('click', e => {
+        const row = e.target.closest('[data-rule]');
+        if(row){
+            const name = row.dataset.rule;
+            if(row.classList.contains('is-off')){ toast('该规则已停用：先在编辑里打开「启用」'); return; }
+            setCurrentLlmRule(name);
+            closeLlmOptMenu();
+            return;
+        }
+        if(e.target.closest('[data-edit]')){ closeLlmOptMenu(); openLlmRuleEditor(cur?.name || ''); return; }
+        if(e.target.closest('[data-new]')){ closeLlmOptMenu(); openLlmRuleEditor(''); return; }
+        if(e.target.closest('[data-close]')) closeLlmOptMenu();
+    });
+}
+// —— 规则编辑弹窗 ——
+function openLlmRuleEditor(name){
+    const rules = getLlmRules();
+    const existing = rules.find(r => r.name === name) || null;
+    const isBuiltin = existing ? BUILTIN_LLM_RULES.some(b => b.name === existing.name) : false;
+    let mode = existing ? llmRuleMode(existing) : 'agent';
+    let enabled = existing?.enabled !== false;
+    let showOnNode = existing ? existing.showOnNode !== false : true;
+    let showOnAssistant = existing ? existing.showOnAssistant !== false : true;
+    let type = LLM_RULE_TYPES.includes(existing?.type) ? existing.type : '自定义';
+    let cat = LLM_RULE_CATS.includes(existing?.cat) ? existing.cat : (LLM_RULE_TYPE_CATS[type] || '未分类');
+    const mask = document.createElement('div');
+    mask.className = 'llm-rule-mask';
+    mask.innerHTML = `<div class="llm-rule-modal">
+        <h3>${existing ? '编辑规则' : '新建规则'}${existing ? ' · ' + escapeHtml(existing.name) : ''}</h3>
+        <p class="llm-rule-hint">规则内容会作为系统提示词（这个智能体“是谁”）；输入框里的原文是喂给它的材料。</p>
+        <label class="llm-rule-label">规则名称<input class="llm-rule-input" data-name value="${escapeAttr(existing?.name || '')}" placeholder="例如：视频复刻与重构"></label>
+        <div class="llm-rule-row2">
+            <label class="llm-rule-label">规则类型<select class="llm-rule-input" data-type>${LLM_RULE_TYPES.map(t => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+            <label class="llm-rule-label">分类<select class="llm-rule-input" data-cat>${LLM_RULE_CATS.map(c => `<option ${c === cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+        </div>
+        <div class="llm-rule-label">显示范围
+            <div class="llm-rule-scope">
+                <button type="button" class="llm-rule-scope-btn ${showOnAssistant ? 'on' : ''}" data-scope="assistant">小助手上显示</button>
+                <button type="button" class="llm-rule-scope-btn ${showOnNode ? 'on' : ''}" data-scope="node">节点上显示</button>
+                <span class="llm-rule-scope-hint">节点上显示 = 选中该规则后节点卡片出现规则徽标</span>
+            </div>
+        </div>
+        <div class="llm-rule-label">生效方式
+            <div class="llm-rule-seg" data-mode>
+                <button type="button" data-m="agent" class="${mode === 'agent' ? 'on' : ''}">智能体（整段作为系统提示词）</button>
+                <button type="button" data-m="polish" class="${mode === 'polish' ? 'on' : ''}">润色（只改写指令）</button>
+            </div>
+        </div>
+        <label class="llm-rule-label">规则内容 / 系统提示词<textarea class="llm-rule-textarea" data-content placeholder="Role&#10;你是一位……&#10;&#10;工作方式&#10;……&#10;&#10;输出格式&#10;……">${escapeHtml(existing?.content || '')}</textarea></label>
+        <label class="llm-rule-check"><span class="box ${enabled ? 'on' : ''}" data-enabled>${enabled ? '✓' : ''}</span>启用这条规则</label>
+        <div class="llm-rule-foot">
+            ${existing && !isBuiltin ? '<button type="button" class="llm-rule-btn danger" data-del>删除</button>' : ''}
+            <span class="spacer"></span>
+            <button type="button" class="llm-rule-btn" data-cancel>取消</button>
+            <button type="button" class="llm-rule-btn primary" data-save>保存</button>
+        </div>
+    </div>`;
+    document.body.appendChild(mask);
+    const q = sel => mask.querySelector(sel);
+    q('[data-mode]').addEventListener('click', e => {
+        const btn = e.target.closest('[data-m]');
+        if(!btn) return;
+        mode = btn.dataset.m === 'agent' ? 'agent' : 'polish';
+        mask.querySelectorAll('[data-mode] button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
+    });
+    q('[data-type]').onchange = e => {
+        const nextType = e.currentTarget.value;
+        const catSel = q('[data-cat]');
+        // 类型改了但分类还是上一个类型的默认值 → 跟着类型走
+        if(catSel.value === (LLM_RULE_TYPE_CATS[type] || '未分类')) catSel.value = LLM_RULE_TYPE_CATS[nextType] || '未分类';
+        type = nextType;
+    };
+    q('[data-cat]').onchange = e => { cat = e.currentTarget.value; };
+    mask.querySelectorAll('[data-scope]').forEach(btn => {
+        btn.onclick = () => {
+            if(btn.dataset.scope === 'node') showOnNode = !showOnNode;
+            else showOnAssistant = !showOnAssistant;
+            btn.classList.toggle('on', btn.dataset.scope === 'node' ? showOnNode : showOnAssistant);
+        };
+    });
+    q('[data-enabled]').parentElement.onclick = e => {
+        e.preventDefault();
+        enabled = !enabled;
+        const box = q('[data-enabled]');
+        box.classList.toggle('on', enabled);
+        box.textContent = enabled ? '✓' : '';
+    };
+    mask.addEventListener('mousedown', e => { if(e.target === mask) mask.remove(); });
+    q('[data-cancel]').onclick = () => mask.remove();
+    q('[data-del]')?.addEventListener('click', () => {
+        if(!existing) return;
+        if(isBuiltin){
+            // 内置规则不物理删除，存一条 enabled:false 的覆盖 → 列表里灰显「已停用」
+            const user = getLlmUserRules().filter(r => r.name !== existing.name);
+            user.push({name:existing.name, content:existing.content || '', mode:existing.mode, type:existing.type || '通用润色', cat:existing.cat || '润色', enabled:false, showOnNode:existing.showOnNode !== false, showOnAssistant:existing.showOnAssistant !== false});
+            saveLlmRules(user);
+        } else {
+            saveLlmRules(getLlmUserRules().filter(r => r.name !== existing.name));
+        }
+        if(getCurrentLlmRule()?.name === existing.name) { localStorage.removeItem(LLM_RULE_CURRENT_KEY); llmCurrentRuleCache = undefined; }
+        mask.remove();
+        syncPromptLlmOptimizeUI(activePromptLlmComposerNode());
+        render();
+        toast('规则已删除');
+    });
+    q('[data-save]').onclick = () => {
+        const nextName = String(q('[data-name]').value || '').trim();
+        const content = String(q('[data-content]').value || '').trim();
+        if(!nextName){ toast('请填写规则名称'); return; }
+        if(!content){ toast('请填写规则内容'); return; }
+        cat = q('[data-cat]').value;
+        type = q('[data-type]').value;
+        // 只维护“用户层”：同名即覆盖内置规则，绝不把内置规则整批写进 localStorage
+        const user = getLlmUserRules().filter(r => r.name !== (existing?.name || '') && r.name !== nextName);
+        user.push({name:nextName, content, mode, type, cat, enabled, showOnNode, showOnAssistant, provider:'', model:''});
+        saveLlmRules(user);
+        if(enabled) { localStorage.setItem(LLM_RULE_CURRENT_KEY, nextName); llmCurrentRuleCache = undefined; }
+        mask.remove();
+        syncPromptLlmOptimizeUI(activePromptLlmComposerNode());
+        render();
+        toast('规则已保存');
+    };
+}
 function cleanOptimizedPromptText(text){
     let out = String(text || '').trim();
     out = out.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '').trim();
@@ -37507,6 +37956,7 @@ promptLlmInstruction?.addEventListener('input', event => {
     if(!node) return;
     node.llmInstruction = event.target.value || '';
     scheduleSave();
+    syncPromptLlmOptimizeUI(node);   // 手改文本后「已优化」标记自动失效（原文仍可还原）
     const query = promptLlmSlashQuery(event.target.value || '');
     if(query !== null){
         setPromptLlmSkillPickerOpen(true, query);
@@ -37573,7 +38023,9 @@ promptLlmRun?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
     const node = activePromptLlmComposerNode();
-    if(!node || node.running) return;
+    if(!node) return;
+    // 2026-10-19（用户要求简化）：生成中再点同一个按钮 = 取消
+    if(node.running){ cancelPromptLLMNode(node.id); return; }
     ensurePromptNodeLlmDefaults(node);
     node.llmEnabled = true;
     node.llmInstruction = promptLlmInstruction?.value || node.llmInstruction || '';
@@ -37581,12 +38033,6 @@ promptLlmRun?.addEventListener('click', event => {
     node.llmModel = resolveChatModel(promptLlmModel?.value || node.llmModel || '', node.llmProvider);
     scheduleSave();
     runPromptLLMNode(node.id, {writeMode:'overwrite'});
-});
-promptLlmCancel?.addEventListener('click', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    const node = activePromptLlmComposerNode();
-    if(node) cancelPromptLLMNode(node.id);
 });
 document.getElementById('promptLlmTranslate')?.addEventListener('click', async event => {
     event.preventDefault();
@@ -37621,8 +38067,33 @@ document.getElementById('promptLlmTranslate')?.addEventListener('click', async e
     } catch(e) { toast((e.message || '翻译失败').slice(0, 160)); }
     finally { btn.disabled = false; btn.style.opacity = ''; }
 });
+// —— 2026-10-19（用户要求）：LLM 节点「规则智能体」 ——
+// 开关：开启后生成按规则执行（智能体=规则即系统词；润色=先改写指令）；
+// 规则：手动切换；优化：按当前规则预演一次（结果写节点本体，原文不动，不跑下游）。
+promptLlmOptToggle?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const node = activePromptLlmComposerNode();
+    if(!node){ toast('先选中一个 LLM 节点'); return; }
+    node.llmPromptOptimize = node.llmPromptOptimize !== true;
+    syncPromptLlmOptimizeUI(node);
+    render();   // 节点徽标跟着显隐
+    scheduleSave();
+    const rule = getCurrentLlmRule();
+    toast(node.llmPromptOptimize
+        ? `已开启：生成按「${rule?.name || '规则'}」执行`
+        : '已关闭：生成走节点原系统词');
+});
+promptLlmOptRule?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if(llmOptMenuEl) closeLlmOptMenu();
+    else openLlmOptMenu();
+});
+
 document.addEventListener('click', event => {
     if(!event.target.closest('.workflow-group-color-picker')) closeGroupColorPicker();
+    if(!event.target.closest('.llm-opt-menu') && !event.target.closest('#promptLlmOptimizeRule')) closeLlmOptMenu();
     if(!event.target.closest('.smart-control') && !event.target.closest('.storyboard-script-modal')) closeAllSmartPopovers();
     if(!event.target.closest('.mention-picker') && !event.target.closest('#promptInput') && !event.target.closest('[data-input-add-reference]')) closeMentionPicker();
     if(!event.target.closest('.prompt-preset-panel') && !event.target.closest('.prompt-preset-edit') && !event.target.closest('.prompt-preset-save')) closePromptPresetPanel();
@@ -37630,7 +38101,7 @@ document.addEventListener('click', event => {
     if(!event.target.closest('.preset-workflow-panel') && !event.target.closest('#presetWorkflowToggle')) closePresetWorkflowPanel();
 });
 document.addEventListener('keydown', event => {
-    if(event.key === 'Escape') { closeGroupColorPicker(); closePromptExpandEditor({save:true}); closeStoryboardScriptModal(); closeSmartLogLightbox(); closeAllSmartPopovers(); closeCreateMenu(); closeSmartCanvasLog(); closeSmartCanvasShortcuts(); closePresetWorkflowPanel(); closePromptPresetPanel(); closePromptTemplatePanel(); closeSmartAgentPromptModal(); }
+    if(event.key === 'Escape') { closeLlmOptMenu(); closeGroupColorPicker(); closePromptExpandEditor({save:true}); closeStoryboardScriptModal(); closeSmartLogLightbox(); closeAllSmartPopovers(); closeCreateMenu(); closeSmartCanvasLog(); closeSmartCanvasShortcuts(); closePresetWorkflowPanel(); closePromptPresetPanel(); closePromptTemplatePanel(); closeSmartAgentPromptModal(); }
 });
 function cropDragModeFromPointer(event){
     const explicit = event.target.closest?.('[data-crop-handle]')?.dataset?.cropHandle;
