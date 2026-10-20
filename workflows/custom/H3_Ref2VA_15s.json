@@ -1,230 +1,230 @@
 {
-  "1361": {
-    "inputs": {
-      "fl2va_model": "minimax h3/minimax_h3_fl2va_int8_convrot.safetensors",
-      "ref2va_model": "minimax h3/minimax_h3_fl2va_int8_convrot.safetensors",
-      "text_encoder": "H3/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
-      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
-      "custom_second_sampling_models": false,
-      "second_fl2va_model": "minimax h3/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
-      "second_ref2va_model": "minimax h3/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
-      "second_sampling_use_lora": false,
-      "lora_stack": [
-        "1362",
-        0
-      ]
-    },
-    "class_type": "FeiHouEasyH3Loader",
-    "_meta": {
-      "title": "FeiHou Easy H3 加载器"
-    }
+ "1361": {
+  "inputs": {
+   "fl2va_model": "minimax h3/minimax_h3_fl2va_int8_convrot.safetensors",
+   "ref2va_model": "minimax h3/minimax_h3_fl2va_int8_convrot.safetensors",
+   "text_encoder": "H3/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+   "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+   "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+   "custom_second_sampling_models": false,
+   "second_fl2va_model": "minimax h3/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+   "second_ref2va_model": "minimax h3/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+   "second_sampling_use_lora": false,
+   "lora_stack": [
+    "1362",
+    0
+   ]
   },
-  "1362": {
-    "inputs": {
-      "lora_1": {
-        "on": true,
-        "lora": "H3\\minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
-        "strength": 1
-      },
-      "+ 添加 LoRA": ""
-    },
-    "class_type": "FeiHouEasyH3LoraStack",
-    "_meta": {
-      "title": "加载LoRA（旁路，仅模型）（用于调试）"
-    }
-  },
-  "1363": {
-    "inputs": {
-      "mode": "image",
-      "prompt": "一个女孩",
-      "resolution": "640P",
-      "aspect_ratio": "16:9",
-      "width": 320,
-      "height": 32,
-      "audio_duration_auto": false,
-      "seconds": 5,
-      "advanced": false,
-      "fps": 24,
-      "keyframe_role": "first",
-      "ref_image_size": "match",
-      "reference_mention_mode": "index",
-      "prompt_optimizer_enabled": false,
-      "prompt_optimizer_provider": "aliyun/qwen3.8-flash",
-      "prompt_optimizer_scene_guide": "none",
-      "force_offload": false,
-      "reference_text_only": false,
-      "low_vram_streamed_attention": false,
-      "h3_bundle": [
-        "1361",
-        0
-      ],
-      "prompt_optimizer_applied": false,
-      "second_sampling_output_connected": false
-    },
-    "class_type": "FeiHouEasyH3",
-    "_meta": {
-      "title": "ComfyUI-FeiHou-Easy-H3"
-    }
-  },
-  "1365": {
-    "inputs": {
-      "text": [
-        "1374",
-        5
-      ]
-    },
-    "class_type": "FeiHouEasyH3PromptPreview",
-    "_meta": {
-      "title": "FeiHou Easy H3 提示词预览"
-    }
-  },
-  "1373": {
-    "inputs": {
-      "attention": "comfy kitchen attention",
-      "model": [
-        "1363",
-        0
-      ]
-    },
-    "class_type": "ModelAttentionBackend",
-    "_meta": {
-      "title": "模型注意力后端"
-    }
-  },
-  "1374": {
-    "inputs": {
-      "h3_context": [
-        "1363",
-        2
-      ]
-    },
-    "class_type": "FeiHouEasyH3Output",
-    "_meta": {
-      "title": "FeiHou Easy H3 输出"
-    }
-  },
-  "1377": {
-    "inputs": {
-      "frame_rate": [
-        "1374",
-        4
-      ],
-      "loop_count": 0,
-      "filename_prefix": "minimax H3",
-      "format": "video/h264-mp4",
-      "pix_fmt": "yuv420p",
-      "crf": 19,
-      "save_metadata": true,
-      "trim_to_audio": false,
-      "pingpong": false,
-      "save_output": true,
-      "images": [
-        "1394",
-        0
-      ],
-      "audio": [
-        "1394",
-        1
-      ]
-    },
-    "class_type": "VHS_VideoCombine",
-    "_meta": {
-      "title": "Video Combine 🎥🅥🅗🅢"
-    }
-  },
-  "1391": {
-    "inputs": {
-      "steps": 8,
-      "shift_video": 8,
-      "shift_audio": 3,
-      "sampler_name": "dual_clock_euler",
-      "scheduler": "native_flow",
-      "model": [
-        "1373",
-        0
-      ],
-      "av_latent": [
-        "1374",
-        1
-      ]
-    },
-    "class_type": "MiniMaxH3DualClockSamplerT8",
-    "_meta": {
-      "title": "MiniMax H3 Dual-Clock Sampler (T8)"
-    }
-  },
-  "1392": {
-    "inputs": {
-      "model": [
-        "1391",
-        0
-      ],
-      "conditioning": [
-        "1374",
-        0
-      ]
-    },
-    "class_type": "BasicGuider",
-    "_meta": {
-      "title": "基本引导器"
-    }
-  },
-  "1393": {
-    "inputs": {
-      "noise_seed": 325314464182849
-    },
-    "class_type": "RandomNoise",
-    "_meta": {
-      "title": "随机噪波"
-    }
-  },
-  "1394": {
-    "inputs": {
-      "av_latent": [
-        "1396",
-        0
-      ],
-      "video_vae": [
-        "1374",
-        2
-      ],
-      "audio_vae": [
-        "1374",
-        3
-      ]
-    },
-    "class_type": "MiniMaxH3AVDecodeT8",
-    "_meta": {
-      "title": "MiniMax H3 AV Decode (T8)"
-    }
-  },
-  "1396": {
-    "inputs": {
-      "noise": [
-        "1393",
-        0
-      ],
-      "guider": [
-        "1392",
-        0
-      ],
-      "sampler": [
-        "1391",
-        1
-      ],
-      "sigmas": [
-        "1391",
-        2
-      ],
-      "latent_image": [
-        "1374",
-        1
-      ]
-    },
-    "class_type": "SamplerCustomAdvanced",
-    "_meta": {
-      "title": "自定义采样器（高级）"
-    }
+  "class_type": "FeiHouEasyH3Loader",
+  "_meta": {
+   "title": "FeiHou Easy H3 加载器"
   }
+ },
+ "1362": {
+  "inputs": {
+   "lora_1": {
+    "on": true,
+    "lora": "H3\\minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+    "strength": 1
+   },
+   "+ 添加 LoRA": ""
+  },
+  "class_type": "FeiHouEasyH3LoraStack",
+  "_meta": {
+   "title": "加载LoRA（旁路，仅模型）（用于调试）"
+  }
+ },
+ "1363": {
+  "inputs": {
+   "mode": "reference",
+   "prompt": "",
+   "resolution": "640P",
+   "aspect_ratio": "16:9",
+   "width": 320,
+   "height": 32,
+   "audio_duration_auto": "off",
+   "seconds": 5,
+   "advanced": false,
+   "fps": 24,
+   "keyframe_role": "first",
+   "ref_image_size": "match",
+   "reference_mention_mode": "index",
+   "prompt_optimizer_enabled": false,
+   "prompt_optimizer_provider": "aliyun/qwen3.8-flash",
+   "prompt_optimizer_scene_guide": "none",
+   "force_offload": false,
+   "reference_text_only": false,
+   "low_vram_streamed_attention": false,
+   "h3_bundle": [
+    "1361",
+    0
+   ],
+   "prompt_optimizer_applied": false,
+   "second_sampling_output_connected": false
+  },
+  "class_type": "FeiHouEasyH3",
+  "_meta": {
+   "title": "ComfyUI-FeiHou-Easy-H3"
+  }
+ },
+ "1365": {
+  "inputs": {
+   "text": [
+    "1374",
+    5
+   ]
+  },
+  "class_type": "FeiHouEasyH3PromptPreview",
+  "_meta": {
+   "title": "FeiHou Easy H3 提示词预览"
+  }
+ },
+ "1373": {
+  "inputs": {
+   "attention": "comfy kitchen attention",
+   "model": [
+    "1363",
+    0
+   ]
+  },
+  "class_type": "ModelAttentionBackend",
+  "_meta": {
+   "title": "模型注意力后端"
+  }
+ },
+ "1374": {
+  "inputs": {
+   "h3_context": [
+    "1363",
+    2
+   ]
+  },
+  "class_type": "FeiHouEasyH3Output",
+  "_meta": {
+   "title": "FeiHou Easy H3 输出"
+  }
+ },
+ "1377": {
+  "inputs": {
+   "frame_rate": [
+    "1374",
+    4
+   ],
+   "loop_count": 0,
+   "filename_prefix": "minimax H3",
+   "format": "video/h264-mp4",
+   "pix_fmt": "yuv420p",
+   "crf": 19,
+   "save_metadata": true,
+   "trim_to_audio": false,
+   "pingpong": false,
+   "save_output": true,
+   "images": [
+    "1394",
+    0
+   ],
+   "audio": [
+    "1394",
+    1
+   ]
+  },
+  "class_type": "VHS_VideoCombine",
+  "_meta": {
+   "title": "Video Combine 🎥🅥🅗🅢"
+  }
+ },
+ "1391": {
+  "inputs": {
+   "steps": 12,
+   "shift_video": 12,
+   "shift_audio": 3,
+   "sampler_name": "dual_clock_euler",
+   "scheduler": "native_flow",
+   "model": [
+    "1373",
+    0
+   ],
+   "av_latent": [
+    "1374",
+    1
+   ]
+  },
+  "class_type": "MiniMaxH3DualClockSamplerT8",
+  "_meta": {
+   "title": "MiniMax H3 Dual-Clock Sampler (T8)"
+  }
+ },
+ "1392": {
+  "inputs": {
+   "model": [
+    "1391",
+    0
+   ],
+   "conditioning": [
+    "1374",
+    0
+   ]
+  },
+  "class_type": "BasicGuider",
+  "_meta": {
+   "title": "基本引导器"
+  }
+ },
+ "1393": {
+  "inputs": {
+   "noise_seed": 325314464182849
+  },
+  "class_type": "RandomNoise",
+  "_meta": {
+   "title": "随机噪波"
+  }
+ },
+ "1394": {
+  "inputs": {
+   "av_latent": [
+    "1396",
+    0
+   ],
+   "video_vae": [
+    "1374",
+    2
+   ],
+   "audio_vae": [
+    "1374",
+    3
+   ]
+  },
+  "class_type": "MiniMaxH3AVDecodeT8",
+  "_meta": {
+   "title": "MiniMax H3 AV Decode (T8)"
+  }
+ },
+ "1396": {
+  "inputs": {
+   "noise": [
+    "1393",
+    0
+   ],
+   "guider": [
+    "1392",
+    0
+   ],
+   "sampler": [
+    "1391",
+    1
+   ],
+   "sigmas": [
+    "1391",
+    2
+   ],
+   "latent_image": [
+    "1374",
+    1
+   ]
+  },
+  "class_type": "SamplerCustomAdvanced",
+  "_meta": {
+   "title": "自定义采样器（高级）"
+  }
+ }
 }

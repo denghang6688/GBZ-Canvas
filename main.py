@@ -348,7 +348,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "V26.10.19.1"
+APP_VERSION = "V26.10.20.1"
 # === GBZ智能画布 更新源（发布地址绑定作者账号；换账号/仓库名只改这里） ===
 GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认）
 GITHUB_REPO_NAME = "GBZ-Canvas"
@@ -750,7 +750,7 @@ APIMART_IMAGE_POLL_INTERVAL = float(os.getenv("APIMART_IMAGE_POLL_INTERVAL", "5"
 APIMART_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("APIMART_IMAGE_INITIAL_POLL_DELAY", "10"))
 VIDEO_POLL_TIMEOUT = float(os.getenv("VIDEO_POLL_TIMEOUT", "1800"))
 ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH", "20000"))
-VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
+VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "20000"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
 ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
@@ -823,6 +823,7 @@ def reload_env_globals():
         "wan2.2-t2v-plus", "wan2.2-i2v-plus", "wan2.2-i2v-flash",
         "doubao-seedance-2-0-260128",
         "doubao-seedance-2-0-fast-260128",
+        "doubao-seedance-2-5-260628",
         "doubao-seedance-1-5-pro-251215",
         "doubao-seedance-1-0-pro-250528",
         "doubao-seedance-1-0-lite-t2v-250428",
@@ -847,6 +848,7 @@ VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
     # —— 火山 豆包 Seedance ——
     "doubao-seedance-2-0-260128",
     "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-5-260628",
     "doubao-seedance-1-5-pro-251215",
     "doubao-seedance-1-0-pro-250528",
     "doubao-seedance-1-0-lite-t2v-250428",
@@ -8953,11 +8955,16 @@ def volcengine_content_role(role: str, kind: str = "image") -> Optional[str]:
     # 否则火山后端会误判为 r2v(参考图生视频)，导致 seedance/seedream 等生图模型失败。
     return None
 
-def volcengine_video_duration(duration) -> int:
+def volcengine_video_duration(duration, model: str = "") -> int:
+    # 方舟视频模型时长范围按模型区分：Seedance 2.5 官方 4-30 秒，其余 Seedance 4-15 秒。
     try:
         value = int(duration)
     except Exception:
         value = 5
+    name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    if "seedance" in name:
+        upper = 30 if "seedance-2-5" in name else 15
+        return max(4, min(upper, value))
     return max(1, min(60, value))
 
 def volcengine_video_resolution(value: str) -> str:
@@ -15688,16 +15695,22 @@ async def canvas_video(payload: CanvasVideoRequest):
                     }
                     # 火山方舟视频接口（含 Seedance 2.0 图生视频）均通过 body 的 duration 字段控制时长；
                     # 之前对 seedance-2.0 + 参考图的情况省略了 duration，导致接口回退到默认 5s。
-                    body["duration"] = volcengine_video_duration(payload.duration)
-                    if payload.aspect_ratio:
-                        body["ratio"] = payload.aspect_ratio
+                    body["duration"] = volcengine_video_duration(payload.duration, volc_model)
+                    # 方舟 ratio 白名单：官方支持 21:9/16:9/4:3/1:1/3:4/9:16（auto/adaptive=跟随意图，留空走默认）。
+                    _ratio = str(payload.aspect_ratio or "").strip()
+                    if _ratio in {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive", "auto"}:
+                        body["ratio"] = _ratio
                     resolution = volcengine_video_resolution(payload.resolution)
+                    # Seedance 2.0-fast 官方仅支持 480p/720p，误选 1080p 时自动降级为 720p，避免接口直接拒绝。
+                    if resolution == "1080p" and "fast" in volc_model.lower():
+                        resolution = "720p"
                     if resolution:
                         body["resolution"] = resolution
                     if payload.watermark:
                         body["watermark"] = True
-                    if payload.generate_audio:
-                        body["generate_audio"] = True
+                    # 2026-10-19 generate_audio 显式透传：官方默认 true（有声），
+                    # 关闭时必须传 false 才是真静音（旧逻辑只在 true 时传，false 会回落到有声默认）。
+                    body["generate_audio"] = bool(payload.generate_audio)
                     if payload.camerafixed:
                         body["camerafixed"] = True
                     image_like_urls = set()
@@ -18662,10 +18675,6 @@ def _resolve_skill_script_path_raw(base_dir, script_rel):
 async def _install_skill_from_url(url, force=False, target=""):
     """主入口：下载 → 解压 → 逐包审查 → 落盘。"""
     url = url.strip()
-    findings_all = []
-    installed = []
-    blocked = []
-    skipped = []
 
     if re.search(r"\.(md|markdown)\b(\?.*)?$", url, re.IGNORECASE) or "raw.githubusercontent.com" in url or "gist.githubusercontent.com" in url:
         try:
@@ -18678,8 +18687,7 @@ async def _install_skill_from_url(url, force=False, target=""):
             text = content_bytes.decode("utf-8", errors="replace")
         meta, body = _parse_frontmatter(text)
         result = _write_single_skill(meta, body, source=url)
-        installed.append(result)
-        return {"ok": True, "installed": installed, "blocked": blocked, "skipped": skipped, "warnings": [], "source": url}
+        return {"ok": True, "installed": [result], "blocked": [], "skipped": [], "warnings": [], "source": url}
 
     pkg = _parse_github_url(url)
     if pkg:
@@ -18698,6 +18706,18 @@ async def _install_skill_from_url(url, force=False, target=""):
     except Exception as exc:
         return {"ok": False, "error": f"下载失败：{zip_url}：{exc}"}
 
+    return _install_skill_from_zip_bytes(content_bytes, source=url, force=force, sub=sub)
+
+
+def _install_skill_from_zip_bytes(content_bytes, source, force=False, sub=""):
+    """zip 字节流 → 解压 → 逐包审查 → 落盘。链接安装与本地压缩包上传共用同一套安全审查。"""
+    findings_all = []
+    installed = []
+    blocked = []
+    skipped = []
+    sub = (sub or "").strip("/")
+    if not content_bytes:
+        return {"ok": False, "error": "压缩包内容为空"}
     if len(content_bytes) > SKILL_INSTALL_MAX_TOTAL:
         return {"ok": False, "error": f"压缩包超过 {SKILL_INSTALL_MAX_TOTAL // (1024 * 1024)} MB 上限，已拒绝"}
 
@@ -18765,7 +18785,7 @@ async def _install_skill_from_url(url, force=False, target=""):
                 })
                 continue
             try:
-                result = _install_one(pkg_dir, meta, body, source=url, findings=findings, copy_dirs=True)
+                result = _install_one(pkg_dir, meta, body, source=source, findings=findings, copy_dirs=True)
                 installed.append(result)
             except Exception as exc:
                 skipped.append({"dir": os.path.relpath(pkg_dir, extracted_root), "reason": f"安装失败：{exc}"})
@@ -18776,7 +18796,7 @@ async def _install_skill_from_url(url, force=False, target=""):
         "blocked": blocked,
         "skipped": skipped,
         "warnings": [f for f in findings_all if f["level"] == "P1"],
-        "source": url,
+        "source": source,
     }
 
 
@@ -18860,6 +18880,27 @@ async def api_install_skill(payload: SkillInstallRequest):
     if not (url.startswith("http://") or url.startswith("https://")):
         raise HTTPException(status_code=400, detail="链接必须以 http(s):// 开头")
     result = await _install_skill_from_url(url, force=payload.force, target=payload.target)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "安装失败")
+    return result
+
+
+@app.post("/api/skills/install/upload")
+async def api_install_skill_upload(
+    file: UploadFile = File(...),
+    force: bool = Form(False),
+    target: str = Form(""),
+):
+    """2026-10-19 新增：直接上传本地 .zip 技能包（不经外链），与链接安装共用解压+安全审查链路。"""
+    filename = (file.filename or "").strip()
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 .zip 压缩包（技能包目录内需包含 SKILL.md）")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="上传的压缩包为空")
+    if len(content) > SKILL_INSTALL_MAX_TOTAL:
+        raise HTTPException(status_code=400, detail=f"压缩包超过 {SKILL_INSTALL_MAX_TOTAL // (1024 * 1024)} MB 上限，已拒绝")
+    result = _install_skill_from_zip_bytes(content, source=f"upload:{os.path.basename(filename)}", force=force, sub=target)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error") or "安装失败")
     return result
@@ -20126,11 +20167,22 @@ _WORKFLOW_CATEGORY_MARKERS = (
 _WORKFLOW_CATEGORY_CACHE: Dict[str, Any] = {}
 
 def normalize_workflow_category(value) -> str:
-    """把外部传入的分类值归一成 5 个 key 之一；无法识别（含空值）返回空串表示"未分类/自动"。"""
+    """把外部传入的分类值归一成「内置 key」或「自定义分类名」；空值返回空串表示"未分类/自动"。
+
+    2026-10-19：支持自定义分类（用户要"分类明确、好找"，内置 5 类不够用时可以自己建，
+    如"电商图""测跑"）。自定义名只做长度与字符集校验，原样落盘，前后端用同一个字符串当 key；
+    内置的 5 个 key 仍然走别名表，避免旧数据（"生图"等）失效。
+    """
     text = str(value or "").strip()
     if not text:
         return ""
-    return WORKFLOW_CATEGORY_ALIASES.get(text, WORKFLOW_CATEGORY_ALIASES.get(text.lower(), ""))
+    alias = WORKFLOW_CATEGORY_ALIASES.get(text) or WORKFLOW_CATEGORY_ALIASES.get(text.lower())
+    if alias:
+        return alias
+    # 自定义分类：1-12 个字符，只允许字母数字/中文/下划线/短横线/空格/间隔点，避免路径与控制字符
+    if len(text) <= 12 and re.fullmatch(r"[\w\u4e00-\u9fff·\u3000 -]+", text):
+        return text
+    return ""
 
 def workflow_class_types(workflow) -> List[str]:
     """兼容两种工作流格式：API 格式（{id: {class_type}} 扁平）与 UI 格式（{nodes: [{type}]}）。"""

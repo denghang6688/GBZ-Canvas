@@ -39,6 +39,9 @@ const apiKindToggle = document.getElementById('apiKindToggle');
 const inputMediaSummary = document.getElementById('inputMediaSummary');
 const imageOutputModeToggle = document.getElementById('imageOutputModeToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
+const refManifestBtn = document.getElementById('refManifestBtn');
+const refManifestPop = document.getElementById('refManifestPop');
+const refManifestCount = document.getElementById('refManifestCount');
 const SMART_UPLOAD_MAX = Number.POSITIVE_INFINITY;
 const SMART_REFERENCE_IMAGE_MAX = Number.POSITIVE_INFINITY;
 const SMART_APPEND_OUTPUT_MAX = 100;
@@ -285,6 +288,7 @@ const promptTemplateLibrarySelect = document.getElementById('promptTemplateLibra
 const promptTemplateCats = document.getElementById('promptTemplateCats');
 const promptTemplateBody = document.getElementById('promptTemplateBody');
 const composerTemplateBtn = document.getElementById('composerTemplateBtn');
+const promptWordCount = document.getElementById('promptWordCount');
 if(window.parent !== window) {
     const markStudioEmbedded = () => document.body?.classList.add('smart-studio-embedded');
     if(document.body) markStudioEmbedded();
@@ -354,8 +358,8 @@ const COMFY_WORKFLOW_CATEGORY_DEFS = [
 ];
 const COMFY_WORKFLOW_CATEGORY_KEY = 'smart_comfy_workflow_category';
 let comfyWorkflowCategory = (() => {
-    try { return localStorage.getItem(COMFY_WORKFLOW_CATEGORY_KEY) || 'all'; }
-    catch(e){ return 'all'; }
+    try { return localStorage.getItem(COMFY_WORKFLOW_CATEGORY_KEY) || ''; }
+    catch(e){ return ''; }
 })();
 let comfyInstanceCount = 1;
 let smartAgentOpen = true;
@@ -711,16 +715,18 @@ let settings = {
     videoProvider:'',
     videoModel:'',
     videoDuration:5,
+    videoCount:1,
     videoAspect:'16:9',
     videoResolution:'',
     videoEnhancePrompt:false,
     videoEnableUpsample:false,
     videoWatermark:false,
     videoCameraFixed:false,
-    videoGenerateAudio:false,
+    videoGenerateAudio:true,
     videoMultimodal:true,
     _videoMultimodalUserSet:false,
     videoUseFrameRoles:false,
+    videoFrameRole:'first',
     videoTrustedAsset:false,
     videoTrustedSource:'library',
     videoTempShLinks:[],
@@ -1719,12 +1725,24 @@ function settingsForStorage(source=settings){
     clean.videoTempShLinks = (clean.videoTempShLinks || []).filter(item => item?.manual === true);
     return clean;
 }
+function smartStrictBool(value, fallback=false){
+    // 2026-10-19 修复首尾帧切换失效：data-smart-value 传进来的是字符串 "true"/"false"，
+    // 旧的 Boolean("false") === true 会把任何点击都当成「要首尾帧」。这里做严格解析，
+    // 同时兼容历史存档里已持久化的字符串值。
+    if(typeof value === 'boolean') return value;
+    if(value === undefined || value === null || value === '') return fallback;
+    const t = String(value).trim().toLowerCase();
+    if(['true','1','yes','on'].includes(t)) return true;
+    if(['false','0','no','off'].includes(t)) return false;
+    return fallback;
+}
 function normalizeSmartVideoModeSettings(target, preferMultimodal=false){
     if(!target || typeof target !== 'object') return target;
-    target.videoUseFrameRoles = Boolean(target.videoUseFrameRoles);
+    target.videoUseFrameRoles = smartStrictBool(target.videoUseFrameRoles, false);
     if(preferMultimodal && !target.videoUseFrameRoles && target._videoMultimodalUserSet !== true) target.videoMultimodal = true;
-    else target.videoMultimodal = Boolean(target.videoMultimodal);
+    else target.videoMultimodal = smartStrictBool(target.videoMultimodal, false);
     if(target.videoUseFrameRoles) target.videoMultimodal = false;
+    if(target.videoFrameRole !== 'last') target.videoFrameRole = 'first';
     return target;
 }
 function isApiLikeEngine(engine){
@@ -3286,6 +3304,7 @@ function clearMinimaxH3Settings(target){
     delete target.h3Mode;
     delete target.videoMultimodal;
     delete target.videoUseFrameRoles;
+    delete target.videoFrameRole;
     if(target.videoModel === 'MiniMax H3') delete target.videoModel;
     if(target.comfyWorkflow === H3_COMFY_WORKFLOW){
         target.comfyWorkflow = '';
@@ -5961,6 +5980,8 @@ function syncPromptLlmComposer(node=activePromptLlmComposerNode()){
     promptLlmComposer.dataset.nodeId = node.id;
     if(promptLlmInstruction && document.activeElement !== promptLlmInstruction){
         promptLlmInstruction.value = node.llmInstruction || '';
+        promptLlmInstruction.scrollTop = 0;
+        growPromptLlmComposerShell(promptLlmInstruction);
     }
     if(promptLlmProvider){
         promptLlmProvider.innerHTML = chatProviderOptions(node.llmProvider);
@@ -8658,9 +8679,15 @@ function showOptimizeResultPopup(anchorEl){
     };
 }
 function renderVideoModeControl(){
-    const isFrame = !!settings.videoUseFrameRoles;
+    const isFrame = smartStrictBool(settings.videoUseFrameRoles, false);
     const current = isFrame ? '首尾帧' : '全能参考';
     return '<div class="smart-control video-mode-control"><button class="smart-pill" type="button"><i data-lucide="images"></i><span>' + current + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button><div class="smart-popover compact-popover"><div class="smart-popover-title">参考模式</div><div class="model-list"><button type="button" class="direct-option' + (isFrame ? '' : ' active') + '" data-smart-param="videoUseFrameRoles" data-smart-value="false"><span>全能参考</span></button><button type="button" class="direct-option' + (isFrame ? ' active' : '') + '" data-smart-param="videoUseFrameRoles" data-smart-value="true"><span>首尾帧</span></button></div></div></div>';
+}
+// 2026-10-19 输出声音 开/关：Seedance generate_audio 官方默认 true（自动人声/音效/BGM）。
+// 「开」提交 true，「关」显式提交 false 才是真静音（后端需显式透传，不能只在不传时靠默认）。
+function renderVideoAudioControl(){
+    const on = smartStrictBool(settings.videoGenerateAudio, true);
+    return '<div class="smart-control video-audio-control"><button class="smart-pill" type="button" title="是否生成同步声音（人声/音效/背景音乐）。关=静音视频"><i data-lucide="' + (on ? 'volume-2' : 'volume-x') + '"></i><span>声音 ' + (on ? '开' : '关') + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button><div class="smart-popover compact-popover"><div class="smart-popover-title">输出声音</div><div class="model-list"><button type="button" class="direct-option' + (on ? ' active' : '') + '" data-smart-param="videoGenerateAudio" data-smart-value="true"><span>🔊 开（默认）</span></button><button type="button" class="direct-option' + (on ? '' : ' active') + '" data-smart-param="videoGenerateAudio" data-smart-value="false"><span>🔇 关（静音）</span></button></div></div></div>';
 }
 let _cachedOptimizedPrompt = '';
 let _cachedOptimizedPromptOriginal = '';
@@ -8763,15 +8790,29 @@ function syncPackedDurPillSummary(input){
     if(!/\d+s\s*$/.test(text)) return;
     span.textContent = text.replace(/\d+s\s*$/, input.value + 's');
 }
+// 2026-10-19 视频时长范围按「模型」判定（此前按平台一刀切会误伤 Seedance 2.5）：
+//   Seedance 2.5 → 官方 4-30s；其他 Seedance（2.0 / 2.0-fast / 1.5-pro）→ 4-15s；非 Seedance 平台 → 1-30s。
+function videoDurationRangeForProvider(providerId, modelName){
+    const model = String(modelName ?? settings.videoModel ?? '').toLowerCase().replace(/_/g, '-').replace(/\./g, '-');
+    if(model.includes('seedance')){
+        if(model.includes('seedance-2-5') || model.includes('seedance2-5')) return {min:4, max:30};
+        return {min:4, max:15};
+    }
+    return {min:1, max:30};
+}
 function renderVideoPackedControl(){
     const resOptions = [['', 'Auto'], ['480p', '480P'], ['720p', '720P'], ['1080p', '1080P']];
     const aspOptions = [['', 'Auto'], ['16:9','16:9'], ['4:3','4:3'], ['1:1','1:1'], ['3:4','3:4'], ['9:16','9:16'], ['21:9','21:9']];
     const res = settings.videoResolution || '';
     const asp = settings.videoAspect || '16:9';
-    const dur = Math.max(1, Math.min(60, Number(settings.videoDuration) || 5));
+    // 2026-10-19 时长按模型判定：Seedance 2.5 = 4-30s，其他 Seedance = 4-15s，非 Seedance 平台 1-30s。
+    const durRange = videoDurationRangeForProvider(settings.videoProvider, settings.videoModel);
+    const dur = Math.max(durRange.min, Math.min(durRange.max, Number(settings.videoDuration) || 5));
+    // 生成数量：方舟没有批量参数，前端并发提交 N 次（官方并发上限 3，第 4 个排队补发）。
+    const count = [1, 2, 4].includes(Number(settings.videoCount)) ? Number(settings.videoCount) : 1;
     const aspLabel = (aspOptions.find(o => o[0] === asp) || [asp, asp]).filter(Boolean)[1] || asp;
     const resLabel = (resOptions.find(o => o[0] === res) || [res, res || 'Auto'])[1];
-    const summary = aspLabel + ' \u00b7 ' + resLabel + ' \u00b7 ' + dur + 's';
+    const summary = aspLabel + ' \u00b7 ' + resLabel + ' \u00b7 ' + dur + 's' + (count > 1 ? ' \u00b7 \u00d7' + count : '');
     let h = '<div class="smart-control video-packed-control">';
     h += '<button class="smart-pill" type="button"><i data-lucide="smartphone"></i><span>' + summary + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button>';
     h += '<div class="smart-popover packed-popover">';
@@ -8793,7 +8834,14 @@ function renderVideoPackedControl(){
     h += '</div>';
     // 时长
     h += '<div class="packed-section-label">\u89c6\u9891\u65f6\u957f</div>';
-    h += '<div class="packed-dur-row"><input type="range" min="1" max="30" step="1" class="packed-dur-slider" data-param="videoDuration" value="' + dur + '"><span class="packed-dur-val">' + dur + 's</span></div>';
+    h += '<div class="packed-dur-row"><input type="range" min="' + durRange.min + '" max="' + durRange.max + '" step="1" class="packed-dur-slider" data-param="videoDuration" value="' + dur + '"><span class="packed-dur-val">' + dur + 's</span></div>';
+    // 生成数量（多结果并发提交，单价×数量即总费用）
+    h += '<div class="packed-section-label">\u751f\u6210\u6570\u91cf</div>';
+    h += '<div class="packed-count-row">';
+    [1, 2, 4].forEach(function(n){
+        h += '<button type="button" class="packed-count-btn' + (n === count ? ' active' : '') + '" data-smart-param="videoCount" data-smart-value="' + n + '">' + n + ' \u4e2a</button>';
+    });
+    h += '</div>';
     h += '</div></div>';
     return h;
 }
@@ -9064,6 +9112,7 @@ function renderApiVideoParams(){
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
         ${renderVideoModeControl()}
+        ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
@@ -9152,6 +9201,7 @@ function renderVolcengineVideoParams(){
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
         ${renderVideoModeControl()}
+        ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
@@ -9248,8 +9298,57 @@ function comfyWorkflowDisplayTitle(workflow){
     const raw = workflow?.title || workflow?.name || '';
     return String(raw).replace(/^custom\//, '').replace(/^自定义\//, '').replace(/\.json$/i, '');
 }
+// 2026-10-20：H3 官方规范的「可执行骨架」。
+// 只保留官方规范里不可压缩的部分：字段名、固定首行句式、六段式顺序、引用标签、时间码、
+// 原样保留规则。大段示例和解释全部去掉——恰恰是这些硬约束一压缩就失效。
+var H3_OFFICIAL_SKELETON = [
+    '【输出结构｜字段名与顺序必须完全一致】',
+    '一、文生视频 / 首帧 / 首尾帧 / 尾帧（T2VA / I2VA / FL2VA / L2VA）',
+    '  · 只有带参考图时，第一行写固定对齐句（文生视频不写这一行，直接进字段）：',
+    '    首帧：For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.',
+    '    首尾帧：How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from [Shot N]) aligns with the S.SS-second mark of the target video.',
+    '    尾帧：How the reference pictures align with the target video — <Picture 1> (from [Shot N]) aligns with the S.SS-second mark of the target video.',
+    '  · 空一行后依次写三个字段，一个都不能少、不能改名、不能换顺序：',
+    '    integrated_multimodal_description: [Shot 1] ...（画面、动作、镜头、说话人、对白、同期声，按时间线推进）',
+    '    overall_soundscape: ...',
+    '    non_diegetic_music: ...',
+    '  · S.SS 必须是两位小数的秒，且等于本次请求的总时长；[Shot N] 的 N 是实际最后一个镜头序号。',
+    '',
+    '二、全能参考（Ref2VA，带参考图/视频/音频）改用六段式，顺序固定：',
+    '  subject_definitions: 每个被单独引用的内容一行，写明标签含义、参考角色、要保留的主要特征',
+    '  summary: [任务类型] 一句话概括；任务类型从 keyframe completion / reference generation / video editing / video continuation / audio reuse / audio reference 中选，多个用 " + " 连接',
+    '  retention_analysis: 每个标签一行，「<标签> (出现在 [Shot N]): 标记 - 说明」；视觉用 fully_preserved / partially_preserved / attribute_transfer / weak_reference，音频用 fully_copy / partially_copy / reference / weak_reference',
+    '  detailed_description: 先用一两句英文交代整体风格，再写 [Shot 1] ...；生成类任务 350-500 英文词',
+    '  overall_soundscape: ...',
+    '  non_diegetic_music: ...',
+    '  · 标签只有四种：<Subject N> 可复用的可见内容、<Picture N> 具体帧锚点、<Video N> 整段视频来源或结构、<Audio N> 音频信号。同一标签在所有段落含义一致，不许出现未定义的标签。',
+    '',
+    '三、镜头与时间码',
+    '  · 第一个镜头不写时间戳；后续镜头写成 [Shot 2] At 00:03.500, the camera cuts to ...，切点严格递增且落在总时长内',
+    '  · 运镜写成句中自然英文，不堆在句尾：The camera pushes in with small amplitude at slow speed toward the letter.',
+    '  · 台词跨切点：两部分都加 <scenetrans> 并说明音频连续；被片尾截断用 <cutoff>',
+    '  · 只是景别或角度微调时用运镜，不要写切镜',
+    '',
+    '四、声音分层（写错这一层等于浪费 H3 的能力）',
+    '  · overall_soundscape：1-4 句英文，只写环境音、动作音、非语言人声（风/雨/脚步/布料/碰撞/呼吸/笑声）',
+    '  · non_diegetic_music：1-3 句英文，只写角色听不到的配乐，写乐器/速度/节奏/强弱变化，禁止情绪形容词',
+    '  · 对白、唱歌、角色能听到的音乐（收音机/电视/手机）属于同期声，写在 integrated_multimodal_description 里，不要在这两段重复',
+    '  · 没有配乐写 N/A；只有用户明确要求全程静音时 overall_soundscape 才写 N/A',
+    '',
+    '五、原样保留（不得翻译、不得改写）',
+    '  · 台词只写进 <d>[语言] 原文</d>，说话人用稳定 ID：(S1)、(S2)，两人同时说写 (S1,S2)；说话人首次出现要交代音色（年龄/性别/是否画外/音高/语速）',
+    '  · 画外音固定写 says in an off-screen voiceover，并在 <d> 之后补一句嘴唇保持闭合',
+    '  · 屏幕可见文字（招牌/字幕/标语/霓虹）用英文双引号包住，原文什么语言就留什么语言',
+    '',
+    '六、长度与纪律',
+    '  · 描述覆盖的时长必须等于请求时长，不要写超时长的动作',
+    '  · 生成类 350-500 英文词；对白密集时优先把台词时间线写全，不必凑字数',
+    '  · 只输出提示词本身：不要解释、不要标题、不要 Markdown、不要代码块包裹',
+    '  · 不新增原文没有的人物、品牌、道具、场景；参考素材与文本冲突时以素材可见内容为准'
+].join('\n');
+
 var BUILTIN_OPTIMIZE_RULES = [
-    {name:'H3官方', content:'（默认规则，使用完整的H3官方提示词规范）运镜用英文专业术语（push in/tracking shot/arc shot等），风格词前置（cinematic/live-action/2D-animated等），视觉四要素完整（主体/环境/道具/色彩），动作可拍摄按时间顺序，声音分diegetic和non-diegetic两层，只输出提示词本身。'},
+    {name:'H3官方', content:H3_OFFICIAL_SKELETON},
     {name:'极简', content:'保持提示词简短精炼，只保留核心画面描述和运镜，去掉多余形容词和解释，总长度不超过80字。不要写环境细节和配乐。'},
     {name:'产品TVC', content:'强调产品外观特写、材质质感、使用场景。镜头以产品为中心，多用 push in 和特写。突出产品卖点和视觉冲击力。不要写人物情绪和心理活动。'},
     {name:'电影感', content:'强化 cinematic 风格：宽银幕构图、自然光、浅景深、慢节奏运镜。加入天气、时间、光线氛围描写。配乐用 ambient 或管弦乐。'},
@@ -9269,15 +9368,53 @@ function getDeletedBuiltinRules(){
     try { return JSON.parse(localStorage.getItem('smart_optimize_deleted_builtin') || '[]'); }
     catch(e){ return []; }
 }
+// 2026-10-20：判断这条同名覆盖是不是「过期的 H3官方」。
+// 旧内置版是 ~110 字中文摘要；另有用户误把官方 skill 的 frontmatter 描述整段粘进来当规则。
+// 这两种都不是可执行规范，会以"优先级最高"压住新骨架，必须丢弃覆盖、回到内置版。
+function isStaleH3OfficialOverride(content){
+    var text = String(content || '').trim();
+    if(!text) return true;
+    // 已经换成新骨架的，保留
+    if(text.indexOf('【输出结构') === 0) return false;
+    // 旧内置版：~110 字中文摘要
+    if(text.indexOf('运镜用英文专业术语') === 0) return true;
+    // 误把官方 skill 的元数据整段粘进来当规则
+    if(text.indexOf('Write MiniMax H3 video generation prompts') >= 0) return true;
+    if(text.indexOf('h3-general-prompt-guide') >= 0) return true;
+    if(text.indexOf('h3_general_prompt_guide') >= 0) return true;
+    return false;
+}
+// 把本地那条过期覆盖就地换成新骨架：否则用户点「查看/编辑规则」会看到旧内容，以为没升级。
+function migrateStaleH3Rule(){
+    try{
+        var raw = localStorage.getItem('smart_optimize_rules');
+        if(!raw) return;
+        var arr = JSON.parse(raw);
+        if(!Array.isArray(arr)) return;
+        var changed = false;
+        arr = arr.map(function(u){
+            if(u && u.name === 'H3官方' && isStaleH3OfficialOverride(u.content)){
+                changed = true;
+                return {name:'H3官方', content:H3_OFFICIAL_SKELETON};
+            }
+            return u;
+        });
+        if(changed) saveOptimizeRules(arr);
+    }catch(e){}
+}
 function getOptimizeRules(){
     // 2026-09-26 修：编辑内置规则后保存被 saveOptimizeRules 过滤掉导致"改了不生效"。
     // 现在同名用户规则作为内置规则的"覆盖版"参与合并：用户改过 content 就用用户的。
+    migrateStaleH3Rule();
     var deleted = getDeletedBuiltinRules();
     var userRules = getUserOptimizeRules();
     var merged = BUILTIN_OPTIMIZE_RULES
         .filter(function(r){ return deleted.indexOf(r.name) < 0; })
         .map(function(r){
             var override = userRules.find(function(u){ return u.name === r.name; });
+            if(override && r.name === 'H3官方' && isStaleH3OfficialOverride(override.content)){
+                override = null;
+            }
             return override ? {name:r.name, content:override.content} : r;
         });
     userRules.forEach(function(u){
@@ -9441,9 +9578,22 @@ function renderUpscalePill(paramKey, current){
         </div>
     </div>`;
 }
+// 2026-10-19（用户要求）：去掉「全部」，分类直接一排铺开、满了换行。
+// 分类 = 内置 5 类 + 自定义类（名字直接当 key，跟着工作流 .config.json 走，多端一致）。
+// 颜色只用于区分，规则：内置固定色；自定义按名字哈希从调色板取，保证同一分类颜色稳定。
+const COMFY_WF_CUSTOM_CATS_KEY = 'smart_comfy_wf_custom_cats';
+const COMFY_WF_PINS_KEY = 'smart_comfy_wf_pins';
+const COMFY_WF_CAT_COLORS = {
+    image:'#4ade80', video:'#38bdf8', audio:'#f472b6', upscale:'#fbbf24', other:'#8e8e9a'
+};
+const COMFY_WF_CUSTOM_PALETTE = ['#a78bfa','#f97316','#22d3ee','#e879f9','#84cc16','#fb7185','#60a5fa','#facc15'];
 function comfyWorkflowCategoryKey(workflow){
-    const raw = String(workflow?.category || '').trim().toLowerCase();
-    return COMFY_WORKFLOW_CATEGORY_DEFS.some(def => def.key === raw) ? raw : 'other';
+    const raw = String(workflow?.category || '').trim();
+    if(!raw) return 'other';
+    return raw;
+}
+function comfyWorkflowIsBuiltinCategory(key){
+    return COMFY_WORKFLOW_CATEGORY_DEFS.some(def => def.key === key);
 }
 // i18n 没加载 / 缺键时退回中文兜底文案（tr() 缺键会原样返回 key）
 function smartI18nOr(key, fallback){
@@ -9452,16 +9602,64 @@ function smartI18nOr(key, fallback){
 }
 function comfyWorkflowCategoryLabel(key){
     const def = COMFY_WORKFLOW_CATEGORY_DEFS.find(item => item.key === key);
-    if(!def) return tr('smart.wfcatOther');
-    return smartI18nOr(def.i18n, def.fallback);
+    if(def) return smartI18nOr(def.i18n, def.fallback);
+    return String(key || smartI18nOr('smart.wfcatOther', '其他'));
+}
+function comfyWorkflowCategoryColor(key){
+    if(COMFY_WF_CAT_COLORS[key]) return COMFY_WF_CAT_COLORS[key];
+    let hash = 0;
+    const text = String(key || '');
+    for(let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+    return COMFY_WF_CUSTOM_PALETTE[Math.abs(hash) % COMFY_WF_CUSTOM_PALETTE.length];
+}
+function comfyCustomCategoryList(){
+    let stored = [];
+    try {
+        const raw = JSON.parse(localStorage.getItem(COMFY_WF_CUSTOM_CATS_KEY) || '[]');
+        if(Array.isArray(raw)) stored = raw.map(v => String(v || '').trim()).filter(Boolean);
+    } catch(e){ stored = []; }
+    const fromWorkflows = (Array.isArray(comfyWorkflows) ? comfyWorkflows : [])
+        .map(w => comfyWorkflowCategoryKey(w))
+        .filter(k => k && !comfyWorkflowIsBuiltinCategory(k));
+    return [...new Set([...stored, ...fromWorkflows])];
+}
+function saveComfyCustomCategoryList(list){
+    const clean = [...new Set((list || []).map(v => String(v || '').trim()).filter(Boolean))]
+        .filter(k => !comfyWorkflowIsBuiltinCategory(k));
+    try { localStorage.setItem(COMFY_WF_CUSTOM_CATS_KEY, JSON.stringify(clean)); } catch(e){}
+    return clean;
 }
 function comfyWorkflowCategoryCount(key){
     const list = Array.isArray(comfyWorkflows) ? comfyWorkflows : [];
-    if(key === 'all') return list.length;
     return list.filter(workflow => comfyWorkflowCategoryKey(workflow) === key).length;
 }
+// 渲染用的分类定义：内置 5 类（固定顺序）+ 自定义类（按名字）
+function comfyWorkflowCategoryDefs(){
+    const builtins = COMFY_WORKFLOW_CATEGORY_DEFS.map(def => ({
+        key: def.key, label: comfyWorkflowCategoryLabel(def.key),
+        color: comfyWorkflowCategoryColor(def.key), builtin: true,
+        count: comfyWorkflowCategoryCount(def.key)
+    }));
+    const customs = comfyCustomCategoryList().map(key => ({
+        key, label: key, color: comfyWorkflowCategoryColor(key), builtin: false,
+        count: comfyWorkflowCategoryCount(key)
+    }));
+    return [...builtins, ...customs];
+}
+function comfyWorkflowPinned(){
+    try {
+        const arr = JSON.parse(localStorage.getItem(COMFY_WF_PINS_KEY) || '[]');
+        return new Set(Array.isArray(arr) ? arr.filter(Boolean) : []);
+    } catch(e){ return new Set(); }
+}
+function toggleComfyWorkflowPin(name){
+    const pins = comfyWorkflowPinned();
+    if(pins.has(name)) pins.delete(name); else pins.add(name);
+    try { localStorage.setItem(COMFY_WF_PINS_KEY, JSON.stringify([...pins])); } catch(e){}
+    return pins.has(name);
+}
 function persistComfyWorkflowCategory(key){
-    try { localStorage.setItem(COMFY_WORKFLOW_CATEGORY_KEY, String(key || 'all')); } catch(e){}
+    try { localStorage.setItem(COMFY_WORKFLOW_CATEGORY_KEY, String(key || '')); } catch(e){}
 }
 function closeComfyWorkflowCategoryMenu(){
     const menu = document.getElementById('comfyWfCatMenu');
@@ -9479,9 +9677,13 @@ function openComfyWorkflowCategoryMenu(workflowName, clientX, clientY){
     menu.id = 'comfyWfCatMenu';
     menu.className = 'comfy-wf-cat-menu';
     menu.dataset.workflowName = workflowName;
+    const defs = comfyWorkflowCategoryDefs();
     menu.innerHTML = `
         <div class="comfy-wf-cat-menu-title">${escapeHtml(tr('smart.wfcatMenu'))}</div>
-        ${COMFY_WORKFLOW_CATEGORY_DEFS.map(def => `<button type="button" class="${def.key === activeKey ? 'active' : ''}" data-comfy-wf-set="${escapeAttr(def.key)}"><span>${escapeHtml(comfyWorkflowCategoryLabel(def.key))}</span>${def.key === activeKey ? '<i data-lucide="check"></i>' : ''}</button>`).join('')}
+        ${defs.map(def => `<button type="button" class="${def.key === activeKey ? 'active' : ''}" data-comfy-wf-set="${escapeAttr(def.key)}"><span class="wf-dot" style="background:${def.color}"></span><span>${escapeHtml(def.label)}</span>${def.key === activeKey ? '<i data-lucide="check"></i>' : ''}</button>`).join('')}
+        <div class="comfy-wf-cat-menu-sep"></div>
+        <button type="button" class="new-cat" data-comfy-wf-new><i data-lucide="plus"></i><span>新建分类…</span></button>
+        <button type="button" class="manage" data-comfy-wf-manage><i data-lucide="settings-2"></i><span>管理分类…</span></button>
         <div class="comfy-wf-cat-menu-sep"></div>
         <button type="button" class="auto${isManual ? '' : ' current'}" data-comfy-wf-set="auto" ${isManual ? '' : 'disabled'} title="${escapeAttr(tr('smart.wfcatAuto'))}"><i data-lucide="wand-2"></i><span>${escapeHtml(tr('smart.wfcatAuto'))}</span>${isManual ? '' : '<i data-lucide="check"></i>'}</button>`;
     document.body.appendChild(menu);
@@ -9499,6 +9701,26 @@ function openComfyWorkflowCategoryMenu(workflowName, clientX, clientY){
             closeComfyWorkflowCategoryMenu();
             setComfyWorkflowCategory(workflowName, value);
         };
+    });
+    menu.querySelector('[data-comfy-wf-new]')?.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeComfyWorkflowCategoryMenu();
+        const name = await openAssetNameDialog({title:'新建工作流分类', value:'', placeholder:'例如：电商图 / 产品图'});
+        const clean = String(name || '').trim();
+        if(!clean) return;
+        if(clean.length > 12 || /[\\/:*?"<>|]/.test(clean)){ toast('分类名最多 12 个字，且不能包含 \\ / : * ? " < > |'); return; }
+        if(['image','video','audio','upscale','other','生图','生视频','生音频','放大','其他'].includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
+        saveComfyCustomCategoryList([...comfyCustomCategoryList(), clean]);
+        comfyWorkflowCategory = clean;
+        persistComfyWorkflowCategory(clean);
+        await setComfyWorkflowCategory(workflowName, clean);
+    });
+    menu.querySelector('[data-comfy-wf-manage]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeComfyWorkflowCategoryMenu();
+        openComfyWorkflowCategoryManager();
     });
     // 点空白 / Esc 关闭；延后一拍注册，避免触发本次 contextmenu 的同一轮事件立刻把菜单关掉。
     setTimeout(() => {
@@ -9540,38 +9762,262 @@ async function setComfyWorkflowCategory(workflowName, value){
         toast(`${tr('smart.wfcatFail')}：${e.message || e}`);
     }
 }
+// 批量改分类（改名/删除分类时用）：逐个 PUT，全部成功后再动本地缓存
+async function setComfyWorkflowCategoryBulk(names, value){
+    const list = Array.isArray(names) ? names : [];
+    let failed = 0;
+    for(const name of list){
+        try {
+            const res = await fetch(`/api/workflows/${encodeURIComponent(name)}/category`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({category:value, source:'manual'})
+            });
+            if(!res.ok) throw new Error('fail');
+            const data = await res.json();
+            const workflow = (comfyWorkflows || []).find(item => item.name === name);
+            if(workflow){ workflow.category = data.category; workflow.category_source = data.category_source; }
+        } catch(e){ failed++; }
+    }
+    renderDynamicParams();
+    return { total:list.length, failed };
+}
+// 管理分类：内置 5 类固定（名称与颜色随主题），自定义类可新建 / 改名 / 删除
+function openComfyWorkflowCategoryManager(){
+    document.querySelector('.wf-cat-mask')?.remove();
+    const defs = comfyWorkflowCategoryDefs();
+    const mask = document.createElement('div');
+    mask.className = 'wf-cat-mask';
+    mask.innerHTML = `<div class="wf-cat-modal" role="dialog" aria-label="管理工作流分类">
+        <div class="wf-cat-modal-head">
+            <div><h3>管理工作流分类</h3><p>内置分类不可删除；自定义分类可改名、删除（删除后工作流归入「其他」）。</p></div>
+            <button type="button" class="wf-cat-x" data-close aria-label="关闭">✕</button>
+        </div>
+        <div class="wf-cat-rows">
+            ${defs.map(def => `<div class="wf-cat-row ${def.builtin ? 'is-builtin' : ''}" data-key="${escapeAttr(def.key)}">
+                <span class="wf-dot" style="background:${def.color}"></span>
+                <span class="wf-cat-name">${escapeHtml(def.label)}${def.builtin ? '<em>内置</em>' : ''}</span>
+                <span class="wf-cat-count">${def.count} 个</span>
+                <span class="wf-cat-ops">
+                    ${def.builtin ? '' : '<button type="button" data-rename title="改名">✎</button><button type="button" class="danger" data-del title="删除">🗑</button>'}
+                </span>
+            </div>`).join('')}
+        </div>
+        <button type="button" class="wf-cat-add" data-add>＋ 新建分类</button>
+        <div class="wf-cat-tip">归类入口：卡片悬停点 <b>⋯</b>，或直接右键卡片。</div>
+    </div>`;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.addEventListener('mousedown', event => { if(event.target === mask) close(); });
+    mask.querySelectorAll('[data-close]').forEach(btn => btn.onclick = close);
+    const reload = () => { close(); openComfyWorkflowCategoryManager(); };
+    mask.querySelector('[data-add]').onclick = async () => {
+        const name = await openAssetNameDialog({title:'新建工作流分类', value:'', placeholder:'例如：电商图 / 产品图'});
+        const clean = String(name || '').trim();
+        if(!clean) return;
+        if(clean.length > 12 || /[\\/:*?"<>|]/.test(clean)){ toast('分类名最多 12 个字，且不能包含 \\ / : * ? " < > |'); return; }
+        if(['image','video','audio','upscale','other','生图','生视频','生音频','放大','其他'].includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
+        saveComfyCustomCategoryList([...comfyCustomCategoryList(), clean]);
+        comfyWorkflowCategory = clean;
+        persistComfyWorkflowCategory(clean);
+        renderDynamicParams();
+        reload();
+        toast(`已新建分类「${clean}」，把工作流拖进去即可`);
+    };
+    mask.querySelectorAll('.wf-cat-row').forEach(row => {
+        const key = row.dataset.key;
+        const isBuiltin = row.classList.contains('is-builtin');
+        row.querySelector('[data-rename]')?.addEventListener('click', async () => {
+            const next = await openAssetNameDialog({title:`分类改名：${key}`, value:key, placeholder:'新的分类名'});
+            const clean = String(next || '').trim();
+            if(!clean || clean === key) return;
+            if(clean.length > 12 || /[\\/:*?"<>|]/.test(clean)){ toast('分类名最多 12 个字，且不能包含 \\ / : * ? " < > |'); return; }
+            const names = (comfyWorkflows || []).filter(w => comfyWorkflowCategoryKey(w) === key).map(w => w.name);
+            if(names.length){
+                const out = await setComfyWorkflowCategoryBulk(names, clean);
+                if(out.failed){ toast(`${out.failed} 个工作流改名失败，请重试`); return; }
+            }
+            saveComfyCustomCategoryList(comfyCustomCategoryList().map(k => k === key ? clean : k));
+            if(comfyWorkflowCategory === key){ comfyWorkflowCategory = clean; persistComfyWorkflowCategory(clean); }
+            reload();
+            toast(`分类已改名为「${clean}」`);
+        });
+        row.querySelector('[data-del]')?.addEventListener('click', async () => {
+            if(isBuiltin) return;
+            const names = (comfyWorkflows || []).filter(w => comfyWorkflowCategoryKey(w) === key).map(w => w.name);
+            if(!window.confirm(`删除分类「${key}」？${names.length ? `\n其中 ${names.length} 个工作流会归入「其他」。` : ''}`)) return;
+            if(names.length) await setComfyWorkflowCategoryBulk(names, 'other');
+            saveComfyCustomCategoryList(comfyCustomCategoryList().filter(k => k !== key));
+            if(comfyWorkflowCategory === key){ comfyWorkflowCategory = 'other'; persistComfyWorkflowCategory('other'); }
+            renderDynamicParams();
+            reload();
+            toast('分类已删除');
+        });
+    });
+}
+let comfyWorkflowSearch = '';
+// 当前分类：存的分类没了（被删/改名）就落到第一个有内容的分类，避免打开就是空列表
+function comfyWorkflowActiveCategory(defs){
+    if(comfyWorkflowCategory && defs.some(def => def.key === comfyWorkflowCategory)) return comfyWorkflowCategory;
+    const first = defs.find(def => def.count > 0) || defs[0];
+    return first ? first.key : 'image';
+}
+function comfyWorkflowCardHtml(workflow, pinned){
+    const key = comfyWorkflowCategoryKey(workflow);
+    const label = comfyWorkflowCategoryLabel(key);
+    const color = comfyWorkflowCategoryColor(key);
+    const isPinned = pinned.has(workflow.name);
+    const name = comfyWorkflowDisplayTitle(workflow);
+    return `<button type="button" class="comfy-workflow-card ${workflow.name === settings.comfyWorkflow ? 'active' : ''} ${isPinned ? 'is-pinned' : ''}" style="--wf-cat:${color}" data-smart-param="comfyWorkflow" data-smart-value="${escapeAttr(workflow.name)}" data-comfy-wf-card="${escapeAttr(workflow.name)}" title="${escapeAttr(`${name} · ${label}（右键或 ⋯ 归类）`)}">
+        <span class="wf-name">${escapeHtml(name)}</span>
+        <em class="wf-tag">${escapeHtml(label)}</em>
+        <span class="wf-more" data-comfy-wf-more title="${escapeAttr(tr('smart.wfcatMenu'))}">⋯</span>
+        <span class="wf-star" data-comfy-wf-pin title="收藏为常用">${isPinned ? '★' : '☆'}</span>
+    </button>`;
+}
+// 列表区单独渲染：搜索时只换列表，不重绘输入框（否则每敲一个字就丢焦点）
+function comfyWorkflowListHtml(defs, activeKey){
+    const q = comfyWorkflowSearch.trim().toLowerCase();
+    const pinned = comfyWorkflowPinned();
+    const match = workflow => {
+        if(!q) return true;
+        const name = comfyWorkflowDisplayTitle(workflow).toLowerCase();
+        return name.includes(q) || String(workflow.name || '').toLowerCase().includes(q)
+            || comfyWorkflowCategoryLabel(comfyWorkflowCategoryKey(workflow)).toLowerCase().includes(q);
+    };
+    const all = Array.isArray(comfyWorkflows) ? comfyWorkflows : [];
+    // 搜索：跨全部自定义/内置分类找，结果按分类分节
+    if(q){
+        const sections = defs.map(def => ({
+            def,
+            items: all.filter(w => comfyWorkflowCategoryKey(w) === def.key && match(w))
+        })).filter(section => section.items.length);
+        if(!sections.length){
+            return `<div class="comfy-workflow-empty">没有匹配「${escapeHtml(comfyWorkflowSearch.trim())}」的工作流</div>`;
+        }
+        return sections.map(section => `<div class="wf-section">
+            <div class="wf-section-head"><span class="wf-bar" style="background:${section.def.color}"></span><b>${escapeHtml(section.def.label)}</b><small>${section.items.length}</small></div>
+            <div class="wf-grid">${section.items.map(w => comfyWorkflowCardHtml(w, pinned)).join('')}</div>
+        </div>`).join('');
+    }
+    const items = all.filter(w => comfyWorkflowCategoryKey(w) === activeKey && match(w));
+    if(!items.length){
+        return `<div class="comfy-workflow-empty">「${escapeHtml(comfyWorkflowCategoryLabel(activeKey))}」下还没有工作流<br>
+            <span class="wf-empty-hint" data-comfy-wf-manage>去管理分类看看</span></div>`;
+    }
+    const pinnedItems = items.filter(w => pinned.has(w.name));
+    const rest = items.filter(w => !pinned.has(w.name));
+    return [
+        pinnedItems.length ? `<div class="wf-section"><div class="wf-section-head is-pin"><span class="wf-bar"></span><b>★ 常用</b><small>${pinnedItems.length}</small></div>
+            <div class="wf-grid">${pinnedItems.map(w => comfyWorkflowCardHtml(w, pinned)).join('')}</div></div>` : '',
+        `<div class="wf-grid">${rest.map(w => comfyWorkflowCardHtml(w, pinned)).join('')}</div>`
+    ].join('');
+}
+// 只重绘列表区 + 计数（搜索输入用，避免整块重绘导致输入框丢焦点）
+function updateComfyWorkflowListDom(){
+    const control = document.querySelector('.comfy-workflow-control');
+    const grid = control?.querySelector('[data-comfy-wf-grid]');
+    if(!grid) return;
+    const defs = comfyWorkflowCategoryDefs();
+    const activeKey = comfyWorkflowActiveCategory(defs);
+    grid.innerHTML = comfyWorkflowListHtml(defs, activeKey);
+    const countEl = control.querySelector('[data-comfy-wf-count]');
+    if(countEl){
+        const q = comfyWorkflowSearch.trim().toLowerCase();
+        if(q){
+            const total = (comfyWorkflows || []).filter(w => {
+                const label = comfyWorkflowCategoryLabel(comfyWorkflowCategoryKey(w)).toLowerCase();
+                return comfyWorkflowDisplayTitle(w).toLowerCase().includes(q)
+                    || String(w.name || '').toLowerCase().includes(q) || label.includes(q);
+            }).length;
+            countEl.textContent = `${total} 个 · 搜索结果`;
+        } else {
+            countEl.textContent = `${comfyWorkflowCategoryCount(activeKey)} 个 · ${comfyWorkflowCategoryLabel(activeKey)}`;
+        }
+    }
+    bindComfyWorkflowCardEvents(grid);
+}
+// 卡片事件：选中 / 右键归类 / ⋯ 归类 / ☆ 收藏（列表局部重绘后要重绑，所以抽成函数）
+function bindComfyWorkflowCardEvents(scope){
+    const root = scope || document;
+    root.querySelectorAll('[data-comfy-wf-card]').forEach(card => {
+        card.onclick = event => {
+            if(event.target.closest('[data-comfy-wf-more],[data-comfy-wf-pin]')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setDynamicSetting('comfyWorkflow', card.dataset.comfyWfCard);
+            closeAllSmartPopovers();
+            card.blur?.();
+        };
+        card.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openComfyWorkflowCategoryMenu(card.dataset.comfyWfCard, event.clientX, event.clientY);
+        });
+    });
+    root.querySelectorAll('[data-comfy-wf-more]').forEach(el => {
+        el.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const card = el.closest('[data-comfy-wf-card]');
+            if(!card) return;
+            const rect = el.getBoundingClientRect();
+            openComfyWorkflowCategoryMenu(card.dataset.comfyWfCard, rect.left, rect.bottom + 6);
+        };
+    });
+    root.querySelectorAll('[data-comfy-wf-pin]').forEach(el => {
+        el.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const card = el.closest('[data-comfy-wf-card]');
+            if(!card) return;
+            const on = toggleComfyWorkflowPin(card.dataset.comfyWfCard);
+            toast(on ? '已收藏为常用（排在最上面）' : '已取消常用');
+            updateComfyWorkflowListDom();
+        };
+    });
+}
 function renderComfyWorkflowControl(){
     if(!comfyWorkflows.length) return `<div class="muted-note">${escapeHtml(tr('smart.noWorkflow'))}</div>`;
     const current = comfyWorkflows.find(w => w.name === settings.comfyWorkflow) || comfyWorkflows[0];
     if(!settings.comfyWorkflow && current?.name) settings.comfyWorkflow = current.name;
     settings.comfyMode = 'custom';
     const title = comfyWorkflowDisplayTitle(current);
-    // 2026-10-15：popover 顶部加分类 tab（全部 / 生图 / 生视频 / 生音频 / 放大 / 其他），
-    // 以及每张卡片的右键归类菜单（contextmenu，见 bindDynamicParams）。
-    const activeCategory = comfyWorkflowCategory === 'all' || COMFY_WORKFLOW_CATEGORY_DEFS.some(def => def.key === comfyWorkflowCategory)
-        ? comfyWorkflowCategory
-        : 'all';
-    const categoryWorkflows = activeCategory === 'all'
-        ? comfyWorkflows
-        : comfyWorkflows.filter(workflow => comfyWorkflowCategoryKey(workflow) === activeCategory);
-    const categoryTabs = [
-        {key:'all', label: smartI18nOr('smart.tplAll', '全部')},
-        ...COMFY_WORKFLOW_CATEGORY_DEFS.map(def => ({key:def.key, label: comfyWorkflowCategoryLabel(def.key)}))
-    ].map(tab => `<button type="button" class="comfy-workflow-cat ${tab.key === activeCategory ? 'active' : ''}" data-comfy-wf-cat="${escapeAttr(tab.key)}" title="${escapeAttr(tab.label)}"><span>${escapeHtml(tab.label)}</span><small>${comfyWorkflowCategoryCount(tab.key)}</small></button>`).join('');
+    // 2026-10-19（用户要求）：按钮直接显示「ComfyUI」，不再显示工作流名；
+    // 当前选中的工作流名保留在悬停 tooltip 里，面板里仍有高亮选中态。
+    // 2026-10-19：去掉「全部」，分类一排铺开、满了自动换行；搜索可跨分类。
+    const defs = comfyWorkflowCategoryDefs();
+    const activeKey = comfyWorkflowActiveCategory(defs);
+    if(activeKey !== comfyWorkflowCategory){
+        comfyWorkflowCategory = activeKey;
+        persistComfyWorkflowCategory(activeKey);
+    }
+    const activeCount = defs.find(def => def.key === activeKey)?.count || 0;
+    const searchLabel = comfyWorkflowSearch.trim() ? '搜索结果' : comfyWorkflowCategoryLabel(activeKey);
+    const showCount = comfyWorkflowSearch.trim()
+        ? defs.reduce((sum, def) => sum + (comfyWorkflows || []).filter(w => comfyWorkflowCategoryKey(w) === def.key).length, 0)
+        : activeCount;
+    const categoryTabs = defs.map(def => `<button type="button" class="comfy-workflow-cat ${def.key === activeKey ? 'active' : ''} ${def.count ? '' : 'is-zero'} ${def.builtin ? '' : 'is-custom'}" data-comfy-wf-cat="${escapeAttr(def.key)}" title="${escapeAttr(`${def.label} · ${def.count} 个`)}">
+        <span class="wf-dot" style="background:${def.color}"></span><span>${escapeHtml(def.label)}</span><small>${def.count}</small>
+    </button>`).join('');
     return `<div class="smart-control comfy-workflow-control">
-        <button class="smart-pill comfy-workflow-pill" type="button" title="${escapeAttr(title)}" aria-label="${escapeAttr(tr('smart.workflow'))}">
-            <i data-lucide="workflow"></i><span>${escapeHtml(title)}</span><small>${comfyWorkflows.length}</small><i data-lucide="chevron-down" class="pill-caret"></i>
+        <button class="smart-pill comfy-workflow-pill" type="button" title="ComfyUI · ${escapeAttr(title)}" aria-label="${escapeAttr(tr('smart.workflow'))}">
+            <i data-lucide="workflow"></i><span>ComfyUI</span><small>${comfyWorkflows.length}</small><i data-lucide="chevron-down" class="pill-caret"></i>
         </button>
         <div class="smart-popover comfy-workflow-popover">
             <div class="comfy-workflow-head">
                 <div class="comfy-panel-title"><span class="comfy-panel-icon"><i data-lucide="workflow"></i></span><strong>${escapeHtml(tr('smart.workflow'))}</strong></div>
-                <div class="comfy-panel-count"><i data-lucide="list-filter"></i><span>${categoryWorkflows.length}/${comfyWorkflows.length}</span></div>
+                <div class="comfy-panel-count"><span data-comfy-wf-count>${showCount} 个 · ${escapeHtml(searchLabel)}</span></div>
+            </div>
+            <div class="comfy-workflow-search">
+                <i data-lucide="search"></i>
+                <input type="text" id="comfyWfSearch" value="${escapeAttr(comfyWorkflowSearch)}" placeholder="搜索工作流名称…" autocomplete="off" spellcheck="false">
             </div>
             <div class="comfy-workflow-cats">${categoryTabs}</div>
-            <div class="comfy-workflow-grid">
-                ${categoryWorkflows.length
-                    ? categoryWorkflows.map(w => `<button type="button" class="comfy-workflow-card ${w.name === settings.comfyWorkflow ? 'active' : ''}" data-smart-param="comfyWorkflow" data-smart-value="${escapeAttr(w.name)}" data-comfy-wf-card="${escapeAttr(w.name)}" title="${escapeAttr(`${comfyWorkflowDisplayTitle(w)} · ${comfyWorkflowCategoryLabel(comfyWorkflowCategoryKey(w))}（右键归类）`)}"><span>${escapeHtml(comfyWorkflowDisplayTitle(w))}</span></button>`).join('')
-                    : `<div class="comfy-workflow-empty">${escapeHtml(tr('smart.wfcatEmpty'))}</div>`}
+            <div class="comfy-workflow-grid" data-comfy-wf-grid>${comfyWorkflowListHtml(defs, activeKey)}</div>
+            <div class="comfy-workflow-foot">
+                <span class="wf-foot-hint">悬停卡片 ⋯ 或右键可归类</span>
+                <button type="button" class="wf-manage" data-comfy-wf-manage>⚙ 管理分类</button>
             </div>
         </div>
     </div>`;
@@ -10585,10 +11031,15 @@ function smartComfyRandomValue(field){
     return Math.floor(value);
 }
 function setDynamicSetting(key, value){
-    const numericKeys = new Set(['count','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','audioSpeed','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioVoice','audioSpeed']);
+    const numericKeys = new Set(['count','videoCount','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','audioSpeed','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioVoice','audioSpeed','videoUseFrameRoles','videoGenerateAudio']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
+    // 布尔类参数：data-smart-value 传的是字符串，先转真布尔再落库（否则 "false" 会被当 true）
+    if(key === 'videoGenerateAudio') settings.videoGenerateAudio = smartStrictBool(value, true);
+    if(key === 'videoUseFrameRoles') settings.videoUseFrameRoles = smartStrictBool(value, false);
     if(key === 'count') settings.count = clampSmartGenerationCount(settings.count, 1);
+    // 视频生成数量只开放 1/2/4（方舟并发上限 3，前端自动排队）
+    if(key === 'videoCount') settings.videoCount = [1, 2, 4].includes(Number(settings.videoCount)) ? Number(settings.videoCount) : 1;
     if(key === 'provider_id') settings.model = '';
     if(key === 'videoProvider') settings.videoModel = '';
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
@@ -10712,6 +11163,8 @@ function bindDynamicParams(){
         };
     });
     dynamicParams.querySelectorAll('[data-smart-param]').forEach(btn => {
+        // 工作流卡片单独绑定（列表会局部重绘，见 bindComfyWorkflowCardEvents）
+        if(btn.hasAttribute('data-comfy-wf-card')) return;
         btn.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
@@ -10725,26 +11178,45 @@ function bindDynamicParams(){
             if(smartParam === 'videoDuration') renderDynamicParams();
         };
     });
-    // 2026-10-15 工作流分类 tab：切分类只重渲染参数面板（弹层靠 :hover / pinned 状态自动保持打开）
+    // 2026-10-19 工作流分类：去掉「全部」，切分类时清空搜索（搜索本身是跨分类的）
     dynamicParams.querySelectorAll('[data-comfy-wf-cat]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            const next = btn.dataset.comfyWfCat || 'all';
+            const next = btn.dataset.comfyWfCat || '';
+            if(!next) return;
+            comfyWorkflowSearch = '';
             if(next === comfyWorkflowCategory) return;
             comfyWorkflowCategory = next;
             persistComfyWorkflowCategory(next);
             renderDynamicParams();
         };
     });
-    // 2026-10-15 工作流卡片右键 → 归类菜单（手动分类入口，改完立刻重排 tab 计数）
-    dynamicParams.querySelectorAll('[data-comfy-wf-card]').forEach(card => {
-        card.addEventListener('contextmenu', event => {
+    const wfSearchInput = dynamicParams.querySelector('#comfyWfSearch');
+    if(wfSearchInput){
+        wfSearchInput.oninput = event => {
+            comfyWorkflowSearch = event.target.value || '';
+            updateComfyWorkflowListDom();
+        };
+        wfSearchInput.onkeydown = event => {
+            event.stopPropagation();
+            if(event.key === 'Escape'){
+                if(comfyWorkflowSearch){ comfyWorkflowSearch = ''; wfSearchInput.value = ''; updateComfyWorkflowListDom(); }
+                else closeAllSmartPopovers();
+            }
+        };
+        wfSearchInput.onclick = event => event.stopPropagation();
+    }
+    dynamicParams.querySelectorAll('[data-comfy-wf-manage]').forEach(btn => {
+        btn.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            openComfyWorkflowCategoryMenu(card.dataset.comfyWfCard, event.clientX, event.clientY);
-        });
+            openComfyWorkflowCategoryManager();
+        };
     });
+    // 工作流卡片：选中 / 右键归类 / ⋯ 归类 / ☆ 收藏
+    bindComfyWorkflowCardEvents(dynamicParams);
+    // 2026-10-15 工作流卡片右键 → 归类菜单（手动分类入口，改完立刻重排 tab 计数）
     dynamicParams.querySelectorAll('[data-size-scope]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -11512,7 +11984,12 @@ async function openPromptTemplatePanel(nodeId='', templateId='', options={}){
     promptTemplateSearch?.focus();
 }
 function closePromptTemplatePanel(){
-    promptTemplatePanel?.classList.remove('open');
+    // 2026-10-20：这个函数挂在全局 document click 上，每次点击画布都会调到。
+    // 之前无条件 render()，导致「随便点一下/每次按下拖动」都全量重建画布（75 节点约 120~250ms）。
+    // 面板本来没开就什么都别做。
+    const wasOpen = Boolean(promptTemplatePanel?.classList.contains('open'));
+    if(!wasOpen) return;
+    promptTemplatePanel.classList.remove('open');
     syncComposerTemplateButton();
     render();
 }
@@ -15475,82 +15952,168 @@ function openSmartLogLightbox(url, kind='image'){
 function smartLogPreviewNode(url, kind='image'){
     openSmartLogLightbox(url, kind);
 }
+// ---------------------------------------------------------------------------
+// 2026-10-20 日志弹窗重构：生成日志（卡片式 + 提示词一键复制）+ 找回视频双页签
+let smartLogFilter = 'all';
+let smartLogActiveTab = 'logs';
+let smartLogVideoJobs = [];
+
+function smartLogWhenText(ts){
+    const d = new Date(Number(ts) || Date.now());
+    if(Number.isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function smartLogOutputKind(item){
+    return item?.kind || (outputUrlLooksVideo(item?.url || '') ? 'video' : 'image');
+}
+function smartLogMediaHtml(item, attrs, size = 512){
+    return smartLogOutputKind(item) === 'video' ? smartVideoPreviewHtml(item, size, attrs) : smartPreviewImgHtml(item, size, attrs);
+}
+function setSmartLogFilter(key){
+    smartLogFilter = ['all', 'ok', 'failed'].includes(key) ? key : 'all';
+    renderSmartCanvasLog();
+}
 function renderSmartCanvasLog(){
-    const logs = canvas?.logs || [];
-    smartLogList.innerHTML = logs.length ? logs.map(log => {
+    if(!smartLogList) return;
+    const logs = Array.isArray(canvas?.logs) ? canvas.logs : [];
+    const failedCount = logs.filter(log => log?.status === 'failed').length;
+    const okCount = logs.length - failedCount;
+    const countLogs = document.getElementById('smartLogTabCountLogs');
+    if(countLogs) countLogs.textContent = String(logs.length);
+    document.querySelectorAll('#smartLogFilter button').forEach(btn => {
+        const key = btn.dataset.logFilter;
+        const value = key === 'all' ? logs.length : key === 'failed' ? failedCount : okCount;
+        const badge = btn.querySelector('b');
+        if(badge) badge.textContent = String(value);
+        btn.classList.toggle('active', key === smartLogFilter);
+    });
+    const outputWord = window.StudioI18n?.lang() === 'en' ? 'outputs' : '输出';
+    const visible = smartLogFilter === 'all'
+        ? logs
+        : logs.filter(log => (log?.status === 'failed' ? 'failed' : 'ok') === smartLogFilter);
+    smartLogList.innerHTML = visible.length ? visible.map(log => {
         const outputs = (log.outputs || []).map(smartLogOutputItem).filter(item => item?.url);
-        const thumbs = outputs.slice(0, 8).map((item, index) => {
-            const safe = escapeAttr(item.url);
-            const kind = item.kind || (outputUrlLooksVideo(item.url) ? 'video' : 'image');
-            const label = imageResolutionLabel(item);
-            const title = label || `输出 ${index + 1}`;
-            const attrs = `data-url="${safe}" data-kind="${escapeAttr(kind)}" title="${escapeAttr(title)}" alt="${escapeAttr(title)}"`;
-            const media = kind === 'video' ? smartVideoPreviewHtml(item, 512, attrs) : smartPreviewImgHtml(item, 512, attrs);
-            return `<button class="log-thumb-card" type="button" data-url="${safe}" data-kind="${escapeAttr(kind)}" title="${escapeAttr(title)}">
-                <span class="log-thumb-media">${media}</span>
-                ${label ? `<span class="log-thumb-size">${escapeHtml(label)}</span>` : ''}
-            </button>`;
-        }).join('');
-        const date = new Date(log.createdAt || Date.now()).toLocaleString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN');
+        const first = outputs[0] || null;
+        const isFailed = log?.status === 'failed';
+        const firstLabel = first ? imageResolutionLabel(first) : '';
+        const anchor = first
+            ? `<button class="log-anchor" type="button" data-url="${escapeAttr(first.url)}" data-kind="${escapeAttr(smartLogOutputKind(first))}" title="查看结果">
+                    ${smartLogMediaHtml(first, 'alt="输出预览"', 320)}
+                    ${firstLabel ? `<span class="log-anchor-badge">${escapeHtml(firstLabel)}</span>` : ''}
+                    ${outputs.length > 1 ? `<span class="log-anchor-more">+${outputs.length - 1}</span>` : ''}
+               </button>`
+            : `<div class="log-anchor is-empty" aria-hidden="true"><span>⚠</span></div>`;
         const req = log.request || {};
         const taskId = req.task_id || req.taskId || req.prompt_id || req.promptId || '';
         const backend = req.workflow_json || req.workflow || req.provider_id || req.providerId || req.backend || '';
         const sizeSummary = smartLogSizeSummary(log, outputs);
-        const subParts = [
-            date,
-            `${window.StudioI18n?.lang() === 'en' ? 'outputs' : '输出'} ${outputs.length}`,
+        const attrs = [
+            `${outputWord} ${outputs.length}`,
             sizeSummary,
-            taskId ? `ID ${taskId}` : '',
-            backend
+            backend,
+            taskId ? `ID ${taskId}` : ''
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
-            <div class="log-main">
-                <div class="log-meta">
-                    <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
-                    <span class="log-chip">${escapeHtml(log.platform || '-')}</span>
-                    ${log.model ? `<span class="log-chip">${escapeHtml(log.model)}</span>` : ''}
-                    <span class="log-chip">${escapeHtml(formatRunDuration(log.runMs || 0))}</span>
+        const miniHtml = outputs.length > 1 ? `<div class="log-mini">${outputs.slice(1, 5).map(item => `<button class="log-mini-thumb" type="button" data-url="${escapeAttr(item.url)}" data-kind="${escapeAttr(smartLogOutputKind(item))}" title="查看">
+                    ${smartLogMediaHtml(item, 'alt=""', 96)}
+                </button>`).join('')}${outputs.length > 5 ? `<span class="log-mini-more">+${outputs.length - 5}</span>` : ''}</div>` : '';
+        const promptText = String(log.prompt || '');
+        const promptBlock = promptText
+            ? `<div class="log-prompt-block" data-prompt="${escapeAttr(promptText)}" title="点击复制提示词">
+                    <div class="log-prompt">${escapeHtml(promptText)}</div>
+                    <span class="log-prompt-copy">⧉ 复制</span>
+               </div>`
+            : `<div class="log-prompt-block is-empty"><div class="log-prompt">${escapeHtml(tr('canvas.noPromptMeta') || '无提示词')}</div></div>`;
+        const viewBtn = first
+            ? `<button class="log-act" type="button" data-log-view="1" data-url="${escapeAttr(first.url)}" data-kind="${escapeAttr(smartLogOutputKind(first))}">查看</button>`
+            : '';
+        const insertBtn = outputs.length
+            ? `<button class="log-act primary" type="button" data-urls="${escapeAttr(JSON.stringify(outputs.map(item => item.url)))}" onclick="insertLogOutputsToCanvas(this)">插入画布</button>`
+            : '';
+        return `<div class="log-row ${isFailed ? 'is-failed' : ''}" data-log-status="${isFailed ? 'failed' : 'ok'}">
+            ${anchor}
+            <div class="log-row-main">
+                <div class="log-top">
+                    <span class="log-state ${isFailed ? 'bad' : 'ok'}"><i></i>${escapeHtml(isFailed ? (tr('canvas.failed') || '失败') : (tr('canvas.success') || '成功'))}</span>
+                    <span class="log-dot"></span>
+                    <span class="log-meta-line"><b>${escapeHtml(log.platform || '-')}</b>${log.model ? `<em>·</em>${escapeHtml(log.model)}` : ''}<em>·</em>${escapeHtml(formatRunDuration(log.runMs || 0))}</span>
+                    <span class="log-when">${escapeHtml(smartLogWhenText(log.createdAt))}</span>
                 </div>
-                <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
-                ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
-                <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
+                ${log.error ? `<div class="log-error" data-error="${escapeAttr(log.error)}" title="点击复制报错">
+                    <span class="log-error-ico">⚠</span>
+                    <span class="log-error-text">${escapeHtml(log.error)}</span>
+                    <button class="log-error-copy" type="button" data-error-copy="${escapeAttr(log.error)}">复制</button>
+                </div>` : ''}
+                ${promptBlock}
+                <div class="log-foot">
+                    <div class="log-attrs">${attrs.map(text => `<span>${escapeHtml(String(text))}</span>`).join('')}</div>
+                    ${miniHtml}
+                    ${viewBtn}
+                    ${insertBtn}
+                </div>
             </div>
-            <div class="log-thumbs">${thumbs || `<div class="log-no-thumb">${escapeHtml(log.status === 'failed' ? (tr('canvas.failed') || '失败') : '无预览')}</div>`}</div>
         </div>`;
-    }).join('') : `<div class="log-empty">${escapeHtml(tr('canvas.noLogs'))}</div>`;
+    }).join('') : `<div class="log-empty">${escapeHtml(smartLogFilter === 'failed' ? '没有失败的记录' : smartLogFilter === 'ok' ? '没有成功的记录' : (tr('canvas.noLogs') || '暂无生成日志'))}</div>`;
     bindSmartPreviewImageFallbacks(smartLogList);
-    smartLogList.querySelectorAll('.log-thumb-card[data-url], .log-thumbs img[data-url], .log-thumbs video[data-url]').forEach(el => {
-        el.onclick = e => {
+    smartLogList.querySelectorAll('.log-anchor[data-url], .log-mini-thumb[data-url], [data-log-view]').forEach(el => {
+        el.addEventListener('click', e => {
             e.stopPropagation();
             smartLogPreviewNode(el.dataset.url, el.dataset.kind || 'image');
-        };
-    });
-    const bindLogCopy = (selector, key) => {
-        smartLogList.querySelectorAll(selector).forEach(el => {
-            el.onclick = async e => {
-                e.stopPropagation();
-                const text = el.dataset[key] || '';
-                const copied = await copyTextToClipboard(text);
-                const oldText = el.textContent;
-                el.textContent = copied ? tr('canvas.copied') : tr('canvas.copyFailed');
-                if(copied) el.classList.add('copied');
-                setTimeout(() => {
-                    el.textContent = oldText;
-                    el.classList.remove('copied');
-                }, 900);
-            };
         });
+    });
+    const flashLabel = (el, text, after) => {
+        const old = el.textContent;
+        el.textContent = text;
+        setTimeout(() => { el.textContent = old; if(after) after(); }, 1200);
     };
-    bindLogCopy('[data-prompt]', 'prompt');
-    bindLogCopy('[data-error]', 'error');
+    smartLogList.querySelectorAll('.log-prompt-block[data-prompt]').forEach(block => {
+        block.addEventListener('click', async () => {
+            const text = block.dataset.prompt || '';
+            const copied = await copyTextToClipboard(text);
+            const pill = block.querySelector('.log-prompt-copy');
+            if(pill){
+                pill.classList.add('copied');
+                flashLabel(pill, copied ? '✓ 已复制' : '复制失败', () => pill.classList.remove('copied'));
+            }
+            if(copied) toast(`已复制提示词 · ${text.length} 字`);
+        });
+    });
+    smartLogList.querySelectorAll('.log-error').forEach(strip => {
+        strip.addEventListener('click', async e => {
+            e.stopPropagation();
+            const copied = await copyTextToClipboard(strip.dataset.error || '');
+            const btn = strip.querySelector('.log-error-copy');
+            if(btn){
+                btn.classList.add('copied');
+                flashLabel(btn, copied ? '已复制' : '失败', () => btn.classList.remove('copied'));
+            }
+        });
+    });
     refreshIcons();
 }
+function insertLogOutputsToCanvas(btn){
+    let urls = [];
+    try { urls = JSON.parse(btn?.dataset?.urls || '[]'); } catch(err) { urls = []; }
+    urls = urls.map(url => smartOriginalMediaUrl(url)).filter(Boolean);
+    if(!urls.length || !canvas) return;
+    const center = viewportCenter();
+    const items = urls.map(url => ({
+        url,
+        kind: outputUrlLooksVideo(url) ? 'video' : 'image',
+        name: decodeURIComponent((url.split('/').pop() || '').split('?')[0]) || 'result',
+        generatedResult: true
+    }));
+    createNode(center.x, center.y, items);
+    toast(urls.length > 1 ? `已插入 ${urls.length} 个结果` : '已插入画布');
+}
+
 function openSmartCanvasLog(){
     if(!canvas) return;
     closeFloatingCanvasPanels('log');
+    switchSmartLogTab('logs');
     renderSmartCanvasLog();
     smartLogModal.classList.add('open');
-    positionFloatingPanelBelowButton(smartLogModal, smartLogToggle, {width:820, maxHeight:720, bottom:false});
+    positionFloatingPanelBelowButton(smartLogModal, smartLogToggle, {width:880, maxHeight:760, bottom:false});
     smartLogToggle?.classList.add('active');
 }
 function closeSmartCanvasLog(){
@@ -15568,6 +16131,91 @@ function closeSmartCanvasShortcuts(){
     smartShortcutModal?.classList.remove('open');
     smartShortcutToggle?.classList.remove('active');
 }
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 2026-10-20 找回视频页签：视频生成结果已由后端落库（/api/video/jobs）。
+// 生成期间刷新/关页会让节点丢掉结果（但后端已计费并把文件存到 assets/output），
+// 这里列出最近 7 天的生成结果，一键插回画布，避免「花了钱找不到视频」。
+const smartLogVideoPane = document.getElementById('smartLogVideoPane');
+const smartLogVideoGrid = document.getElementById('smartLogVideoGrid');
+const smartLogToolbar = document.getElementById('smartLogToolbar');
+function switchSmartLogTab(tab){
+    smartLogActiveTab = tab === 'videos' ? 'videos' : 'logs';
+    document.getElementById('smartLogTabLogs')?.classList.toggle('active', smartLogActiveTab === 'logs');
+    document.getElementById('smartLogTabVideos')?.classList.toggle('active', smartLogActiveTab === 'videos');
+    if(smartLogToolbar) smartLogToolbar.hidden = smartLogActiveTab !== 'logs';
+    if(smartLogList) smartLogList.hidden = smartLogActiveTab !== 'logs';
+    if(smartLogVideoPane) smartLogVideoPane.hidden = smartLogActiveTab !== 'videos';
+    if(smartLogActiveTab === 'videos') loadVideoJobs();
+}
+function smartLogVideoOnCanvas(url){
+    const target = smartOriginalMediaUrl(url);
+    if(!target) return false;
+    return (canvas?.nodes || []).some(node => (node.images || []).some(img => smartOriginalMediaUrl(img?.url || img?.src || '') === target));
+}
+async function loadVideoJobs(){
+    if(!smartLogVideoGrid) return;
+    if(!smartLogVideoJobs.length) smartLogVideoGrid.innerHTML = '<div class="log-video-empty">加载中...</div>';
+    try{
+        const res = await fetch('/api/video/jobs?limit=40&days=7');
+        if(res.ok) smartLogVideoJobs = await res.json();
+    }catch(err){}
+    renderVideoJobs();
+}
+function renderVideoJobs(){
+    if(!smartLogVideoGrid) return;
+    const jobs = Array.isArray(smartLogVideoJobs) ? smartLogVideoJobs.filter(job => job?.url) : [];
+    const countEl = document.getElementById('smartLogTabCountVideos');
+    if(countEl) countEl.textContent = String(jobs.length);
+    if(!jobs.length){
+        smartLogVideoGrid.innerHTML = '<div class="log-video-empty">最近 7 天没有生成记录</div>';
+        return;
+    }
+    smartLogVideoGrid.innerHTML = jobs.map(job => {
+        const url = String(job.url || '');
+        const onCanvas = smartLogVideoOnCanvas(url);
+        const when = new Date(Number(job.ts || 0) * 1000);
+        const timeLabel = Number(job.ts || 0) > 0 && !Number.isNaN(when.getTime())
+            ? `${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
+            : '';
+        const sizeLabel = [job.duration ? `${job.duration}s` : '', job.resolution || ''].filter(Boolean).join(' · ');
+        const meta = [job.provider_id, job.model, job.aspect_ratio].filter(Boolean)
+            .map(value => `<span>${escapeHtml(String(value))}</span>`).join('');
+        const prompt = String(job.prompt || '').trim();
+        return `<div class="log-video-card" data-url="${escapeAttr(url)}">
+            <div class="log-video-media">
+                <video src="${escapeAttr(url)}#t=1" preload="metadata" muted playsinline></video>
+                ${timeLabel ? `<span class="log-video-badge is-tl">${escapeHtml(timeLabel)}</span>` : ''}
+                ${sizeLabel ? `<span class="log-video-badge is-tr">${escapeHtml(sizeLabel)}</span>` : ''}
+                ${onCanvas ? '<span class="log-video-badge is-inset">✓ 已在画布</span>' : ''}
+            </div>
+            <div class="log-video-info">
+                ${meta ? `<div class="log-video-meta">${meta}</div>` : ''}
+                ${prompt ? `<div class="log-video-text" title="${escapeAttr(prompt)}">${escapeHtml(prompt)}</div>` : ''}
+                <div class="log-video-actions">
+                    <button class="log-act ${onCanvas ? 'is-done' : 'primary'}" type="button" data-url="${escapeAttr(url)}" ${onCanvas ? 'disabled' : 'onclick="insertRecentVideoToCanvas(this)"'}>${onCanvas ? '已在画布' : '插入画布'}</button>
+                    <a class="log-act" href="${escapeAttr(url)}" download target="_blank" rel="noopener">下载</a>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    refreshIcons();
+}
+function insertRecentVideoToCanvas(btn){
+    const url = smartOriginalMediaUrl(btn?.dataset?.url || '');
+    if(!url || !canvas) return;
+    if(smartLogVideoOnCanvas(url)){ toast('这条视频已在画布中'); return; }
+    const center = viewportCenter();
+    const name = decodeURIComponent((url.split('/').pop() || '').split('?')[0]) || 'video.mp4';
+    createNode(center.x, center.y, [{url, kind:'video', name, generatedResult:true}]);
+    toast('已把视频插入画布');
+    renderVideoJobs();
+}
+document.getElementById('smartLogFilter')?.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-log-filter]');
+    if(btn) setSmartLogFilter(btn.dataset.logFilter);
+});
+
 function promptNodeTitleText(node){
     const raw = String(node?.title || '').trim();
     // 2026-09-28 用户要求：手写提示词节点标题统一显示「Text」（默认标题均视为未自定义）
@@ -20958,7 +21606,14 @@ function bindPromptNodeControls(el, node){
     const systemEl = el.querySelector('.prompt-llm-system');
     if(systemEl) { bindScrollableText(systemEl); systemEl.oninput = e => { node.llmSystemPrompt = e.target.value; scheduleSave(); }; }
     const instructionEl = el.querySelector('.prompt-llm-instruction');
-    if(instructionEl) { bindScrollableText(instructionEl); instructionEl.oninput = e => { node.llmInstruction = e.target.value; scheduleSave(); }; }
+    if(instructionEl) {
+        bindScrollableText(instructionEl);
+        instructionEl.oninput = e => { node.llmInstruction = e.target.value; scheduleSave(); };
+        // 粘贴长文本后回到顶部显示开头（浏览器默认滚到光标处，只显示结尾）
+        instructionEl.addEventListener('paste', () => {
+            requestAnimationFrame(() => { if(instructionEl.scrollHeight > instructionEl.clientHeight + 4) instructionEl.scrollTop = 0; });
+        });
+    }
     const instructionResizeEl = el.querySelector('[data-llm-instruction-resize]');
     if(instructionResizeEl) instructionResizeEl.addEventListener('mousedown', e => {
         if(e.button !== 0) return;
@@ -21708,18 +22363,22 @@ function bindNodeEvents(){
                 if(!(Number(node.w) > 0)) node.w = PROMPT_NODE_DEFAULT_WIDTH;
                 if(!(Number(node.h) > 0)) node.h = PROMPT_NODE_DEFAULT_HEIGHT;
             }
-            const alreadySelected = selectedId === id && selectedIds.length === 0 && selectedImage.nodeId === '';
             selectedId = id;
             selectedIds = [];
             selectedImage = {nodeId:'', index:-1};
             if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-            if(alreadySelected){
+            // 2026-10-20（用户反馈点击/拖动开始时卡顿）：切换选中原来走全量 render()，
+            // 75 节点的画布一次重建要 200ms+，按下鼠标就有明显延迟。
+            // 正常选中态只由 class 驱动，syncSelectionUi 已经覆盖（选中框/多选/连线高亮/agent 面板），
+            // 所以这里走轻量路径；只有需要重建节点内部结构的特殊状态才回落到 render()。
+            const needsFullRender = Boolean(smartTransformEditorState && smartTransformEditorState.nodeId === id);
+            if(needsFullRender) render();
+            else {
                 syncSelectionUi();
                 updateComposer();
                 if(closedGroupColor) render();
-                return;
             }
-            render();
+            return;
         };
         if(nodeForControls?.type !== 'smart-group' && nodeForControls?.type !== 'smart-storyboard') el.ondblclick = e => e.stopPropagation();
         el.querySelectorAll('[data-storyboard-generate]').forEach(btn => {
@@ -27001,6 +27660,14 @@ function autoGrowPromptInput(){
     const next = Math.max(base, Math.min(380, content + 2));
     promptInput.style.setProperty('--prompt-h', `${next}px`);
 }
+function updatePromptWordCount(){
+    if(!promptWordCount || !promptInput) return;
+    // 中文按字符数、英文按词算个大概：去掉空白后取长度，够用且不会因换行跳变
+    const len = String(promptInput.innerText || '').replace(/\s+/g, '').length;
+    const show = len >= 2000;
+    promptWordCount.hidden = !show;
+    promptWordCount.textContent = show ? `${len.toLocaleString('en-US')} 字` : '';
+}
 function updateComposer(){
     const node = selectedNode();
     const isStoryboardComposer = node?.type === "smart-storyboard";
@@ -27056,6 +27723,7 @@ function updateComposer(){
     promptInput.style.setProperty('--prompt-h', `${ph}px`);
     autoGrowPromptInput();
     renderInputThumbsRow(node);
+    updatePromptWordCount();
     renderInputPromptPreview(node);
     syncCascadeRunButton(node);
     updateProviderModels();
@@ -27095,6 +27763,11 @@ function renderInputThumbsRow(node){
     const h3LimitSettings = node ? smartSettingsForNode(node) : null;
     const h3LimitByKind = h3MediaLimitsForSettings(h3LimitSettings);
     const h3ModeLimit = h3LimitByKind ? String(h3LimitSettings?.comfyParams?.['f_h3_mode'] ?? '全能参考') : null;
+    // 2026-10-19 API 生视频「首尾帧」模式：图1=首帧、图2=尾帧（单图时角标可点切换首/尾），
+    // 第 3 张起图片与参考视频/音频全部置灰「不参与」，提交时同步过滤（见 runApiVideoGeneration）。
+    const vs = h3LimitSettings || {};
+    const videoFrameMode = isApiLikeEngine(vs.engine) && vs.apiKind === 'video' && smartStrictBool(vs.videoUseFrameRoles, false);
+    const videoFrameRole = vs.videoFrameRole === 'last' ? 'last' : 'first';
     const manualRefKeys = new Set(manualReferenceImagesFor(node).map(img => inputRefKey(img)));
     const addActive = acceptsRefs && mentionInsertMode === 'manual-ref';
     renderInputMediaSummary(node, dedup.length, Boolean(acceptsRefs && h3ModeLimit !== '文生视频'));
@@ -27108,7 +27781,9 @@ function renderInputThumbsRow(node){
         acceptsImageRefs,
         audioRefNode,
         mode: node ? smartImageMode(node) : '',
-        h3ModeLimit
+        h3ModeLimit,
+        videoFrameMode,
+        videoFrameRole
     });
     if(inputThumbsRow.dataset.thumbsSig === thumbsSignature) return;
     inputThumbsRow.dataset.thumbsSig = thumbsSignature;
@@ -27124,6 +27799,8 @@ function renderInputThumbsRow(node){
         return;
     }
     const mediaCounters = {image:0, video:0, audio:0, text:0, file:0};
+    // 缩略图角标与提示词编号同源：显示 P1 / V1 / A1，和 chip、<Picture N> 完全对齐
+    const promptRefLabels = computeMentionRefLabels(node);
     const thumbsHtml = dedup.map((img, i) => {
         const isVid = isVideoMediaItem(img);
         const kind = mediaKindForItem(img);
@@ -27141,21 +27818,56 @@ function renderInputThumbsRow(node){
         // 只有 image / video / audio 参与 H3 限额；其它 kind 不设限。
         const kindLimit = h3LimitByKind && Object.prototype.hasOwnProperty.call(h3LimitByKind, kind) ? h3LimitByKind[kind] : null;
         const overLimit = kindLimit !== null && count > kindLimit;
-        const label = isLocalPreview ? '局部' : (kind === 'audio' ? `音频${count}` : kind === 'video' ? `视频${count}` : `图${count}`);
+        // 首尾帧模式：图片前 2 张生效（1 首帧 2 尾帧），其余图片与视频/音频不参与。
+        let frameExcluded = false;
+        let frameRoleBadge = '';
+        if(videoFrameMode && ['image','video','audio'].includes(kind)){
+            if(kind === 'image' && count <= 2){
+                const imageTotal = dedup.filter(item => mediaKindForItem(item) === 'image').length;
+                const isLast = count === 2 || (count === 1 && imageTotal === 1 && videoFrameRole === 'last');
+                frameRoleBadge = isLast ? '尾帧' : '首帧';
+            } else {
+                frameExcluded = true;
+            }
+        }
+        const overLimitFinal = overLimit || frameExcluded;
+        const shortRef = shortRefLabel(promptRefLabels.get(img.url || ''));
+        const label = isLocalPreview ? '局部' : (shortRef || `${refLabelPrefix(kind)}${count}`);
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
         const removable = manualRefKeys.has(key);
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-input-remove-reference="${escapeHtml(inputRefKey(img))}" title="删除参考图" aria-label="删除参考图">×</button>` : '';
         // 超出当前 H3 模式上限的：整个缩略图显示黑色 + 角标「不生效」，鼠标悬停说明超了哪一条。
         const limitUnit = kind === 'video' ? '个视频' : kind === 'audio' ? '个音频' : '张图';
-        const limitNote = overLimit ? ` · 当前模式最多 ${kindLimit} ${limitUnit}，这张不生效` : '';
-        const limitBadge = overLimit ? `<span class="input-thumb-limit-badge">${escapeHtml('不生效')}</span>` : '';
-        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimit ? ' input-thumb-limit' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
+        const limitNote = overLimit ? ` · 当前模式最多 ${kindLimit} ${limitUnit}，这张不生效` : (frameExcluded ? ' · 首尾帧模式只使用前 2 张图（首帧/尾帧），这张不参与生成' : '');
+        // 首尾帧角色角标：单图时可点击在「首帧 ⇄ 尾帧」间切换；2 张及以上自动固定（图1首、图2尾）。
+        const frameRoleToggleable = videoFrameMode && kind === 'image' && count === 1 && dedup.filter(item => mediaKindForItem(item) === 'image').length === 1;
+        const limitBadge = frameRoleBadge
+            ? `<button type="button" class="input-thumb-role-badge${frameRoleBadge === '尾帧' ? ' is-last' : ''}${frameRoleToggleable ? ' toggleable' : ''}"${frameRoleToggleable ? ' data-frame-role-toggle="1"' : ''} title="${escapeHtml(frameRoleToggleable ? '点击切换：首帧 ⇄ 尾帧' : '首尾帧模式下图1=首帧、图2=尾帧')}">${escapeHtml(frameRoleBadge)}</button>`
+            : (overLimitFinal ? `<span class="input-thumb-limit-badge">${escapeHtml('不参与')}</span>` : '');
+        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimitFinal ? ' input-thumb-limit' : ''}${frameRoleBadge ? ' has-frame-role' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
     }).join('');
     inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
     bindInputThumbsDrag(node, dedup, manualRefKeys);
     bindInputThumbReferenceActions();
+    // 首尾帧模式：单图角标点击切换 首帧 ⇄ 尾帧（写回 videoFrameRole 并重绘）
+    inputThumbsRow.querySelectorAll('[data-frame-role-toggle]').forEach(btn => {
+        btn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const rs = settings; // composer 激活设置即全局 settings（与参数 pill、persistActiveSmartSettings 同一套）
+            rs.videoFrameRole = rs.videoFrameRole === 'last' ? 'first' : 'last';
+            // 渲染读取的是 node.runSettings 快照，必须同步写回，否则签名不变、角标不重绘
+            if(node?.runSettings) node.runSettings.videoFrameRole = rs.videoFrameRole;
+            persistActiveSmartSettings();
+            scheduleSave();
+            delete inputThumbsRow.dataset.thumbsSig;
+            renderInputThumbsRow(node);
+        });
+    });
+    // 缩略图重建 = 引用集合变了，chip 上的编号要跟着重算（切节点、加删参考图都会走到这里）
+    refreshMentionRefLabels();
     refreshIcons();
 }
 function bindInputThumbReferenceActions(){
@@ -29871,6 +30583,8 @@ function insertMentionToken(img){
     sel.addRange(range);
     closeMentionPicker();
     promptInput.focus();
+    // 编号由 computeMentionRefLabels 统一算：chip 上标出来，用户不用自己数「图几」
+    refreshMentionRefLabels();
     renderInputThumbsRow(selectedNode());
 }
 function collectPromptParts(){
@@ -29912,16 +30626,29 @@ function originalPromptTextFromParts(parts){
     });
     return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
-function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=false, ctx=smartLoopContext, options={}){
-    const ignoreOwnPrompt = Boolean(node?.outputClearedForRerun && isGeneratedOutputRerunNode(node) && !(node.images || []).some(img => img?.url));
-    const ignoreMentionImages = Boolean(options?.ignoreMentionImages);
+// 2026-10-20 引用编号统一为工作流写法：图片 <Picture N>、视频 <Video N>、音频 <Audio N>。
+// 分类计数（图 / 视频 / 音频各自从 1 开始），与 H3 的 media_N 槽位、输入行缩略图角标同一套编号。
+function refTagForKind(kind){
+    return kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'Picture';
+}
+function refLabelPrefix(kind){
+    return refTagForKind(kind).charAt(0);   // P / V / A
+}
+// <Picture 3> → P3（缩略图角标、chip 徽标用的短标签）
+function shortRefLabel(label){
+    const m = /^<(\w+)\s+(\d+)>$/.exec(String(label || ''));
+    return m ? `${m[1].charAt(0)}${m[2]}` : '';
+}
+// 参考图「基础部分」：上游连线 / 显式输入 / 局部编辑输入。mention 引用追加在它们之后。
+// buildPromptRequest 与输入框 chip 角标必须共用这一份，否则画布上标的编号会和真正写进提示词的编号错位。
+function resolvePromptBaseRefs(node, options={}){
+    const consume = Boolean(options.consume);
+    const ctx = options.ctx || smartLoopContext;
+    const overrideDefaultImages = options.overrideDefaultImages ?? null;
     const acceptsImageRefs = smartRunAcceptsImageReferences(settings);
-    const parts = ignoreOwnPrompt ? [] : collectPromptParts();
-    const originalPrompt = originalPromptTextFromParts(parts);
     const blockedRefs = blockedInputRefKeys(node);
-    const hasOverrideImages = Array.isArray(overrideDefaultImages);
-    const hasUpstreamImages = upstreamReferenceImagesFor(node, consumeDefault, ctx).length > 0;
-    const sourceDefaultImages = hasOverrideImages ? overrideDefaultImages : defaultReferenceImagesFor(node, consumeDefault, ctx);
+    const hasUpstreamImages = upstreamReferenceImagesFor(node, consume, ctx).length > 0;
+    const sourceDefaultImages = Array.isArray(overrideDefaultImages) ? overrideDefaultImages : defaultReferenceImagesFor(node, consume, ctx);
     const allowedDefaultImages = acceptsImageRefs
         ? (smartAutomaticReferencesAllowed(settings) ? sourceDefaultImages : sourceDefaultImages.filter(img => img?.manualAdded || img?.explicitInput))
         : [];
@@ -29932,8 +30659,136 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
             // 扩图/编辑节点：显式输入参考（占位图/局部裁剪）是必须传给 API 的编辑输入，不能被“自我引用”过滤
             return Boolean(validOutpaintSize(node) && (img.explicitInput || img.manualAdded));
         });
-    const defaultRefs = uniqueReferenceImages(filteredDefaultImages);
+    return {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs: uniqueReferenceImages(filteredDefaultImages)};
+}
+// 按当前输入框 DOM 顺序算出参考清单：编号、来源、是否 mention。
+// 纯读：不消费上游引用、不改节点状态，可随打字随时调用刷新 chip 角标。
+function computePromptRefEntries(node){
+    const entries = [];
+    if(!node) return entries;
+    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = resolvePromptBaseRefs(node, {consume:false, ctx:smartLoopContext});
+    const counters = {image:0, video:0, audio:0};
+    const takeLabel = kind => {
+        const key = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
+        counters[key] += 1;
+        return `<${refTagForKind(key)} ${counters[key]}>`;
+    };
+    const seen = new Set();
+    let total = 0;
+    defaultRefs.forEach(img => {
+        const url = img?.url || '';
+        if(!url || seen.has(url)) return;
+        seen.add(url);
+        total += 1;
+        const kind = img.kind || mediaKindForItem(img);
+        entries.push({url, name:img.name || '', kind, mentioned:false, nodeId:img.nodeId || '', label:takeLabel(kind)});
+    });
+    if(!acceptsImageRefs) return entries;
+    collectPromptParts().forEach(part => {
+        if(part.type !== 'image' || !part.url || seen.has(part.url)) return;
+        if(blockedRefs.has(inputRefKey(part)) || (hasUpstreamImages && isSelfReferenceForNode(node, part))) return;
+        if(total >= SMART_REFERENCE_IMAGE_MAX) return;
+        seen.add(part.url);
+        total += 1;
+        const kind = part.kind || 'image';
+        entries.push({url:part.url, name:part.name || '', kind, mentioned:true, nodeId:part.nodeId || '', label:takeLabel(kind)});
+    });
+    return entries;
+}
+function computeMentionRefLabels(node){
+    return new Map(computePromptRefEntries(node).map(entry => [entry.url, entry.label]));
+}
+// 把编号写回输入框里的 @ chip：chip 上看到什么，提示词里就是什么，不用用户自己数。
+function refreshMentionRefLabels(){
+    if(!promptInput) return;
+    const tokens = promptInput.querySelectorAll('.mention-image-token');
+    if(!tokens.length) return;
+    const labels = computeMentionRefLabels(selectedNode());
+    tokens.forEach(token => {
+        const label = labels.get(token.dataset.url || '') || '';
+        let el = token.querySelector('.mention-ref-label');
+        if(!label){
+            if(el) el.remove();
+            delete token.dataset.mentionLabel;
+            return;
+        }
+        if(!el){
+            el = document.createElement('b');
+            el.className = 'mention-ref-label';
+            const nameEl = token.querySelector('span');
+            token.insertBefore(el, nameEl || null);
+        }
+        // chip 上只放短标 P1 / V1（窄），完整标签 <Picture 1> 悬停可见
+        const short = shortRefLabel(label) || label;
+        if(el.textContent !== short) el.textContent = short;
+        token.dataset.mentionLabel = label;
+        token.title = `${label} · ${token.dataset.name || ''}（写入提示词即此编号）`;
+    });
+    if(refManifestPop && !refManifestPop.hidden) renderRefManifest();
+}
+// 引用清单：编号、来源、缩略图一次看全。只读展示——顺序由上游连线和 @ 先后决定，
+// 清单跟着变，不在这里改序（改序会和首尾帧 / 局部重绘的 refs 语义打架）。
+function refManifestMediaHtml(entry){
+    const kind = entry.kind || 'image';
+    if(kind === 'audio') return `<span class="ref-manifest-audio">音频</span>`;
+    return smartPreviewImgHtml(entry, 128, 'alt="" loading="lazy" draggable="false"');
+}
+function renderRefManifest(){
+    if(!refManifestPop) return;
+    const entries = computePromptRefEntries(selectedNode());
+    if(refManifestCount){
+        refManifestCount.textContent = String(entries.length);
+        refManifestCount.hidden = !entries.length;
+    }
+    if(!entries.length){
+        refManifestPop.innerHTML = `<div class="ref-manifest-empty">当前节点还没有参考素材</div>`;
+        return;
+    }
+    const rows = entries.map(entry => {
+        const short = shortRefLabel(entry.label);
+        const source = entry.mentioned ? '你 @ 的' : (entry.nodeId ? '上游连线' : '自动带入');
+        return `<div class="ref-manifest-row${entry.mentioned ? ' is-mention' : ''}">
+            <span class="ref-manifest-short">${escapeHtml(short)}</span>
+            <span class="ref-manifest-thumb">${refManifestMediaHtml(entry)}</span>
+            <span class="ref-manifest-main"><b>${escapeHtml(entry.name || short)}</b><i>${escapeHtml(source)}</i></span>
+            <code>${escapeHtml(entry.label)}</code>
+        </div>`;
+    }).join('');
+    refManifestPop.innerHTML = `<div class="ref-manifest-head"><b>引用清单</b><span>编号 = 提示词里的标签</span></div><div class="ref-manifest-list">${rows}</div><div class="ref-manifest-foot">写 <code>&lt;Picture 3&gt;</code> 就指向第 3 项，与 H3 工作流 media 槽位一致</div>`;
+}
+function toggleRefManifest(force){
+    if(!refManifestPop || !refManifestBtn) return;
+    const willOpen = typeof force === 'boolean' ? force : refManifestPop.hidden;
+    if(!willOpen){
+        refManifestPop.hidden = true;
+        refManifestBtn.classList.remove('active');
+        return;
+    }
+    renderRefManifest();
+    refManifestPop.hidden = false;
+    refManifestBtn.classList.add('active');
+    const rect = refManifestBtn.getBoundingClientRect();
+    const width = refManifestPop.offsetWidth || 300;
+    const height = refManifestPop.offsetHeight || 240;
+    refManifestPop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    refManifestPop.style.top = `${Math.max(8, rect.top - height - 8)}px`;
+}
+function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=false, ctx=smartLoopContext, options={}){
+    const ignoreOwnPrompt = Boolean(node?.outputClearedForRerun && isGeneratedOutputRerunNode(node) && !(node.images || []).some(img => img?.url));
+    const ignoreMentionImages = Boolean(options?.ignoreMentionImages);
+    // 基础参考与 chip 角标共用 resolvePromptBaseRefs，保证画布上显示的编号就是提示词里的编号
+    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = resolvePromptBaseRefs(node, {consume:consumeDefault, ctx, overrideDefaultImages});
+    const parts = ignoreOwnPrompt ? [] : collectPromptParts();
+    const originalPrompt = originalPromptTextFromParts(parts);
     const refs = defaultRefs.map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
+    const counters = {image:0, video:0, audio:0};
+    const takeRefLabel = kind => {
+        const key = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
+        counters[key] += 1;
+        return `<${refTagForKind(key)} ${counters[key]}>`;
+    };
+    // refLabels 与 refs 严格同序：refs[i] 在提示词里就叫 refLabels[i]
+    const refLabels = refs.map(img => takeRefLabel(img.kind || mediaKindForItem(img)));
     let hasMentionToken = false;
     const refMap = new Map();
     refs.forEach((img, index) => refMap.set(img.url, index + 1));
@@ -29961,9 +30816,11 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
                 return;
             }
             refMap.set(part.url, refs.length + 1);
-            refs.push(copyMediaSizeFields(part, {url:part.url, name:part.name || `图${refs.length + 1}`, nodeId:part.nodeId, imageIndex:part.imageIndex, kind:part.kind || 'image', asset_uris:part.asset_uris || {}, mentioned:true, role:`image_${refs.length + 1}`}));
+            const pushedRef = copyMediaSizeFields(part, {url:part.url, name:part.name || `图${refs.length + 1}`, nodeId:part.nodeId, imageIndex:part.imageIndex, kind:part.kind || 'image', asset_uris:part.asset_uris || {}, mentioned:true, role:`image_${refs.length + 1}`});
+            refs.push(pushedRef);
+            refLabels.push(takeRefLabel(pushedRef.kind || 'image'));
         }
-        body += `图${refMap.get(part.url)}`;
+        body += refLabels[refMap.get(part.url) - 1] || `图${refMap.get(part.url)}`;
     });
     body = body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     const groupPrompt = isSmartGroupNode(node) ? textForNode(node, ctx).trim() : '';
@@ -29979,7 +30836,7 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
         : (originalPrompt || body);
     const shouldAttachRefMap = refs.length > 1 || hasMentionToken;
     if(shouldAttachRefMap && refs.length){
-        const mapText = refs.map((img, i) => `图${i + 1}：${img.name || `图片${i + 1}`}`).join('\n');
+        const mapText = refs.map((img, i) => `${refLabels[i] || `图${i + 1}`} = ${img.name || `图片${i + 1}`}`).join('\n');
     return {
             prompt:`${tr('smart.refMapHeader')}\n${mapText}\n\n${tr('smart.refUserNeed')}\n${body}`,
             displayPrompt,
@@ -33096,7 +33953,12 @@ async function runPromptLLMNode(nodeId, options={}){
         node.llmInstruction = originalInstruction;
         return merged;
     })();
-    if(!message){ toast(tr('smart.promptLlmNeedText')); return; }
+    // 2026-10-20（用户要求）：规则智能体（agent 模式）开启时，输入为空也允许运行——
+    // 规则内容整段作为系统提示词，配合节点引用的图片/素材即可执行（如九宫格拼图只挂图不写字）。
+    // 此时用一句兜底指令驱动模型按规则处理素材；非智能体模式仍要求非空输入。
+    const agentRuleActive = useLlmRule && llmRuleModeNow === 'agent';
+    const finalMessage = message || (agentRuleActive ? '请按照系统提示词中的规则处理本次任务与附带的素材。' : '');
+    if(!finalMessage){ toast(tr('smart.promptLlmNeedText')); return; }
     const runDownstream = options.runDownstream === true;
     const writeMode = options.writeMode === 'append' ? 'append' : 'overwrite';
     const systemPrompt = (node.llmSystemPrompt || '').trim();
@@ -33132,7 +33994,7 @@ async function runPromptLLMNode(nodeId, options={}){
             signal:controller.signal,
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
-                message,
+                message: finalMessage,
                 messages:[],
                 images,
                 videos,
@@ -33310,23 +34172,30 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             }
             return ref?.url;
         };
-        const refImages = imageRefsOnly(uploadedRefs).map((ref, i) => {
+        // 2026-10-19 首尾帧模式：只取前 2 张图（图1=首帧、图2=尾帧；仅 1 张时按 videoFrameRole
+        // 指定首或尾），第 3 张起图片与参考视频/音频一律不提交（官方要求首尾帧与其他参考互斥）。
+        const frameMode = smartStrictBool(runSettings.videoUseFrameRoles, false);
+        const frameRole = runSettings.videoFrameRole === 'last' ? 'last' : 'first';
+        const allImages = imageRefsOnly(uploadedRefs);
+        const frameImages = frameMode ? allImages.slice(0, 2) : allImages;
+        const refImages = frameImages.map((ref, i) => {
             const item = {url:effUrl(ref), name:ref.name || `图${i + 1}`};
-            if(runSettings.videoUseFrameRoles){
-                if(i === 0) item.role = 'first_frame';
-                else if(i === 1) item.role = 'last_frame';
+            if(frameMode){
+                if(frameImages.length === 1) item.role = frameRole === 'last' ? 'last_frame' : 'first_frame';
+                else item.role = i === 0 ? 'first_frame' : 'last_frame';
             }
             return item;
         });
         const manualVideo = manualSmartVideoLink(runSettings)?.url || '';
-        const refVideos = manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
-        const refAudios = audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
+        const refVideos = frameMode ? [] : (manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean));
+        const refAudios = frameMode ? [] : audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
         if(mismatchedAsset) toast('部分认证素材属于其它平台，已回退为普通素材。切换到对应平台的视频接口才能用 asset:// 认证地址。');
+        const durRange = videoDurationRangeForProvider(runSettings.videoProvider, runSettings.videoModel);
         const payload = {
             prompt,
             provider_id: runSettings.videoProvider || 'comfly',
             model: runSettings.videoModel || 'veo3-fast',
-            duration: Math.max(1, Math.min(60, Number(runSettings.videoDuration) || 5)),
+            duration: Math.max(durRange.min, Math.min(durRange.max, Number(runSettings.videoDuration) || 5)),
             aspect_ratio: runSettings.videoAspect || '16:9',
             resolution: runSettings.videoResolution || '',
             images: refImages,
@@ -33336,17 +34205,45 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             enable_upsample: Boolean(runSettings.videoEnableUpsample),
             watermark: Boolean(runSettings.videoWatermark),
             camerafixed: Boolean(runSettings.videoCameraFixed),
-            generate_audio: Boolean(runSettings.videoGenerateAudio),
-            multimodal: Boolean(runSettings.videoMultimodal),
+            generate_audio: smartStrictBool(runSettings.videoGenerateAudio, true),
+            multimodal: smartStrictBool(runSettings.videoMultimodal, false),
             trusted_asset: useAssetUris
         };
-        const result = await fetch('/api/video/generate', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payload)
-        }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
-        if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
-        return resultMediaUrls(result);
+        // 2026-10-19 生成数量：方舟没有批量参数 → 前端并发提交 N 次，结果全部合并进同一节点。
+        // 官方并发上限 3：最多 3 路并行，第 4 个自动排队补发；单个失败不影响其余成功结果。
+        const totalRuns = [1, 2, 4].includes(Number(runSettings.videoCount)) ? Number(runSettings.videoCount) : 1;
+        const submitOnce = async () => {
+            const result = await fetch('/api/video/generate', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(payload)
+            }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
+            if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
+            return resultMediaUrls(result);
+        };
+        if(totalRuns <= 1) return await submitOnce();
+        const slots = Math.min(3, totalRuns);
+        const batches = new Array(totalRuns).fill(null);
+        let nextIndex = 0;
+        let firstError = null;
+        const runSlot = async () => {
+            while(nextIndex < totalRuns){
+                const index = nextIndex;
+                nextIndex += 1;
+                try {
+                    const urls = await submitOnce();
+                    if(urls && urls.length) batches[index] = urls;
+                } catch(error){
+                    if(error instanceof JimengPendingSignal) throw error;
+                    if(!firstError) firstError = error;
+                }
+            }
+        };
+        await Promise.all(Array.from({length:slots}, runSlot));
+        const merged = batches.filter(Boolean).flat();
+        if(!merged.length) throw firstError || new Error(tr('smart.errNoOutVideos'));
+        if(firstError) toast(`部分生成失败（成功 ${batches.filter(Boolean).length}/${totalRuns}）：${firstError.message || firstError}`);
+        return merged;
     } finally {
         transientSmartCloudLinks = [];
     }
@@ -33451,7 +34348,7 @@ const H3_PROMPT_OPTIMIZER_SYSTEM = [
     'C. 不要新增原文没有的人物、品牌、对白、道具、场景元素 —— 不要"合理想象"用户没说但可能存在的元素。',
     'D. 总长度：中文 80-200 字 / 英文 60-150 词。多于 2 个镜头时按比例延长但不超过 250 字。',
     'E. 如果原文已经是结构化提示词（已有 [Shot 1] / 时间戳 / 运镜词 / 风格词），保留已有结构并补全缺失要素即可，不要破坏或重写已有结构。',
-    'F. 参考素材会随请求一起提供。必须结合参考图的主体、构图、场景、光线、动作关系，以及参考视频关键帧/音频信息来改写，不要只改写文本。可以使用“图1/视频1/音频1”这类画布索引来保持素材顺序，但不要写“我看到了参考图/上传的图”这类解释性元描述。'
+    'F. 参考素材会随请求一起提供。必须结合参考图的主体、构图、场景、光线、动作关系，以及参考视频关键帧/音频信息来改写，不要只改写文本。指代素材一律使用 H3 官方引用标签 <Picture N>/<Video N>/<Audio N>（按素材槽位顺序编号），不要写“图1”“视频1”这类中文索引，也不要写“我看到了参考图/上传的图”这类解释性元描述。'
 ].join('\n');
 function h3OptimizerProviderId(runSettings){
     // 优先用设置中心的「默认翻译大模型」
@@ -33912,7 +34809,7 @@ function h3OptimizerMessage(rawPrompt, runSettings, mediaRefs){
         '1. 先理解这些参考素材的真实画面内容，再和原始提示词合并成一个可执行的视频提示词。',
         '2. 保留素材里的主体外观、场景、天气/光线、构图、镜头氛围和动作关系；不要凭空替换成无关主体。',
         '3. 如果原始提示词与素材冲突，以素材可见内容为准；只把用户额外要求补进镜头动作和节奏。',
-        '4. 需要指代素材时使用图1/图2、视频1、音频1这类索引；不要输出解释、标题或“参考素材如下”。'
+        '4. 需要指代素材时一律使用 H3 官方引用标签 <Picture 1>、<Picture 2>、<Video 1>、<Audio 1>（图片/视频/音频分别按槽位顺序编号）；不要使用“图1”“视频1”这类中文索引，不要输出解释、标题或“参考素材如下”。'
     ].join('\n');
     return {message, images:media.images, videos:media.videos, mediaCount:media.lines.length};
 }
@@ -37739,12 +38636,25 @@ composer.addEventListener('click', event => {
     if(!event.target.closest('.smart-control') && !event.target.closest('#runBtn') && !event.target.closest('#cascadeRunBtn')) closeAllSmartPopovers();
     event.stopPropagation();
 });
+// 引用清单：点按钮弹出，点空白处关闭（面板 fixed 定位在按钮上方，不撑开 composer）
+refManifestBtn?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleRefManifest();
+});
+document.addEventListener('click', event => {
+    if(!refManifestPop || refManifestPop.hidden) return;
+    if(event.target.closest?.('#refManifestPop, #refManifestBtn')) return;
+    toggleRefManifest(false);
+});
 promptInput.addEventListener('input', maybeOpenMentionPicker);
 promptInput.addEventListener('input', () => {
     delete promptInput.dataset.preserveDraftOnce;
     markPromptDraftDirty();
     autoGrowPromptInput();
     savePromptDraftForCurrent();
+    refreshMentionRefLabels();
+    updatePromptWordCount();
     renderInputThumbsRow(selectedNode());
     syncRunButtonState(activeComposerNode() || selectedNode());
     scheduleSave();
@@ -37762,14 +38672,66 @@ async function handleSmartPromptPasteFiles(files){
         toast(err.message || tr('smart.toastUploadFail'));
     }
 }
+// 2026-10-19（用户反馈）粘贴长提示词后输入框里"看不到内容"：
+// 浏览器粘贴后默认把光标（文本结尾）滚进视野，固定高度的输入框只显示最后一行，开头全被裁掉，
+// 要点空白处触发重渲染（value 重设、scrollTop 归零）才看得见。这里贴完主动回到顶部显示开头；
+// LLM composer 的输入壳（.prompt-llm-input-shell，CSS 固定 220px）随内容自动加高（280px 封顶）。
+function growPromptLlmComposerShell(el){
+    const shell = el?.closest?.('.prompt-llm-input-shell');
+    if(!shell) return;
+    const needed = (el.scrollHeight || 0) + 4;
+    const MAX_H = 280, MIN_H = 220;   // 与 CSS 的 min-height:220 / max-height:280 保持一致
+    if(needed > MIN_H){
+        const h = Math.min(MAX_H, needed);
+        shell.style.setProperty('height', h + 'px', 'important');
+        shell.style.setProperty('min-height', h + 'px', 'important');
+    } else {
+        shell.style.removeProperty('height');
+        shell.style.removeProperty('min-height');
+    }
+}
 function bindSmartPromptPaste(el){
     if(!el) return;
     el.addEventListener('paste', event => {
         const files = [...(event.clipboardData?.files || [])].filter(isSupportedUploadFile);
-        if(!files.length) return;
+        if(files.length){
+            event.preventDefault();
+            event.stopPropagation();
+            handleSmartPromptPasteFiles(files);
+            return;
+        }
+        // 统一按纯文本插入：剪贴板富文本常带 white-space:nowrap 等内联样式，
+        // 原样插入会盖掉输入框的折行规则，导致长行横向溢出显示不全
+        const text = event.clipboardData?.getData('text/plain');
+        if(text == null) return;   // 剪贴板不可读时退回默认行为
         event.preventDefault();
         event.stopPropagation();
-        handleSmartPromptPasteFiles(files);
+        let ok = false;
+        try { ok = document.execCommand('insertText', false, text); } catch(_) { ok = false; }
+        if(!ok){
+            // 兜底：手动构造文本节点插入（丢失撤销栈，仅极端环境触发）
+            const sel = window.getSelection();
+            if(sel && sel.rangeCount){
+                const range = sel.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(document.createTextNode(text));
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+        // 纯文本粘贴：等插入完成后回到顶部（默认行为是滚到光标处=只显示结尾）
+        requestAnimationFrame(() => {
+            if(el.scrollHeight > el.clientHeight + 4) el.scrollTop = 0;
+            growPromptLlmComposerShell(el);
+            if(el === promptInput){
+                autoGrowPromptInput();
+                savePromptDraftForCurrent();
+                refreshMentionRefLabels();
+                updatePromptWordCount();
+                syncRunButtonState(activeComposerNode() || selectedNode());
+            }
+        });
     });
 }
 bindSmartPromptPaste(promptInput);
@@ -37956,6 +38918,7 @@ promptLlmInstruction?.addEventListener('input', event => {
     if(!node) return;
     node.llmInstruction = event.target.value || '';
     scheduleSave();
+    growPromptLlmComposerShell(event.target);   // 输入/删减多行时输入壳高度自适应（220→280）
     syncPromptLlmOptimizeUI(node);   // 手改文本后「已优化」标记自动失效（原文仍可还原）
     const query = promptLlmSlashQuery(event.target.value || '');
     if(query !== null){
@@ -38061,7 +39024,7 @@ document.getElementById('promptLlmTranslate')?.addEventListener('click', async e
         const translated = (result.text || '').trim();
         if(!translated){ toast('翻译结果为空'); return; }
         node.llmInstruction = translated;
-        if(promptLlmInstruction) promptLlmInstruction.value = translated;
+        if(promptLlmInstruction){ promptLlmInstruction.value = translated; promptLlmInstruction.scrollTop = 0; growPromptLlmComposerShell(promptLlmInstruction); }
         scheduleSave();
         toast('已翻译');
     } catch(e) { toast((e.message || '翻译失败').slice(0, 160)); }

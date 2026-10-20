@@ -54,7 +54,7 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.19.1.1792382881">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.19.1.1792491355">
     <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.10.19.1.1792302014">
 </head>
 <body>
@@ -79,6 +79,7 @@
                                 <button type="button" data-kind="audio"><i data-lucide="audio-lines"></i><span>音频</span></button>
                             </div>
                             <div id="inputMediaSummary" class="input-media-summary" hidden aria-live="polite"></div>
+                            <span id="promptWordCount" class="prompt-word-count" hidden aria-live="polite"></span>
                         </div>
                     </div>
                     <div id="inputThumbsRow" class="input-thumbs-row"></div>
@@ -95,6 +96,9 @@
                         <div id="dynamicParams" class="dynamic-params"></div>
                     </div>
                     <div class="composer-actions">
+                        <button id="refManifestBtn" class="ref-manifest-btn" type="button" title="引用清单：这里的编号就是提示词里的 &lt;Picture N&gt;">
+                            <i data-lucide="hash"></i><span>引用</span><b id="refManifestCount" class="ref-manifest-count" hidden>0</b>
+                        </button>
                         <div id="imageOutputModeToggle" class="image-mode-slot" style="display:none">
                             <div class="image-mode-toggle" title="生成结果写入方式：追加到当前组合框">
                                 <button type="button" data-output-mode="append" class="active">追加</button>
@@ -104,6 +108,7 @@
                         <button id="runBtn" class="run-btn" type="button"><i data-lucide="sparkles"></i><span data-i18n="smart.run">运行</span></button>
                     </div>
                 </div>
+                <div id="refManifestPop" class="ref-manifest-pop" hidden></div>
             </div>
             <div id="promptLlmComposer" class="prompt-llm-composer" hidden>
                 <div class="prompt-llm-composer-card">
@@ -371,7 +376,7 @@
         </style>
         <aside id="smartAgentPanel" class="smart-agent-panel smart-agent-gpt-host" aria-label="GPT 对话">
             <button id="smartAgentCloseBtn" class="smart-agent-frame-close" type="button" title="收起 GPT 对话"><i data-lucide="x"></i></button>
-            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V26.10.19.1.1792385144" title="AI 助手"></iframe>
+            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V26.10.19.1.1792410449" title="AI 助手"></iframe>
             <script>
                 // 聊天 iframe 的 src 由脚本注入时间戳：保证任何情况下都加载最新版聊天页（绕过一切缓存）
                 (function(){
@@ -650,10 +655,29 @@
         <div id="smartLogModal" class="log-modal" onclick="closeSmartCanvasLog()">
             <div class="log-panel" onclick="event.stopPropagation()">
                 <div class="log-head">
-                    <div class="log-title" data-i18n="canvas.generationLogs">生成日志</div>
+                    <div class="log-title" data-i18n="canvas.logs">日志</div>
+                    <div class="log-tabs" role="tablist">
+                        <button id="smartLogTabLogs" class="log-tab active" type="button" role="tab" onclick="switchSmartLogTab('logs')">生成日志 <span class="log-tab-count" id="smartLogTabCountLogs">0</span></button>
+                        <button id="smartLogTabVideos" class="log-tab" type="button" role="tab" onclick="switchSmartLogTab('videos')">找回视频 <span class="log-tab-count" id="smartLogTabCountVideos">0</span></button>
+                    </div>
                     <button class="preview-icon-btn" type="button" onclick="closeSmartCanvasLog()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
+                <!-- 2026-10-20 生成日志页签：全部/成功/失败 筛选（只在日志页签显示） -->
+                <div id="smartLogToolbar" class="log-toolbar">
+                    <div class="log-seg" id="smartLogFilter">
+                        <button class="active" type="button" data-log-filter="all">全部 <b>0</b></button>
+                        <button type="button" data-log-filter="ok">成功 <b>0</b></button>
+                        <button type="button" data-log-filter="failed">失败 <b>0</b></button>
+                    </div>
+                    <div class="log-tool-spacer"></div>
+                    <span class="log-tool-note">最新优先 ↓</span>
+                </div>
                 <div id="smartLogList" class="log-list"></div>
+                <!-- 2026-10-20 找回视频页签：读 /api/video/jobs（后端落库，刷新/关页也丢不了） -->
+                <div id="smartLogVideoPane" class="log-video-pane" hidden>
+                    <div class="log-video-tip"><i>i</i><span>生成结果已自动落库（含生成期间刷新 / 关页的），可一键插回画布或下载。</span></div>
+                    <div id="smartLogVideoGrid" class="log-video-grid"></div>
+                </div>
             </div>
         </div>
         <div id="billingModal" class="log-modal" onclick="closeBillingPanel()">
@@ -1025,7 +1049,7 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=V26.10.19.1.1792382760"></script>
+    <script src="/static/js/smart-canvas.js?v=V26.10.19.1.1792499810"></script>
 </body>
 </html>
 

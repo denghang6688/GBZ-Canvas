@@ -4923,6 +4923,7 @@
                 ${rows}
                 <button type="button" class="skill-mini-btn" onclick="openSkillForm('__new__')">＋ 手动添加技能包</button>
                 <button type="button" class="skill-mini-btn" onclick="installSkillFromUrl()" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd">🔗 从链接安装技能包</button>
+                <button type="button" class="skill-mini-btn" onclick="pickSkillZip()" style="background:#dcfce7;color:#166534;border-color:#86efac">📎 上传本地压缩包（.zip）</button>
                 <div class="skill-section-title">技能包市场 · 一键安装</div>
                 ${tplRows}`;
             lucide.createIcons();
@@ -5008,6 +5009,58 @@
                     await loadSkills();
                     renderSkillManager();
                 }
+            }catch(err){
+                statusBox.textContent = '❌ ' + err.message;
+                statusBox.style.background = '#b91c1c';
+            } finally {
+                setTimeout(() => statusBox.remove(), 8000);
+            }
+        }
+
+        // —— 2026-10-19 上传本地 .zip 技能包（不走外链，直接 multipart 到后端）——
+        function pickSkillZip(){
+            let input = document.getElementById('skillZipInput');
+            if(!input){
+                input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.zip,application/zip,application/x-zip-compressed';
+                input.id = 'skillZipInput';
+                input.style.display = 'none';
+                document.body.appendChild(input);
+                input.addEventListener('change', () => {
+                    const f = input.files && input.files[0];
+                    input.value = '';
+                    if(f) uploadSkillZip(f);
+                });
+            }
+            input.click();
+        }
+        async function uploadSkillZip(file){
+            if(!file) return;
+            if(!/\.zip$/i.test(file.name)){ alert('请选择 .zip 压缩包（技能包目录内需包含 SKILL.md）'); return; }
+            const force = /^(1\.)/.test(prompt('发现 P0 危险脚本时是否强制安装？\n输入 1 = 强制（自担风险），其他 = 拒绝安装', '0') || '');
+            const statusBox = document.createElement('div');
+            statusBox.style.cssText = 'position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#1e293b;color:#fff;padding:12px 18px;border-radius:8px;z-index:9999;font-size:13px;max-width:560px;white-space:pre-wrap;box-shadow:0 6px 24px rgba(0,0,0,.2)';
+            statusBox.textContent = `正在安装本地压缩包：${file.name}（${Math.max(1, Math.round(file.size / 1024))} KB）...`;
+            document.body.appendChild(statusBox);
+            try{
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('force', force ? 'true' : 'false');
+                const r = await fetch('/api/skills/install/upload', {method:'POST', body:fd});
+                const data = await r.json().catch(() => ({}));
+                if(!r.ok){
+                    statusBox.textContent = '❌ ' + (data.detail || '安装失败');
+                    statusBox.style.background = '#b91c1c';
+                    return;
+                }
+                const inst = (data.installed || []).map(x => `✅ ${x.name}${x.tools > 0 ? '（脚本×' + x.tools + '）' : ''}`).join('\n');
+                const warn = (data.warnings || []).slice(0, 3).map(w => `⚠️ ${w.file}: ${w.message}`).join('\n');
+                const block = (data.blocked || []).map(b => `🚫 ${b.name}: ${(b.findings || []).slice(0, 2).map(f => f.message).join('; ')}`).join('\n');
+                statusBox.style.background = (data.blocked && data.blocked.length) ? '#b91c1c' : '#15803d';
+                statusBox.textContent = `安装来源：${data.source}\n成功：${inst || '(无)'}\n警告：${warn || '(无)'}\n拦截：${block || '(无)'}`;
+                await loadSkills();
+                renderSkillManager();
             }catch(err){
                 statusBox.textContent = '❌ ' + err.message;
                 statusBox.style.background = '#b91c1c';
