@@ -86,19 +86,14 @@
                     <div id="inputPromptPreview" class="input-prompt-preview"></div>
                     <div class="prompt-row">
                         <div id="promptInput" class="prompt-input" contenteditable="true" data-i18n-placeholder="smart.promptPlaceholder" data-placeholder="描述你想生成或编辑的图片..."></div>
-                        <button id="composerTemplateBtn" class="composer-template-btn" type="button" title="模板库" aria-label="模板库" data-i18n-title="smart.promptTemplateLibrary">
-                            <i data-lucide="library"></i><span data-i18n="smart.promptTemplateLibrary">模板库</span>
-                        </button>
                         <div id="mentionPicker" class="mention-picker"></div>
+                        <div id="slashMenu" class="slash-menu"></div>
                         <div id="promptResize" class="prompt-resize" data-i18n-title="smart.promptResize" title="拖拽调整文本框高度"></div>
                     </div>
                     <div class="param-row">
                         <div id="dynamicParams" class="dynamic-params"></div>
                     </div>
                     <div class="composer-actions">
-                        <button id="refManifestBtn" class="ref-manifest-btn" type="button" title="引用清单：这里的编号就是提示词里的 &lt;Picture N&gt;">
-                            <i data-lucide="hash"></i><span>引用</span><b id="refManifestCount" class="ref-manifest-count" hidden>0</b>
-                        </button>
                         <div id="imageOutputModeToggle" class="image-mode-slot" style="display:none">
                             <div class="image-mode-toggle" title="生成结果写入方式：追加到当前组合框">
                                 <button type="button" data-output-mode="append" class="active">追加</button>
@@ -108,7 +103,6 @@
                         <button id="runBtn" class="run-btn" type="button"><i data-lucide="sparkles"></i><span data-i18n="smart.run">运行</span></button>
                     </div>
                 </div>
-                <div id="refManifestPop" class="ref-manifest-pop" hidden></div>
             </div>
             <div id="promptLlmComposer" class="prompt-llm-composer" hidden>
                 <div class="prompt-llm-composer-card">
@@ -226,22 +220,6 @@
                 <button id="promptPresetNew" type="button">存为新预设</button>
                 <button id="promptPresetSave" class="primary" type="button">保存修改</button>
             </div>
-        </div>
-        <div id="promptTemplatePanel" class="prompt-template-panel">
-            <div class="prompt-template-head">
-                <div>
-                    <strong>提示词模板库</strong>
-                    <span>内置标准库 + 我的预设</span>
-                </div>
-                <button id="promptTemplateClose" type="button" title="关闭"><i data-lucide="x"></i></button>
-            </div>
-            <select id="promptTemplateLibrarySelect" class="prompt-template-library-select" title="选择提示词库"></select>
-            <div class="prompt-template-search">
-                <i data-lucide="search"></i>
-                <input id="promptTemplateSearch" type="search" placeholder="搜索模板...">
-            </div>
-            <div id="promptTemplateCats" class="prompt-template-cats"></div>
-            <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
             <div id="minimapContent" class="smart-minimap-content">

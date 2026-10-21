@@ -348,7 +348,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "V26.10.20.1"
+APP_VERSION = "V26.10.21.1"
 # === GBZ智能画布 更新源（发布地址绑定作者账号；换账号/仓库名只改这里） ===
 GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认）
 GITHUB_REPO_NAME = "GBZ-Canvas"
@@ -8224,6 +8224,16 @@ def load_prompt_libraries():
     if not isinstance(data, dict):
         data = default_prompt_libraries()
     normalized = normalize_prompt_libraries(data)
+    # 自愈：系统库一条模板都没有时，把内置模板播种进去。
+    # 历史遗留：2026-09-28 首次初始化时内置模板 markdown 解析失败，落了一个 0 条的空系统库，
+    # 而文件一旦存在就不会再走 default_prompt_libraries()，导致「资产库管理 → 提示词库」一直显示 0 条。
+    # 用户删除内置模板走前端 hiddenBuiltinIds（localStorage），不会清空这个文件，所以播种不会顶掉用户数据。
+    try:
+        for lib in normalized.get("libraries") or []:
+            if lib.get("id") == "system" and not (lib.get("items") or []):
+                lib["items"] = builtin_prompt_templates()
+    except Exception as e:
+        print(f"播种系统提示词库失败: {e}")
     if normalized.get("active_library_id") != data.get("active_library_id") or normalized.get("libraries") != data.get("libraries"):
         return save_prompt_libraries(normalized)
     return normalized

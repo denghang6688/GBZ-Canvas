@@ -28,6 +28,7 @@ const portNextMenuClose = document.getElementById('portNextMenuClose');
 const portNextMenuSearch = document.getElementById('portNextMenuSearch');
 const promptInput = document.getElementById('promptInput');
 const mentionPicker = document.getElementById('mentionPicker');
+const slashMenu = document.getElementById('slashMenu');
 const mentionPreview = document.getElementById('mentionPreview');
 const engineSelect = document.getElementById('engineSelect');
 const composerPanelTitle = document.getElementById('composerPanelTitle');
@@ -1979,6 +1980,7 @@ function closeRightCanvasPanels(except=''){
 }
 function closeFloatingCanvasPanels(except=''){
     closeRightCanvasPanels(except);
+    closeSlashMenu();
     if(except !== 'presetWorkflow') closePresetWorkflowPanel();
 }
 function presetWorkflowMeta(workflow){
@@ -5750,7 +5752,9 @@ function promptNodeUpstreamPromptText(node, ctx=smartLoopContext){
 }
 function promptNodeLLMInputText(node, ctx=smartLoopContext){
     const upstream = promptNodeUpstreamPromptText(node, ctx).trim();
-    const instruction = String(node?.llmInstruction || '').trim() || promptNodePromptItems(node).join('\n\n').trim();
+    // 模板胶囊：正文拼在节点自有文本之前（与生图节点 buildPromptRequest 的拼接位置一致）
+    const tplText = String(node?.appliedTemplate?.text || '').trim();
+    const instruction = [tplText, String(node?.llmInstruction || '').trim() || promptNodePromptItems(node).join('\n\n').trim()].filter(Boolean).join('\n\n');
     return [upstream, instruction].filter(Boolean).join('\n\n');
 }
 function activePromptLlmComposerNode(){
@@ -11595,6 +11599,18 @@ async function loadPromptTemplates(){
         } else {
             const system = promptLibraries.find(lib => lib.id === 'system') || promptLibraries[0];
             builtinPromptTemplates = Array.isArray(system?.items) ? system.items.filter(t => t?.id && t?.positive) : [];
+            // 2026-10-21 系统库存在但被清空时（接口返回了 0 条，原 fallback 不会触发），
+            // 内存合并内置模板，保证模板面板与「/ 常用功能」菜单不为空；不写回文件，编辑/新增仍走后端。
+            if(system?.id === 'system' && !builtinPromptTemplates.length){
+                try {
+                    const fallback = await fetch('/api/smart-canvas/prompt-templates').then(r => r.ok ? r.json() : {templates:[]});
+                    const templates = Array.isArray(fallback.templates) ? fallback.templates.filter(t => t?.id && t?.positive) : [];
+                    if(templates.length){
+                        system.items = templates;
+                        builtinPromptTemplates = templates;
+                    }
+                } catch(e2) {}
+            }
         }
         if(!promptLibraries.some(lib => lib.id === activePromptLibraryId)) activePromptLibraryId = promptLibraries[0]?.id || 'system';
         renderPromptLibrarySelect();
@@ -27599,6 +27615,12 @@ function loadPromptDraft(subject){
     } else {
         setPromptText('');
     }
+    // 草稿 HTML 可能被清洗重建（只剩纯文本），模板胶囊按节点上存的快照补回来
+    if(subject?.appliedTemplate && !promptTemplateChip()){
+        promptInput.insertAdjacentHTML('afterbegin', promptTemplateChipHtml(subject.appliedTemplate));
+        refreshIcons();
+    }
+    syncPromptChipHint();
     delete promptInput.dataset.promptDraftDirty;
 }
 function positionComposerForNode(node){
@@ -29606,7 +29628,11 @@ function selfEditReferenceImagesForNode(node, ctx=smartLoopContext){
 }
 function textForNode(node, ctx=smartLoopContext){
     if(!node) return '';
-    if(node.type === 'smart-prompt') return promptNodePromptItems(node).join('\n\n');
+    if(node.type === 'smart-prompt'){
+        // 模板胶囊：下游读取提示词节点文本时也带上模板正文（LLM 运行与 buildPromptRequest 同源）
+        const tplText = String(node?.appliedTemplate?.text || '').trim();
+        return [tplText, promptNodePromptItems(node).join('\n\n')].filter(Boolean).join('\n\n');
+    }
     if(node.type === 'smart-loop') return smartLoopPrompt(node, ctx);
     if(node.type === 'smart-group') return smartGroupMembers(node).map(member => textForNode(member, ctx)).filter(Boolean).join('\n\n');
     return '';
@@ -29718,11 +29744,14 @@ function sanitizePromptInputForNode(node, ctx=smartLoopContext){
     const rawText = promptPlainText();
     const cleanText = cleanLocalPromptDraftText(node, rawText, ctx);
     if(cleanText === normalizePromptDraftCompareText(rawText)) return false;
-    promptInput.innerHTML = escapeHtml(cleanText);
+    // 重写纯文本时保留模板胶囊（模板正文不在 rawText 里，重写不会重复）
+    const chipHtml = promptTemplateChip()?.outerHTML || (node?.appliedTemplate ? promptTemplateChipHtml(node.appliedTemplate) : '');
+    promptInput.innerHTML = chipHtml + escapeHtml(cleanText);
     promptInput.dataset.promptDraftDirty = '1';
     node.promptDraftText = cleanText;
-    node.promptDraftHtml = escapeHtml(cleanText);
+    node.promptDraftHtml = promptInput.innerHTML;
     node.promptDraftTouched = true;
+    syncPromptChipHint();
     return true;
 }
 function upstreamLoopPromptNodesFor(node){
@@ -30535,6 +30564,337 @@ function maybeOpenMentionPicker(){
     if(/@$/.test(before)) showMentionPicker();
     else closeMentionPicker();
 }
+// ===== 2026-10-21 「/ 常用功能」菜单：composer 输入框键入 / 唤起提示词模板快捷面板 =====
+// 数据复用现有提示词模板库（promptTemplateItems），不另造内容体系；「/」只是快捷入口，
+// 顶栏「模板库」面板仍是完整管理入口。最近使用记录存 localStorage（与模板 overrides 同思路）。
+const SLASH_RECENT_KEY = 'smartCanvasSlashRecentIds';
+const slashState = { open:false, query:'', items:[], active:0, replaceChip:false };
+function slashRecentIds(){
+    try {
+        const list = JSON.parse(localStorage.getItem(SLASH_RECENT_KEY) || '[]');
+        return Array.isArray(list) ? list.filter(id => typeof id === 'string') : [];
+    } catch(e){ return []; }
+}
+function recordSlashRecent(id){
+    if(!id) return;
+    const list = slashRecentIds().filter(x => x !== id);
+    list.unshift(id);
+    try { localStorage.setItem(SLASH_RECENT_KEY, JSON.stringify(list.slice(0, 8))); } catch(e){}
+}
+function slashCategoryIcon(category){
+    if(category === 'view') return 'eye';
+    if(category === 'storyboard') return 'layout-grid';
+    if(category === 'character') return 'user-round';
+    if(category === 'product') return 'package';
+    if(category === 'lighting') return 'sun-medium';
+    return 'bookmark';
+}
+// 分类色板：菜单里每个分组一枚彩点 + 图标块同色底/前景，避免整块黑白灰
+const SLASH_CATEGORY_COLORS = {
+    view:       { fg:'#4d9dff', bg:'rgba(77,157,255,.14)' },
+    storyboard: { fg:'#a78bfa', bg:'rgba(167,139,250,.15)' },
+    character:  { fg:'#fb7185', bg:'rgba(251,113,133,.14)' },
+    product:    { fg:'#34d399', bg:'rgba(52,211,153,.14)' },
+    lighting:   { fg:'#22d3ee', bg:'rgba(34,211,238,.14)' },
+    custom:     { fg:'#e879f9', bg:'rgba(232,121,249,.14)' },
+    recent:     { fg:'#fbbf24', bg:'rgba(251,191,36,.14)' }
+};
+const SLASH_FALLBACK_HUES = ['#4d9dff', '#a78bfa', '#fb7185', '#34d399', '#22d3ee', '#fbbf24', '#e879f9'];
+const slashFallbackColors = new Map();
+function slashCategoryColor(category){
+    const key = String(category || 'custom');
+    if(SLASH_CATEGORY_COLORS[key]) return SLASH_CATEGORY_COLORS[key];
+    if(!slashFallbackColors.has(key)){
+        let hash = 0;
+        for(let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+        const fg = SLASH_FALLBACK_HUES[hash % SLASH_FALLBACK_HUES.length];
+        const rgb = [parseInt(fg.slice(1,3),16), parseInt(fg.slice(3,5),16), parseInt(fg.slice(5,7),16)].join(',');
+        slashFallbackColors.set(key, { fg, bg:`rgba(${rgb},.14)` });
+    }
+    return slashFallbackColors.get(key);
+}
+function slashGroups(){
+    const groups = [];
+    const seen = new Set();
+    const all = promptTemplateItems().filter(t => t?.positive);
+    const query = slashState.query.trim().toLowerCase();
+    // 「最近使用」只在空查询时给（过滤时以命中优先），最多 3 条
+    if(!query){
+        const recents = slashRecentIds()
+            .map(id => all.find(t => t.id === id || t.sourceId === id))
+            .filter(Boolean).slice(0, 3);
+        if(recents.length){
+            recents.forEach(t => seen.add(t.id));
+            groups.push({id:'recent', label:tr('smart.slashRecent'), items:recents});
+        }
+    }
+    const buckets = new Map();
+    all.forEach(t => {
+        const cat = t.category || 'custom';
+        if(!buckets.has(cat)) buckets.set(cat, []);
+        buckets.get(cat).push(t);
+    });
+    // 分组顺序以模板库分组（后端 categories）为准，剩余分组按出现顺序排在后面
+    activePromptTemplateGroups().forEach(g => {
+        const items = (buckets.get(g.id) || []).filter(t => !seen.has(t.id));
+        if(items.length){
+            items.forEach(t => seen.add(t.id));
+            groups.push({id:g.id, label:promptTemplateCategoryLabel(g.id), items});
+        }
+    });
+    buckets.forEach((items, cat) => {
+        const rest = items.filter(t => !seen.has(t.id));
+        if(rest.length){
+            rest.forEach(t => seen.add(t.id));
+            groups.push({id:cat, label:promptTemplateCategoryLabel(cat), items:rest});
+        }
+    });
+    return groups;
+}
+// 输入框光标前的「/query」：/ 必须是本条开头或前面是空白，避免网址/路径里的斜杠误触发。
+// 光标前若有模板胶囊，把胶囊当成一个空格（否则胶囊名称会顶在 / 前面，导致贴得紧一点就不触发）。
+function slashQueryFromCaret(){
+    const sel = window.getSelection();
+    if(!sel || !sel.rangeCount || !promptInput?.contains?.(sel.anchorNode)) return null;
+    let before = textBeforeCaret();
+    if(promptTemplateChip()){
+        const range = sel.getRangeAt(0).cloneRange();
+        range.selectNodeContents(promptInput);
+        range.setEnd(sel.anchorNode, sel.anchorOffset);
+        const holder = document.createElement('div');
+        holder.appendChild(range.cloneContents());
+        holder.querySelectorAll('.tpl-chip').forEach(el => el.replaceWith(document.createTextNode(' ')));
+        before = holder.textContent || '';
+    }
+    const m = /(?:^|\s)\/([^\/\n]{0,60})$/.exec(before);
+    return m ? m[1] : null;
+}
+function maybeOpenSlashMenu(){
+    // ⇄ 换模板唤起的菜单没有「/query」：方向键/回车都会触发 keyup，
+    // 不能按「光标前没有 /」就关掉，否则一按上下键菜单就消失（选择也就丢了）。
+    if(slashState.replaceChip) return;
+    const q = slashQueryFromCaret();
+    if(q == null){ closeSlashMenu(); return; }
+    // 已开着且过滤词没变（keyup 等重复触发）时不重绘，避免闪烁/滚动重置
+    if(slashState.open && slashState.query === q) return;
+    openSlashMenu(q);
+}
+function openSlashMenu(query){
+    slashState.query = query;
+    slashState.open = true;
+    renderSlashMenu();
+    slashMenu.classList.add('open');
+    positionSlashMenu();
+}
+function closeSlashMenu(){
+    const wasReplace = slashState.replaceChip;
+    if(!slashState.open && !slashMenu.classList.contains('open')){ slashState.replaceChip = false; return; }
+    slashState.open = false;
+    slashState.query = '';
+    slashState.items = [];
+    slashState.active = 0;
+    slashState.replaceChip = false;
+    slashMenu.classList.remove('open', 'flip');
+    slashMenu.innerHTML = '';
+    if(wasReplace) promptInput?.focus?.();
+}
+function renderSlashMenu(){
+    const query = slashState.query.trim().toLowerCase();
+    const groups = slashGroups()
+        .map(g => ({...g, items: g.items.filter(t => !query || promptTemplateSearchText(t).includes(query))}))
+        .filter(g => g.items.length);
+    const flat = [];
+    let listHtml = '';
+    groups.forEach((g, gi) => {
+        const groupColor = slashCategoryColor(g.id);
+        listHtml += `<div class="slash-group-label"><span class="slash-dot" style="background:${groupColor.fg}"></span>${escapeHtml(g.label)}</div><div class="slash-grid">`;
+        g.items.forEach(tpl => {
+            const idx = flat.length;
+            flat.push({tpl, gi});
+            const icoColor = slashCategoryColor(tpl.category || g.id);
+            listHtml += `<button type="button" class="slash-item${idx === slashState.active ? ' active' : ''}" data-slash-index="${idx}">
+                <span class="slash-ico" style="color:${icoColor.fg};background:${icoColor.bg};border-color:${icoColor.bg}"><i data-lucide="${slashCategoryIcon(tpl.category)}"></i></span>
+                <span class="slash-item-main">
+                    <span class="slash-name">${escapeHtml(promptTemplateName(tpl))}</span>
+                    <span class="slash-desc">${escapeHtml(promptTemplateScene(tpl) || '')}</span>
+                </span>
+            </button>`;
+        });
+        listHtml += `</div>`;
+    });
+    slashState.items = flat;
+    if(slashState.active >= flat.length) slashState.active = Math.max(0, flat.length - 1);
+    slashMenu.innerHTML = `
+        <div class="slash-head">
+            <span class="slash-query">/${escapeHtml(slashState.query)}</span>
+            <span>${flat.length ? trf('smart.slashHits', {n:flat.length}) : ''}</span>
+            <span class="slash-esc">Esc</span>
+        </div>
+        <div class="slash-body">${flat.length ? listHtml : `<div class="slash-empty">${escapeHtml(tr('smart.slashNoMatch'))}</div>`}</div>
+        <div class="slash-foot">
+            <span><b>↑</b><b>↓</b>${escapeHtml(tr('smart.slashNav'))}</span>
+            <span><b>Enter</b>${escapeHtml(tr('smart.slashInsert'))}</span>
+            <span><b>Tab</b>${escapeHtml(tr('smart.slashNextGroup'))}</span>
+            <span class="slash-foot-src">${escapeHtml(tr('smart.slashSource'))}</span>
+        </div>`;
+    refreshIcons();
+    slashMenu.querySelectorAll('.slash-item').forEach(btn => {
+        btn.addEventListener('mouseenter', () => setSlashActive(Number(btn.dataset.slashIndex)));
+        btn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            insertSlashTemplate(slashState.items[Number(btn.dataset.slashIndex)]);
+        });
+    });
+}
+function setSlashActive(idx){
+    slashState.active = idx;
+    slashMenu.querySelectorAll('.slash-item').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.slashIndex) === idx));
+    slashMenu.querySelector(`.slash-item[data-slash-index="${idx}"]`)?.scrollIntoView({block:'nearest'});
+}
+function slashTabNextGroup(){
+    const cur = slashState.items[slashState.active];
+    const next = slashState.items.find(it => it.gi > (cur?.gi ?? -1));
+    if(next) setSlashActive(slashState.items.indexOf(next));
+}
+// 菜单默认贴输入框上沿；上方视口空间不够时翻转到下方（flip）
+function positionSlashMenu(){
+    // 固定向上弹出，不再因上方空间不足翻转到输入框下方
+    slashMenu.classList.remove('flip');
+}
+// 插入时把光标前那段「/query」选中替换掉：/ 与 query 通常在同一个文本节点里（刚打出来的）
+function slashMatchRange(){
+    const sel = window.getSelection();
+    if(!sel || !sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if(!promptInput.contains(range.startContainer)) return null;
+    if(range.startContainer.nodeType === Node.TEXT_NODE){
+        const text = range.startContainer.textContent || '';
+        const off = range.startOffset;
+        const m = /\/([^\/\n]*)$/.exec(text.slice(0, off));
+        if(m){
+            const r = document.createRange();
+            r.setStart(range.startContainer, off - m[0].length);
+            r.setEnd(range.startContainer, off);
+            return r;
+        }
+    }
+    // 兜底：从最后一个文本节点往前找「/query」
+    const walker = document.createTreeWalker(promptInput, NodeFilter.SHOW_TEXT);
+    let last = null;
+    while(walker.nextNode()){
+        const node = walker.currentNode;
+        const r = document.createRange();
+        r.selectNodeContents(node);
+        try { if(range.compareBoundaryPoints(Range.START_TO_START, r) < 0) break; } catch(e){ break; }
+        last = node;
+    }
+    const text = last ? String(last.textContent || '') : '';
+    const m = /\/[^\/\n]*$/.exec(text);
+    if(last && m){
+        const r = document.createRange();
+        r.setStart(last, text.length - m[0].length);
+        r.setEnd(last, text.length);
+        return r;
+    }
+    return null;
+}
+function insertSlashTemplate(entry){
+    const tpl = entry?.tpl || entry;
+    const replacing = slashState.replaceChip;
+    closeSlashMenu();
+    if(!promptInput || !tpl?.positive) return;
+    const subject = activeComposerNode() || selectedNode();
+    promptInput.focus();
+    // 单胶囊：模板是「基调」，多枚语义会打架——已有胶囊时再选即原位替换
+    promptInput.querySelectorAll('.tpl-chip').forEach(chip => chip.remove());
+    if(!replacing){
+        const sel = window.getSelection();
+        const mrange = slashMatchRange();
+        if(mrange){
+            sel.removeAllRanges();
+            sel.addRange(mrange);
+        }
+    }
+    let ok = false;
+    try { ok = document.execCommand('insertHTML', false, promptTemplateChipHtml(tpl)); } catch(e){ ok = false; }
+    if(!ok || !promptTemplateChip()){
+        // 兜底：手动插入（丢撤销栈，仅极端环境触发）
+        promptInput.insertAdjacentHTML('afterbegin', promptTemplateChipHtml(tpl));
+    }
+    const chip = promptTemplateChip();
+    if(chip){
+        const sel = window.getSelection();
+        if(!sel.rangeCount || !promptInput.contains(sel.anchorNode)){
+            const range = document.createRange();
+            range.setStartAfter(chip);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+    }
+    // 模板正文快照挂到节点上：草稿 HTML 被清洗/重建后仍能把胶囊原样放回来
+    if(isSmartRunnableNode(subject)){
+        subject.appliedTemplate = {
+            id:tpl.id || '',
+            sourceId:tpl.sourceId || '',
+            name:promptTemplateName(tpl),
+            desc:promptTemplateScene(tpl) || '',
+            category:tpl.category || '',
+            text:promptTemplateText(tpl, 'positive')
+        };
+    }
+    recordSlashRecent(tpl.id);
+    refreshIcons();
+    syncPromptChipHint();
+    // 与输入框 input 事件同一套刷新，保证草稿/编号/字数/运行按钮状态同步
+    delete promptInput.dataset.preserveDraftOnce;
+    markPromptDraftDirty(subject);
+    autoGrowPromptInput();
+    savePromptDraftForCurrent();
+    refreshMentionRefLabels();
+    updatePromptWordCount();
+    renderInputThumbsRow(selectedNode());
+    syncRunButtonState(activeComposerNode() || selectedNode());
+    scheduleSave();
+}
+// ===== 模板胶囊：模板正文收在 chip 的 data 上，输入框只显示胶囊 =====
+function promptTemplateChipHtml(tpl){
+    const name = promptTemplateName(tpl);
+    const desc = promptTemplateScene(tpl) || '';
+    const text = promptTemplateText(tpl, 'positive');
+    const btn = (action, icon, label) => `<span class="tpl-chip-btn" data-chip-action="${action}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i></span>`;
+    return `<span class="tpl-chip" contenteditable="false" data-tpl-id="${escapeAttr(tpl.id || '')}" data-tpl-name="${escapeAttr(name)}" data-tpl-desc="${escapeAttr(desc)}" data-tpl-category="${escapeAttr(tpl.category || '')}" data-tpl-text="${escapeAttr(text)}">` +
+        `<i data-lucide="${slashCategoryIcon(tpl.category)}"></i>` +
+        `<span class="tpl-chip-name">${escapeHtml(name)}</span>` +
+        btn('swap', 'repeat-2', tr('smart.slashChipSwap')) +
+        btn('remove', 'x', tr('smart.slashChipRemove')) +
+        `</span>`;
+}
+function promptTemplateChip(){
+    return promptInput?.querySelector?.('.tpl-chip') || null;
+}
+// 胶囊是唯一内容时返回模板描述，交给 CSS 伪元素画成灰色占位（不进 DOM、不进草稿）
+function promptChipOnlyHint(){
+    const chip = promptTemplateChip();
+    if(!chip) return '';
+    const clone = promptInput.cloneNode(true);
+    clone.querySelectorAll('.tpl-chip').forEach(el => el.remove());
+    if(String(clone.textContent || '').replace(/\u200b/g, '').trim()) return '';
+    return chip.dataset.tplDesc || '';
+}
+function syncPromptChipHint(){
+    if(!promptInput) return;
+    const hint = promptChipOnlyHint();
+    if(hint) promptInput.dataset.chipHint = hint;
+    else delete promptInput.dataset.chipHint;
+}
+function dropAppliedTemplateIfNoChip(){
+    const subject = activeComposerNode() || selectedNode();
+    if(!isSmartRunnableNode(subject)) return;
+    if(promptTemplateChip()) return;
+    if(subject.appliedTemplate) delete subject.appliedTemplate;
+}
 function insertMentionToken(img){
     if(!img?.url) return;
     promptInput.focus();
@@ -30595,6 +30955,11 @@ function collectPromptParts(){
             return;
         }
         if(node.nodeType !== Node.ELEMENT_NODE) return;
+        // 2026-10-21 模板胶囊：只带模板正文与名称，不把 chip 上的图标/按钮文字当提示词
+        if(node.classList?.contains('tpl-chip')){
+            parts.push({type:'template', id:node.dataset.tplId || '', name:node.dataset.tplName || '', text:node.dataset.tplText || '', desc:node.dataset.tplDesc || ''});
+            return;
+        }
         if(node.classList?.contains('mention-image-token')){
             let assetUris = {};
             try { assetUris = JSON.parse(node.dataset.assetUris || '{}') || {}; } catch(e) { assetUris = {}; }
@@ -30623,6 +30988,8 @@ function originalPromptTextFromParts(parts){
             return;
         }
         if(part.type === 'image') text += `@${part.name || '图片'}`;
+        // 模板胶囊刻意不写进草稿文本：输入框只显示胶囊，模板正文留在 chip 的 data 上，
+        // 由 buildPromptRequest 在真正发请求时拼接（草稿/日志/下游文本都保持"用户自己的话"）。
     });
     return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -30778,8 +31145,15 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
     const ignoreMentionImages = Boolean(options?.ignoreMentionImages);
     // 基础参考与 chip 角标共用 resolvePromptBaseRefs，保证画布上显示的编号就是提示词里的编号
     const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = resolvePromptBaseRefs(node, {consume:consumeDefault, ctx, overrideDefaultImages});
-    const parts = ignoreOwnPrompt ? [] : collectPromptParts();
+    // 「输出被清空待重跑」时忽略自己输入框里的文本（沿用上次上游提示词），
+    // 但模板胶囊是用户显式放置的指令，不能连坐忽略——否则胶囊-only 的节点会因 displayPrompt 为空而永远无法运行。
+    const collectedParts = collectPromptParts();
+    const parts = ignoreOwnPrompt ? collectedParts.filter(part => part.type === 'template') : collectedParts;
     const originalPrompt = originalPromptTextFromParts(parts);
+    // 模板胶囊：正文只在发请求时拼到最前面（输入框里只有胶囊，不展开正文）
+    const templateParts = parts.filter(part => part.type === 'template' && String(part.text || '').trim());
+    const templateText = templateParts.map(part => String(part.text || '').trim()).join('\n\n');
+    const templateLabel = templateParts.map(part => `【${part.name || '模板'}】`).join(' ');
     const refs = defaultRefs.map((img, index) => ({...img, role:img.role || `image_${index + 1}`}));
     const counters = {image:0, video:0, audio:0};
     const takeRefLabel = kind => {
@@ -30823,6 +31197,8 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
         body += refLabels[refMap.get(part.url) - 1] || `图${refMap.get(part.url)}`;
     });
     body = body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    // 模板正文居中在最前：模板是基调，用户补充在它之后
+    if(templateText) body = [templateText, body].filter(Boolean).join('\n\n');
     const groupPrompt = isSmartGroupNode(node) ? textForNode(node, ctx).trim() : '';
     const inputPrompt = inputPromptTextFor(node, ctx).trim();
     if(groupPrompt || inputPrompt) body = [body, groupPrompt, inputPrompt].filter(Boolean).join('\n\n');
@@ -30831,9 +31207,12 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
     if(!body && settings.engine === 'runninghub'){
         body = rhDefaultPromptSuggestion();
     }
-    const displayPrompt = parallelPromptSuffix && (originalPrompt || body)
-        ? [originalPrompt || body, parallelPromptSuffix].filter(Boolean).join(' ').trim()
-        : (originalPrompt || body);
+    // 展示用文案不展开模板正文（节点标题/日志里只留【模板名】，避免整段提示词糊在画布上）
+    const displayPrompt = templateLabel
+        ? [templateLabel, originalPrompt, parallelPromptSuffix].filter(Boolean).join(' ').trim()
+        : (parallelPromptSuffix && (originalPrompt || body)
+            ? [originalPrompt || body, parallelPromptSuffix].filter(Boolean).join(' ').trim()
+            : (originalPrompt || body));
     const shouldAttachRefMap = refs.length > 1 || hasMentionToken;
     if(shouldAttachRefMap && refs.length){
         const mapText = refs.map((img, i) => `${refLabels[i] || `图${i + 1}`} = ${img.name || `图片${i + 1}`}`).join('\n');
@@ -38648,8 +39027,13 @@ document.addEventListener('click', event => {
     toggleRefManifest(false);
 });
 promptInput.addEventListener('input', maybeOpenMentionPicker);
+promptInput.addEventListener('input', maybeOpenSlashMenu);
+// ⇄ 换模板模式下直接打字 = 放弃换模板、继续自己写，菜单收起
+promptInput.addEventListener('input', () => { if(slashState.replaceChip) closeSlashMenu(); });
 promptInput.addEventListener('input', () => {
     delete promptInput.dataset.preserveDraftOnce;
+    syncPromptChipHint();
+    dropAppliedTemplateIfNoChip();
     markPromptDraftDirty();
     autoGrowPromptInput();
     savePromptDraftForCurrent();
@@ -38737,11 +39121,92 @@ function bindSmartPromptPaste(el){
 bindSmartPromptPaste(promptInput);
 bindSmartPromptPaste(promptLlmInstruction);
 promptInput.addEventListener('keyup', maybeOpenMentionPicker);
+promptInput.addEventListener('keyup', maybeOpenSlashMenu);
 promptInput.addEventListener('mouseup', saveMentionRange);
 promptInput.addEventListener('focus', saveMentionRange);
 promptInput.addEventListener('keydown', event => {
+    if(slashState.open && !event.isComposing){
+        const total = slashState.items.length;
+        if(event.key === 'ArrowDown'){
+            event.preventDefault(); event.stopPropagation();
+            if(total) setSlashActive((slashState.active + 1) % total);
+            return;
+        }
+        if(event.key === 'ArrowUp'){
+            event.preventDefault(); event.stopPropagation();
+            if(total) setSlashActive((slashState.active - 1 + total) % total);
+            return;
+        }
+        if(event.key === 'Enter'){
+            event.preventDefault(); event.stopPropagation();
+            insertSlashTemplate(slashState.items[slashState.active]);
+            return;
+        }
+        if(event.key === 'Tab'){
+            event.preventDefault(); event.stopPropagation();
+            slashTabNextGroup();
+            return;
+        }
+        if(event.key === 'Escape'){
+            event.preventDefault(); event.stopPropagation();
+            // 关闭的同时把光标前那段「/query」删掉，避免半截指令留在提示词里
+            // （⇄ 换模板唤起的菜单没有「/query」，不能误删前面的正文）
+            const mrange = slashState.replaceChip ? null : slashMatchRange();
+            closeSlashMenu();
+            if(mrange){
+                promptInput.focus();
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(mrange);
+                try { document.execCommand('delete', false); } catch(e2) {}
+                autoGrowPromptInput();
+                savePromptDraftForCurrent();
+                updatePromptWordCount();
+                scheduleSave();
+            }
+            return;
+        }
+    }
     if(event.key === 'Escape') closeMentionPicker();
 });
+// 点击菜单项不把焦点从输入框夺走（保住光标选区）；点外部即关闭
+slashMenu.addEventListener('mousedown', event => event.preventDefault());
+slashMenu.addEventListener('pointerdown', event => event.stopPropagation());
+// 胶囊上的两个小按钮：⇄ 原位换模板、× 移除（点按钮不吞光标、不触发菜单）
+promptInput.addEventListener('click', event => {
+    const btn = event.target.closest?.('.tpl-chip-btn');
+    if(!btn) return;
+    const chip = btn.closest('.tpl-chip');
+    if(!chip) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if(btn.dataset.chipAction === 'remove'){
+        chip.remove();
+        delete promptInput.dataset.preserveDraftOnce;
+        syncPromptChipHint();
+        dropAppliedTemplateIfNoChip();
+        markPromptDraftDirty(activeComposerNode() || selectedNode());
+        autoGrowPromptInput();
+        savePromptDraftForCurrent();
+        updatePromptWordCount();
+        syncRunButtonState(activeComposerNode() || selectedNode());
+        scheduleSave();
+        promptInput.focus();
+        return;
+    }
+    if(btn.dataset.chipAction === 'swap'){
+        slashState.replaceChip = true;
+        slashState.active = 0;
+        openSlashMenu('');
+        promptInput.focus();
+    }
+});
+document.addEventListener('pointerdown', event => {
+    if(!slashState.open) return;
+    if(event.target.closest?.('#slashMenu')) return;
+    if(event.target === promptInput || promptInput.contains(event.target)) return;
+    closeSlashMenu();
+}, true);
 promptInput.addEventListener('mouseover', event => {
     const token = event.target.closest?.('.mention-image-token');
     if(!token) return;

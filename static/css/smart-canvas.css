@@ -1496,7 +1496,7 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .prompt-row { position:relative; }
 .prompt-input { width:100%; height:var(--prompt-h, 150px); min-height:70px; max-height:440px; resize:none; border:1px solid var(--line); border-radius:13px; outline:none; padding:12px 46px 12px 15px; background:var(--card); color:var(--text); font-size:14px; font-weight:400; line-height:1.7; overflow:auto; transition:border-color .15s ease, box-shadow .15s ease; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; scrollbar-width:none; scrollbar-color:transparent transparent; }
 /* 粘贴进来的富文本可能自带 white-space:nowrap 内联样式导致长行溢出，统一强制折行（引用 chip 除外） */
-.prompt-input *:not(.mention-image-token):not(.mention-image-token *) { white-space:pre-wrap !important; overflow-wrap:anywhere !important; word-break:break-word; }
+.prompt-input *:not(.mention-image-token):not(.mention-image-token *):not(.tpl-chip):not(.tpl-chip *) { white-space:pre-wrap !important; overflow-wrap:anywhere !important; word-break:break-word; }
 .prompt-input::-webkit-scrollbar { width:6px; height:6px; }
 .prompt-input::-webkit-scrollbar-track { background:transparent; }
 .prompt-input::-webkit-scrollbar-thumb { background:rgba(154,154,154,.4); border-radius:999px; border:2px solid transparent; background-clip:content-box; }
@@ -18354,3 +18354,45 @@ select.llm-rule-input option { background:#1f1f1f; color:#eee; }
     .log-video-grid { grid-template-columns:1fr; }
     .log-tab { padding:0 9px; }
 }
+
+/* ===== 2026-10-21 「/ 常用功能」菜单（composer 输入框键入 / 唤起模板快捷面板） ===== */
+.slash-menu { position:absolute; left:2px; right:2px; bottom:calc(100% + 8px); z-index:88; display:none; flex-direction:column; border-radius:13px; background:var(--panel); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); backdrop-filter:blur(10px); overflow:hidden; }
+.slash-menu.open { display:flex; }
+.slash-menu.flip { bottom:auto; top:calc(100% + 8px); }
+.slash-head { display:flex; align-items:center; gap:8px; padding:9px 13px; border-bottom:1px solid var(--line); color:var(--muted); font-size:11px; font-weight:600; }
+.slash-head .slash-query { max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-weight:800; font-family:ui-monospace,Consolas,monospace; }
+.slash-head .slash-esc { margin-left:auto; flex:0 0 auto; padding:1px 7px; border:1px solid var(--line); border-radius:5px; color:var(--faint); font-size:9.5px; line-height:1.5; }
+/* 2026-10-21 用户要求：菜单高度对齐参考图（紧凑单屏），一屏约见 4 组 × 2 项，其余滚动 */
+.slash-body { overflow-y:auto; overscroll-behavior:contain; padding:2px 8px 10px; max-height:560px; scrollbar-width:thin; scrollbar-color:rgba(154,154,154,.42) transparent; }
+.slash-body::-webkit-scrollbar { width:7px; }
+.slash-body::-webkit-scrollbar-thumb { background:rgba(154,154,154,.42); border-radius:999px; border:2px solid transparent; background-clip:content-box; }
+.slash-group-label { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--faint); font-weight:850; letter-spacing:1.2px; padding:9px 6px 5px; }
+.slash-dot { width:7px; height:7px; flex:0 0 auto; border-radius:50%; box-shadow:0 0 0 3px rgba(255,255,255,.04); }
+.slash-grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; }
+.slash-item { display:flex; align-items:center; gap:9px; min-width:0; padding:6px 8px; border-radius:9px; border:1px solid transparent; background:transparent; color:var(--text); text-align:left; cursor:pointer; transition:background .12s ease, border-color .12s ease; }
+.slash-item:hover { background:var(--card); }
+.slash-item.active { background:var(--card); border-color:var(--line); }
+.slash-ico { width:28px; height:28px; flex:0 0 auto; border-radius:8px; background:var(--soft); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--muted); }
+.slash-ico i,.slash-ico svg { width:14px; height:14px; stroke-width:2; }
+.slash-item-main { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.slash-name { font-size:12px; font-weight:700; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.slash-desc { font-size:10px; color:var(--faint); line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.slash-empty { min-height:84px; display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:11.5px; }
+.slash-foot { display:flex; align-items:center; gap:14px; padding:7px 13px; border-top:1px solid var(--line); color:var(--faint); font-size:10px; font-weight:600; }
+.slash-foot b { display:inline-block; padding:0 5px; margin-right:3px; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; color:var(--muted); font-weight:700; font-family:ui-monospace,Consolas,monospace; font-size:9.5px; }
+.slash-foot .slash-foot-src { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:760px) { .slash-grid { grid-template-columns:1fr; } }
+
+/* ===== 2026-10-21 模板胶囊：/ 菜单选中的模板以 chip 形式引用，输入框不展开提示词正文 ===== */
+.tpl-chip { display:inline-flex; align-items:center; gap:5px; vertical-align:middle; margin:0 4px 2px 0; padding:2px 4px 2px 7px; border-radius:8px; background:linear-gradient(135deg,rgba(139,124,246,.20),rgba(139,124,246,.08)); border:1px solid rgba(139,124,246,.5); color:var(--text); font-size:12px; font-weight:700; line-height:1.7; white-space:nowrap; user-select:none; max-width:100%; }
+.theme-dark .tpl-chip { background:linear-gradient(135deg,rgba(139,124,246,.24),rgba(139,124,246,.10)); border-color:rgba(160,148,255,.55); }
+.tpl-chip > i,.tpl-chip > svg { width:12px !important; height:12px !important; flex:0 0 auto; stroke-width:2.2; color:#8b7cf6; }
+.theme-dark .tpl-chip > i,.theme-dark .tpl-chip > svg { color:#a79bff; }
+.tpl-chip .tpl-chip-name { min-width:0; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+.tpl-chip .tpl-chip-btn { flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; }
+.prompt-input .tpl-chip .tpl-chip-btn { cursor:pointer; }
+.tpl-chip .tpl-chip-btn i,.tpl-chip .tpl-chip-btn svg { width:11px !important; height:11px !important; stroke-width:2.4; }
+.tpl-chip .tpl-chip-btn:hover { background:rgba(139,124,246,.22); color:var(--text); }
+.tpl-chip .tpl-chip-btn[data-chip-action="remove"]:hover { background:rgba(255,107,107,.18); color:#ff7b7b; }
+/* 胶囊后的灰色描述：纯 CSS 伪元素，不进入 DOM / 草稿，打字即被覆盖隐藏 */
+.prompt-input[data-chip-hint]::after { content:attr(data-chip-hint); color:var(--faint); font-weight:400; font-size:12.5px; pointer-events:none; }
