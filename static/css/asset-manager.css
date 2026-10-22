@@ -722,3 +722,42 @@ html, body {
     -moz-osx-font-smoothing:grayscale !important;
     text-rendering:optimizeLegibility !important;
 }
+
+/* ---- 真人认证四步引导（persona） ---- */
+.persona-wrap { display:flex; flex-direction:column; gap:10px; }
+.persona-steps { display:flex; align-items:flex-start; margin:2px 0; }
+.persona-steps .step { flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; position:relative; }
+.persona-steps .step .dot { width:22px; height:22px; border-radius:50%; background:var(--bg); border:1px solid var(--line); color:var(--muted); font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; z-index:1; }
+.persona-steps .step .lbl { font-size:10px; color:var(--muted); text-align:center; line-height:1.35; font-weight:650; }
+.persona-steps .step:not(:last-child)::after { content:""; position:absolute; top:11px; left:calc(50% + 13px); width:calc(100% - 26px); height:2px; background:var(--bg); border-radius:2px; }
+.persona-steps .step.done .dot { background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.5); color:#22c55e; }
+.persona-steps .step.done:not(:last-child)::after { background:rgba(34,197,94,.4); }
+.persona-steps .step.active .dot { background:#2563eb; border-color:#2563eb; color:#fff; box-shadow:0 0 0 3px rgba(59,130,246,.16); }
+.persona-steps .step.active .lbl { color:var(--text); }
+.step-card { background:var(--bg); border:1px solid var(--line); border-radius:11px; padding:11px 12px; display:flex; flex-direction:column; gap:9px; }
+.step-card.failed { border-color:rgba(239,68,68,.4); background:rgba(239,68,68,.07); }
+.step-card .sc-head { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; color:var(--text); flex-wrap:wrap; }
+.step-card .sc-head .tag { margin-left:auto; }
+.step-card .sc-desc { font-size:11px; color:var(--muted); line-height:1.65; font-weight:650; }
+.persona-new-row { display:flex; gap:8px; }
+.persona-name-input { flex:1; min-width:0; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:12px; color:var(--text); font-weight:650; }
+.persona-name-input:focus { outline:none; border-color:rgba(59,130,246,.55); }
+.qr-row { display:flex; gap:11px; align-items:flex-start; }
+.qr { width:88px; height:88px; border-radius:10px; background:#fff; flex:none; display:flex; align-items:center; justify-content:center; padding:6px; }
+.qr img, .qr canvas { width:76px; height:76px; display:block; }
+.qr-actions { display:flex; flex-direction:column; gap:7px; flex:1; min-width:0; }
+.qr-actions .hint { font-size:10.5px; color:var(--muted); line-height:1.6; font-weight:650; }
+.qr-actions .uri-box { display:none; }
+.asset-list { display:flex; flex-direction:column; gap:6px; }
+.asset-row { display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:650; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 9px; }
+.asset-row .thumb { width:24px; height:24px; border-radius:6px; background:var(--line); flex:none; }
+.asset-row .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.asset-row .tag { flex:none; }
+.dotok { width:7px; height:7px; border-radius:50%; background:#22c55e; flex:none; }
+.dotwait { width:7px; height:7px; border-radius:50%; background:#3b82f6; flex:none; animation:persona-pulse 1.2s ease-in-out infinite; }
+.dotfail { width:7px; height:7px; border-radius:50%; background:#ef4444; flex:none; }
+@keyframes persona-pulse { 50% { opacity:.35; } }
+.persona-switch { display:flex; gap:8px; align-items:center; }
+.persona-switch .avatar-provider-select { flex:1; min-width:0; }
+.linklike { background:none; border:none; padding:0; color:#60a5fa; font-size:inherit; font-weight:700; cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+.btn.small.ghost { background:transparent; }

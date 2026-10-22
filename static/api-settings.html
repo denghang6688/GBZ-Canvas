@@ -14,7 +14,7 @@
                 document.documentElement.classList.toggle('theme-dark', dark);
                 document.documentElement.classList.toggle('studio-theme-custom', custom);
                 document.documentElement.classList.toggle('theme-custom', custom);
-                document.documentElement.style.setProperty('--studio-custom-color', '#22c55e');
+                document.documentElement.style.setProperty('--studio-custom-color', '#7c8cff');
                 if(document.body) {
                     document.body.classList.toggle('studio-theme-dark', dark);
                     document.body.classList.toggle('theme-dark', dark);
@@ -45,12 +45,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.19.1.1790042522"></script>
-    <script src="/static/vendor/js/lucide.js?v=V26.10.19.1.1790042522"></script>
-    <script src="/static/js/theme.js?v=V26.10.19.1.1790042521"></script>
-    <script src="/static/js/i18n.js?v=V26.10.19.1.1790305929"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.19.1.1790492361">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.19.1.1790504397">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.21.1.1790042522"></script>
+    <script src="/static/vendor/js/lucide.js?v=V26.10.21.1.1790042522"></script>
+    <script src="/static/js/theme.js?v=V26.10.21.1.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V26.10.21.1.1790305929"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.21.1.1790492361">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.21.1.1792642139">
 </head>
 <body class="studio-theme-dark">
     <div class="page">
@@ -88,12 +88,26 @@
 
                 <main id="settingsContent" class="content" hidden>
                     <div class="left-col">
-                    <div class="content-head">
-                        <div>
-                            <div id="editorTitle" class="editor-title" data-i18n="api.provider">平台</div>
-                            <div class="editor-sub" data-i18n="api.editorSub">配置基础信息、API Key 和可用模型</div>
+                    <div class="content-head site-head">
+                        <div class="site-identity">
+                            <div id="siteLogo" class="site-logo">A</div>
+                            <div class="site-meta">
+                                <div id="editorTitle" class="editor-title" data-i18n="api.provider">平台</div>
+                                <div class="site-pills">
+                                    <div class="proto-pill-wrap">
+                                        <button id="protocolPill" class="proto-pill" type="button" title="切换协议">
+                                            <span id="protocolPillLabel">OpenAI 直连</span><span class="proto-caret">▾</span>
+                                        </button>
+                                        <div id="protocolMenu" class="proto-menu" hidden></div>
+                                    </div>
+                                    <span id="siteStatePill" class="state-pill"><i></i>已保存</span>
+                                </div>
+                            </div>
                         </div>
                         <div class="content-actions">
+                            <button id="testUrlBtn" class="action-btn" type="button" onclick="testConnection()">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span data-i18n="api.testUrl">验证地址</span>
+                            </button>
                             <button id="deleteBtn" class="action-btn danger-btn api-page-delete-btn" type="button" onclick="deleteProvider()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="api.delete">删除</span></button>
                             <button class="action-btn save-btn api-page-save-btn" type="button" onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
                         </div>
@@ -290,14 +304,16 @@
                                 </div>
                                 <div id="geminiCliInfo" class="jimeng-credit"></div>
                             </div>
-                            <!-- 验证操作行 -->
-                            <div class="verify-action-row">
-                                <button id="testUrlBtn" class="action-btn" type="button" onclick="testConnection()">
-                                    <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span data-i18n="api.testUrl">验证地址</span>
+                            <!-- 高级设置：协议 / 图片接口（2026-10-22 收进折叠，协议快捷切换在页面标题栏） -->
+                            <div style="grid-column:1/-1">
+                                <button id="advToggleBtn" class="adv-toggle" type="button" onclick="toggleAdvSettings()">
+                                    <span class="adv-chev">▸</span> 高级设置（验证协议 / 图片接口）
                                 </button>
-                                <button id="probeAsyncBtn" class="action-btn" type="button" onclick="probeAsync()">
-                                    <i data-lucide="radar" class="w-3.5 h-3.5"></i><span>验证协议</span>
-                                </button>
+                                <div id="advSettingsRow" class="adv-settings" hidden>
+                                    <div class="verify-action-row">
+                                        <button id="probeAsyncBtn" class="action-btn" type="button" onclick="probeAsync()">
+                                            <i data-lucide="radar" class="w-3.5 h-3.5"></i><span>验证协议</span>
+                                        </button>
                                 <div class="field-frame protocol-selector-wrap">
                                     <select id="protocolInput">
                                         <option value="openai" data-i18n="api.protocolOpenAI">OpenAI 直连</option>
@@ -319,42 +335,20 @@
                                         <option value="openai-responses">图片：OpenAI RS</option>
                                     </select>
                                 </div>
+                                    </div>
+                                </div>
                             </div>
                             <div id="verifyResult" style="display:none;padding:2px 0;grid-column:1/-1"></div>
-                            <!-- 积分系统：余额 / 扣费比例 / 消耗统计与记录 -->
-                            <div id="billingSystemPanel" class="billing-system-panel" style="grid-column:1/-1">
-                                <div class="bsp-head">
-                                    <div>
-                                        <div class="bsp-title">积分系统</div>
-                                        <div class="bsp-desc">生图任务成功后按模型积分自动扣费：生图按 1K / 2K / 4K 分档计费，聊天 / 视频 / 音频按单次积分。余额与消耗在此平台独立核算。</div>
-                                    </div>
-                                    <button class="action-btn" type="button" onclick="refreshBillingStats(true)"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span></button>
+                            <!-- 官方余额：只读，数据来自平台官方接口（2026-10-22 替换原「积分系统」） -->
+                            <div id="officialBalanceCard" class="ob-card" style="grid-column:1/-1">
+                                <div class="ob-main">
+                                    <div class="ob-label">官方余额</div>
+                                    <div id="obValue" class="ob-value">—</div>
+                                    <div class="ob-meta"><span id="obDot" class="ob-dot"></span><span id="obMeta">尚未查询</span></div>
                                 </div>
-                                <div class="bsp-stats">
-                                    <div class="bsp-stat">
-                                        <span class="bsp-stat-label">当前余额（元）</span>
-                                        <div class="bsp-stat-value-row">
-                                            <input id="billingBalanceInput" type="number" min="0" step="0.01" placeholder="0.00">
-                                            <button class="action-btn primary-btn" type="button" onclick="saveBillingBalance()"><i data-lucide="check" class="w-3.5 h-3.5"></i><span>保存</span></button>
-                                        </div>
-                                    </div>
-                                    <div class="bsp-stat">
-                                        <span class="bsp-stat-label">累计消耗（元）</span>
-                                        <div id="billingUsed" class="bsp-stat-value">¥0.00</div>
-                                        <div id="billingCount" class="bsp-stat-sub">0 次调用</div>
-                                    </div>
-                                    <div class="bsp-stat">
-                                        <span class="bsp-stat-label">扣费比例（积分 / 元）</span>
-                                        <div class="bsp-stat-value-row">
-                                            <input id="billingRateInput" type="number" min="1" step="1" placeholder="100">
-                                            <button class="action-btn primary-btn" type="button" onclick="saveBillingRate()"><i data-lucide="check" class="w-3.5 h-3.5"></i><span>保存</span></button>
-                                        </div>
-                                        <div class="bsp-stat-sub">1 元 = N 积分，全局生效</div>
-                                    </div>
-                                </div>
-                                <div class="bsp-logs-wrap">
-                                    <div class="bsp-logs-title">最近消耗记录</div>
-                                    <div id="billingLogs" class="bsp-logs"><div class="bsp-empty">暂无消耗记录</div></div>
+                                <div class="ob-actions">
+                                    <a id="obConsoleLink" class="action-btn" target="_blank" rel="noopener" hidden>官网控制台 ↗</a>
+                                    <button id="obQueryBtn" class="action-btn primary-btn" type="button" onclick="queryOfficialBalance(true)"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>查询余额</span></button>
                                 </div>
                             </div>
                         </div>
@@ -393,7 +387,7 @@
                     </div>
                     </main>
                 
-                <div class="models-band" id="modelsBand">
+                <div class="models-band" id="modelsBand" data-mkind="all">
 <div id="modelsHead" class="block models-toolbar">
                         <div>
                             <div class="block-title" data-i18n="api.modelsTitle">模型列表</div>
@@ -408,8 +402,15 @@
                             </button>
                         </div>
                     </div>
+<div class="model-kind-tabs" id="modelKindTabs">
+                        <button type="button" data-mkind="all" class="on">全部 <em id="mkCountAll">0</em></button>
+                        <button type="button" data-mkind="image">生图 <em id="mkCountImage">0</em></button>
+                        <button type="button" data-mkind="video">视频 <em id="mkCountVideo">0</em></button>
+                        <button type="button" data-mkind="chat">聊天 <em id="mkCountChat">0</em></button>
+                        <button type="button" data-mkind="audio">音频 <em id="mkCountAudio">0</em></button>
+                    </div>
 <div class="model-grid">
-                        <section class="block">
+                        <section class="block" data-mkind="image">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title" data-i18n="api.imageModels">生图模型</div>
@@ -423,7 +424,7 @@
                             <div id="imageModelList" class="model-list"></div>
                         </section>
 
-                        <section class="block">
+                        <section class="block" data-mkind="chat">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title" data-i18n="api.chatModels">聊天模型</div>
@@ -434,7 +435,7 @@
                         <div id="chatModelList" class="model-list"></div>
                     </section>
 
-                        <section class="block">
+                        <section class="block" data-mkind="video">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title" data-i18n="api.videoModels">视频模型</div>
@@ -445,7 +446,7 @@
                             <div id="videoModelList" class="model-list"></div>
                         </section>
 
-                        <section class="block">
+                        <section class="block" data-mkind="audio">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title">音频模型</div>
@@ -456,7 +457,7 @@
                             <div id="audioModelList" class="model-list"></div>
                         </section>
 
-                        <section id="msLoraBlock" class="block ms-lora-block">
+                        <section id="msLoraBlock" class="block ms-lora-block" data-mkind="image">
                             <div class="block-head">
                                 <div>
                                     <div class="block-title" data-i18n="api.loraManager">LoRA 管理</div>
@@ -675,8 +676,16 @@
                 window.location.href = '/static/settings.html';
             }
         }
+        // 2026-10-22（用户要求）本页统一蓝紫主题：覆盖 theme.js 从 localStorage 注入的历史绿色
+        (function(){
+            var API_ACCENT = '#7c8cff';
+            var force = function(){ document.documentElement.style.setProperty('--studio-custom-color', API_ACCENT); };
+            window.addEventListener('studio-theme-change', force);
+            force();
+            setTimeout(force, 0);
+        })();
     </script>
-    <script src="/static/js/api-settings.js?v=V26.10.19.1.1792034094"></script>
+    <script src="/static/js/api-settings.js?v=V26.10.21.1.1792642515"></script>
     <script>
         (function(){
             function applyApiPageTheme(theme) {
@@ -687,7 +696,7 @@
                 document.documentElement.classList.toggle('theme-dark', dark);
                 document.documentElement.classList.toggle('studio-theme-custom', custom);
                 document.documentElement.classList.toggle('theme-custom', custom);
-                document.documentElement.style.setProperty('--studio-custom-color', '#22c55e');
+                document.documentElement.style.setProperty('--studio-custom-color', '#7c8cff');
                 if(document.body) {
                     document.body.classList.toggle('studio-theme-dark', dark);
                     document.body.classList.toggle('theme-dark', dark);
@@ -723,7 +732,7 @@ html.studio-theme-dark body, html.theme-dark body{
     radial-gradient(760px 460px at -8% 28%, rgba(255,255,255,.025), transparent 58%),
     linear-gradient(180deg,#0e0e0f 0%,#0a0a0b 55%,#0e0e0f 100%) !important;
   background-attachment:fixed !important;
-  color:#e6f4ee !important;
+  color:#eaecf8 !important;
 }
 
 /* ---------- 顶部横幅：中性灰横幅（保留绿色点缀） ---------- */
@@ -757,16 +766,16 @@ html.studio-theme-dark .page-head::after, html.theme-dark .page-head::after{
 }
 .brand-mascot svg{ width:26px; height:26px; }
 html.studio-theme-dark .page-head .title, html.theme-dark .page-head .title{
-  font-size:24px; font-weight:900; letter-spacing:-.01em; color:#f0fdf7 !important;
+  font-size:24px; font-weight:900; letter-spacing:-.01em; color:#eef0fc !important;
 }
 html.studio-theme-dark .page-head .sub, html.theme-dark .page-head .sub{
   margin-top:6px; color:#a1a8b2 !important; font-size:12.5px; line-height:1.55; font-weight:500; max-width:560px;
 }
 html.studio-theme-dark .page-head-actions, html.theme-dark .page-head-actions{ position:relative; z-index:1; display:flex; align-items:center; gap:10px; }
-html.studio-theme-dark .page-head .status, html.theme-dark .page-head .status{ color:#7fae9f !important; font-size:11.5px; text-transform:none; letter-spacing:0; }
+html.studio-theme-dark .page-head .status, html.theme-dark .page-head .status{ color:#8a92c9 !important; font-size:11.5px; text-transform:none; letter-spacing:0; }
 html.studio-theme-dark .page-back-btn, html.theme-dark .page-back-btn{
   display:inline-flex; align-items:center; gap:7px;
-  background:rgba(4,20,15,.55) !important; color:#c9e8dc !important;
+  background:rgba(8,10,30,.55) !important; color:#c9cdf0 !important;
   border:1px solid rgba(161,168,178,.28) !important; border-radius:10px !important;
   padding:8px 14px; font-size:12.5px; font-weight:700; cursor:pointer;
   transition:all .15s ease;
@@ -825,7 +834,7 @@ html.studio-theme-dark .block-head, html.theme-dark .block-head{
 html.studio-theme-dark .block-title, html.theme-dark .block-title,
 html.studio-theme-dark .editor-title, html.theme-dark .editor-title{
   text-transform:none !important; letter-spacing:0 !important;
-  font-size:14.5px !important; font-weight:800 !important; color:#e6f4ee !important;
+  font-size:14.5px !important; font-weight:800 !important; color:#eaecf8 !important;
 }
 html.studio-theme-dark .block-title::before, html.theme-dark .block-title::before,
 html.studio-theme-dark .editor-title::before, html.theme-dark .editor-title::before{
@@ -893,7 +902,7 @@ html.studio-theme-dark body .action-btn:not(.save-btn):not(.danger-btn):not(.api
 html.studio-theme-dark body .ghost-btn,
 html.theme-dark body .action-btn:not(.save-btn):not(.danger-btn):not(.api-page-save-btn):not(.api-page-delete-btn):not(.primary-btn):not(.key-btn):not(.run-test-btn):not(.apply-btn),
 html.theme-dark body .ghost-btn{
-  background:rgba(10,28,22,.75) !important; color:#c9e8dc !important;
+  background:rgba(12,14,32,.75) !important; color:#c9cdf0 !important;
   border:1px solid rgba(148,163,184,.18) !important; border-radius:9px !important; font-weight:700 !important;
   box-shadow:none !important;
 }
@@ -925,13 +934,13 @@ html.theme-dark body .api-link-btn::after{ content:none !important; }
 html.studio-theme-dark body .key-btn,
 html.theme-dark body .key-btn{
   width:30px !important; height:30px !important; padding:0 !important;
-  background:rgba(10,28,22,.85) !important; color:#a1a8b2 !important;
+  background:rgba(12,14,32,.85) !important; color:#a1a8b2 !important;
   border:1px solid rgba(148,163,184,.22) !important; border-radius:999px !important;
   display:inline-flex; align-items:center; justify-content:center; box-shadow:none !important;
 }
 html.studio-theme-dark body .key-btn:hover,
 html.theme-dark body .key-btn:hover{
-  border-color:rgba(161,168,178,.5) !important; color:#e6f4ee !important; background:rgba(34,34,38,.9) !important;
+  border-color:rgba(161,168,178,.5) !important; color:#eaecf8 !important; background:rgba(34,34,38,.9) !important;
 }
 html.studio-theme-dark body .key-btn.key-clear:hover,
 html.theme-dark body .key-btn.key-clear:hover{
@@ -942,7 +951,7 @@ html.theme-dark body .key-btn.key-clear:hover{
 html.studio-theme-dark .sidebar, html.theme-dark .sidebar{ padding:16px 14px !important; }
 html.studio-theme-dark .side-section-title, html.theme-dark .side-section-title{
   display:flex; align-items:center; gap:7px;
-  color:#a8cdbf !important; font-size:12.5px !important; font-weight:800 !important;
+  color:#a9b0e0 !important; font-size:12.5px !important; font-weight:800 !important;
   text-transform:none !important; letter-spacing:0 !important; padding:4px 4px 2px !important;
 }
 html.studio-theme-dark .side-section-title::before, html.theme-dark .side-section-title::before{
@@ -970,8 +979,8 @@ html.studio-theme-dark .provider-mark, html.theme-dark .provider-mark{
 html.studio-theme-dark .provider-card.active .provider-mark, html.theme-dark .provider-card.active .provider-mark{
   background:linear-gradient(135deg,#c8ccd2,#27272a) !important; color:#f4f4f5 !important; border-color:transparent !important;
 }
-html.studio-theme-dark .provider-name, html.theme-dark .provider-name{ color:#e6f4ee !important; font-size:13px !important; font-weight:700 !important; }
-html.studio-theme-dark .provider-meta, html.theme-dark .provider-meta{ color:#6f958a !important; font-size:11px !important; }
+html.studio-theme-dark .provider-name, html.theme-dark .provider-name{ color:#eaecf8 !important; font-size:13px !important; font-weight:700 !important; }
+html.studio-theme-dark .provider-meta, html.theme-dark .provider-meta{ color:#7b84b8 !important; font-size:11px !important; }
 html.studio-theme-dark .provider-protocol-pill, html.theme-dark .provider-protocol-pill{
   background:rgba(161,168,178,.13) !important; color:#c8ccd2 !important;
   border:1px solid rgba(161,168,178,.3) !important; border-radius:999px !important;
@@ -983,7 +992,7 @@ html.studio-theme-dark .provider-card.has-key .provider-status-dot, html.theme-d
 html.studio-theme-dark .provider-drag-handle, html.theme-dark .provider-drag-handle{ color:#4d6f65 !important; }
 html.studio-theme-dark .add-btn, html.theme-dark .add-btn{
   background:rgba(28,28,31,.85) !important; border:1px solid rgba(161,168,178,.28) !important;
-  color:#c9e8dc !important; border-radius:10px !important; font-weight:700 !important; height:40px !important;
+  color:#c9cdf0 !important; border-radius:10px !important; font-weight:700 !important; height:40px !important;
 }
 html.studio-theme-dark .add-btn:hover, html.theme-dark .add-btn:hover{
   border-color:rgba(161,168,178,.6) !important; color:#fff !important; background:rgba(34,34,38,.9) !important;
@@ -993,13 +1002,13 @@ html.studio-theme-dark .cli-quick-btn, html.theme-dark .cli-quick-btn{
   color:#a1a8b2 !important;
 }
 html.studio-theme-dark .cli-quick-btn, html.theme-dark .cli-quick-btn{
-  background:rgba(10,28,22,.7) !important; border:1px solid rgba(148,163,184,.14) !important; border-radius:9px !important;
+  background:rgba(12,14,32,.7) !important; border:1px solid rgba(148,163,184,.14) !important; border-radius:9px !important;
 }
 html.studio-theme-dark .cli-quick-btn:hover, html.theme-dark .cli-quick-btn:hover{ border-color:rgba(161,168,178,.45) !important; color:#fff !important; }
 
 /* ---------- 表单：深色圆角输入 + 祖母绿聚焦 ---------- */
 html.studio-theme-dark .form > .label, html.theme-dark .form > .label,
-html.studio-theme-dark .field .label, html.theme-dark .field .label{ color:#a8cdbf !important; font-size:12px !important; font-weight:700 !important; }
+html.studio-theme-dark .field .label, html.theme-dark .field .label{ color:#a9b0e0 !important; font-size:12px !important; font-weight:700 !important; }
 html.studio-theme-dark .field-frame, html.theme-dark .field-frame{
   background:#121214 !important; border:1px solid rgba(148,163,184,.15) !important; border-radius:10px !important;
 }
@@ -1012,21 +1021,21 @@ html.studio-theme-dark input[type="text"], html.theme-dark input[type="text"],
 html.studio-theme-dark input[type="password"], html.theme-dark input[type="password"],
 html.studio-theme-dark input:not([type]), html.theme-dark input:not([type]),
 html.studio-theme-dark select, html.theme-dark select, html.studio-theme-dark textarea, html.theme-dark textarea{
-  background:transparent !important; border:0 !important; color:#e6f4ee !important;
+  background:transparent !important; border:0 !important; color:#eaecf8 !important;
 }
 html.studio-theme-dark input::placeholder, html.theme-dark input::placeholder,
 html.studio-theme-dark textarea::placeholder, html.theme-dark textarea::placeholder{ color:#4f7268 !important; }
-html.studio-theme-dark .hint, html.theme-dark .hint{ color:#6f958a !important; }
+html.studio-theme-dark .hint, html.theme-dark .hint{ color:#7b84b8 !important; }
 html.studio-theme-dark .ms-hint .inline-code, html.theme-dark .ms-hint .inline-code,
 html.studio-theme-dark .inline-code, html.theme-dark .inline-code{
   background:rgba(161,168,178,.09) !important; color:#c8ccd2 !important; border:1px solid rgba(161,168,178,.2) !important; border-radius:6px !important;
 }
 html.studio-theme-dark a, html.theme-dark a{ color:#c8ccd2 !important; }
 html.studio-theme-dark .rh-key-item, html.theme-dark .rh-key-item{
-  background:rgba(8,29,23,.6) !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:12px !important;
+  background:rgba(10,12,34,.6) !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:12px !important;
 }
 html.studio-theme-dark .jimeng-cli-panel, html.theme-dark .jimeng-cli-panel{
-  background:rgba(8,29,23,.5) !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:12px !important;
+  background:rgba(10,12,34,.5) !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:12px !important;
 }
 html.studio-theme-dark .verify-action-row, html.theme-dark .verify-action-row{ gap:8px; }
 
@@ -1065,36 +1074,36 @@ html.studio-theme-dark .model-row:focus-within, html.theme-dark .model-row:focus
   border-color:rgba(161,168,178,.55) !important; box-shadow:0 0 0 3px rgba(161,168,178,.10) !important;
 }
 html.studio-theme-dark .model-protocol-select, html.theme-dark .model-protocol-select{
-  background:#131315 !important; border:1px solid rgba(148,163,184,.15) !important; border-radius:8px !important; color:#c9e8dc !important;
+  background:#131315 !important; border:1px solid rgba(148,163,184,.15) !important; border-radius:8px !important; color:#c9cdf0 !important;
 }
-html.studio-theme-dark .icon-btn, html.theme-dark .icon-btn{ color:#6f958a !important; border-radius:8px !important; }
+html.studio-theme-dark .icon-btn, html.theme-dark .icon-btn{ color:#7b84b8 !important; border-radius:8px !important; }
 html.studio-theme-dark .icon-btn:hover, html.theme-dark .icon-btn:hover{ background:rgba(127,29,29,.2) !important; color:#fca5a5 !important; }
 html.studio-theme-dark .lora-row, html.theme-dark .lora-row{
   background:#121214 !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:10px !important;
 }
 html.studio-theme-dark .credit-input-wrap input, html.theme-dark .credit-input-wrap input,
 html.studio-theme-dark .credit-tier input, html.theme-dark .credit-tier input{
-  background:#131315 !important; border:1px solid rgba(148,163,184,.15) !important; border-radius:8px !important; color:#e6f4ee !important;
+  background:#131315 !important; border:1px solid rgba(148,163,184,.15) !important; border-radius:8px !important; color:#eaecf8 !important;
 }
-html.studio-theme-dark .credit-label, html.theme-dark .credit-label{ color:#6f958a !important; }
+html.studio-theme-dark .credit-label, html.theme-dark .credit-label{ color:#7b84b8 !important; }
 
 /* ---------- RunningHub / 推荐卡片 / 浮层 ---------- */
 html.studio-theme-dark .rh-config-card, html.theme-dark .rh-config-card{
   background:#121214 !important; border:1px solid rgba(148,163,184,.12) !important; border-radius:12px !important;
 }
 html.studio-theme-dark .rh-card-group, html.theme-dark .rh-card-group{
-  background:rgba(8,29,23,.5) !important; border:1px solid rgba(148,163,184,.1) !important; border-radius:12px !important;
+  background:rgba(10,12,34,.5) !important; border:1px solid rgba(148,163,184,.1) !important; border-radius:12px !important;
 }
 html.studio-theme-dark .picker-overlay, html.theme-dark .picker-overlay{ background:rgba(2,10,8,.7) !important; backdrop-filter:blur(4px); }
 html.studio-theme-dark .recommend-card, html.theme-dark .recommend-card{
-  background:rgba(8,29,23,.7) !important; border:1px solid rgba(148,163,184,.12) !important; color:#e6f4ee !important; border-radius:12px !important;
+  background:rgba(10,12,34,.7) !important; border:1px solid rgba(148,163,184,.12) !important; color:#eaecf8 !important; border-radius:12px !important;
 }
 html.studio-theme-dark .recommend-badge, html.theme-dark .recommend-badge,
 html.studio-theme-dark .recommend-tag, html.theme-dark .recommend-tag{
   background:rgba(161,168,178,.1) !important; border:1px solid rgba(161,168,178,.25) !important; color:#a1a8b2 !important;
 }
 html.studio-theme-dark .picker-cat-tab, html.theme-dark .picker-cat-tab{
-  background:rgba(10,28,22,.8) !important; border:1px solid rgba(148,163,184,.15) !important; color:#c9e8dc !important; border-radius:8px !important;
+  background:rgba(12,14,32,.8) !important; border:1px solid rgba(148,163,184,.15) !important; color:#c9cdf0 !important; border-radius:8px !important;
 }
 html.studio-theme-dark .picker-cat-tab.active, html.theme-dark .picker-cat-tab.active{
   background:linear-gradient(135deg,#3f3f46,#27272a) !important; color:#f4f4f5 !important; border-color:rgba(161,168,178,.6) !important;
@@ -1189,14 +1198,14 @@ body.show-recommend-mode .layout > aside{ display:none !important; }
 .rc-tiles{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
 .rc-tile{ display:flex; align-items:center; gap:6px; background:#101012; border:1px solid #1a332b; border-radius:8px; padding:6px 8px; min-width:0; }
 .rc-dot{ width:6px; height:6px; border-radius:2px; background:#c8ccd2; flex-shrink:0; }
-.rc-tile span{ font-size:11px; color:#c9e8dc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rc-tile span{ font-size:11px; color:#c9cdf0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rc-tile.rc-more{ justify-content:center; border-style:dashed; color:#5f8578; cursor:pointer; }
 .rc-tile.rc-more span{ color:#5f8578; }
 .rc-empty{ font-size:11px; color:#5f8578; }
 .rc-footer{ display:flex; gap:10px; align-items:stretch; margin-top:12px; flex-wrap:wrap; }
 .rc-note{ flex:1; min-width:240px; font-size:11px; color:#5f8578; background:#101012; border:1px solid #1a332b; border-radius:10px; padding:9px 12px; display:flex; align-items:center; }
 .rc-invite{ display:flex; align-items:center; gap:10px; background:linear-gradient(165deg,#1b1b1d,#141416); border:1px solid rgba(161,168,178,.15); border-radius:10px; padding:8px 12px; }
-.rc-invite-title{ font-size:11.5px; font-weight:800; color:#c9e8dc; }
+.rc-invite-title{ font-size:11.5px; font-weight:800; color:#c9cdf0; }
 .rc-invite-desc{ font-size:10px; color:#5f8578; }
 
 /* ---------- 积分系统（billingSystem · 基本信息 block 底部） ---------- */
@@ -1241,6 +1250,29 @@ body.show-recommend-mode .layout > aside{ display:none !important; }
 .bsp-log-cost{ color:#a1a8b2; flex:0 0 auto; font-family:ui-monospace,Menlo,monospace; }
 .bsp-empty{ font-size:11px; color:#5f8578; padding:6px 2px; }
 @media (max-width:1100px){ .bsp-stats{ grid-template-columns:1fr; } }
+
+/* 2026-10-22（用户要求）模型名用真实输入框包住（:not([type]) 提升特异性，压过上方透明规则） */
+html.studio-theme-dark .model-row, html.theme-dark .model-row{ background-image:none !important; }
+html.studio-theme-dark .model-row > input:not([type]), html.theme-dark .model-row > input:not([type]){
+  height:30px !important;
+  padding:0 10px 0 29px !important;
+  border:1px solid rgba(148,163,184,.4) !important;
+  border-radius:8px !important;
+  background-color:#1c1c21 !important;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a8b2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='5'/%3E%3Cpath d='M9 9h6v6H9z'/%3E%3C/svg%3E") !important;
+  background-repeat:no-repeat !important;
+  background-position:8px center !important;
+  background-size:14px 14px !important;
+  color:#e8e8ec !important;
+  transition:border-color .12s ease, box-shadow .12s ease;
+}
+html.studio-theme-dark .model-row > input:not([type]):hover, html.theme-dark .model-row > input:not([type]):hover{ border-color:rgba(148,163,184,.6) !important; }
+html.studio-theme-dark .model-row > input:not([type]):focus, html.theme-dark .model-row > input:not([type]):focus{
+  outline:none !important;
+  border-color:rgba(124,140,255,.7) !important;
+  box-shadow:0 0 0 3px rgba(108,123,255,.16) !important;
+  background-color:rgba(108,123,255,.07) !important;
+}
 </style>
 
 

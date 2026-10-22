@@ -67,6 +67,10 @@ let promptLibrary = {libraries:[]};
 let apiProviders = [];
 let avatarRegisterProvider = '';
 let avatarBusyId = '';
+let personaSelectedId = '';
+let personaBusy = false;
+let personaPollToken = 0;
+let avatarMode = 'real';
 let activeAssetLibraryId = '';
 let activeAssetCategoryId = '';
 let activeAssetClassFilter = '';
@@ -967,6 +971,47 @@ function avatarProviderIdForPlatform(platform, preferredId=''){
     const match = list.find(p => providerAvatarPlatform(p) === platform);
     return match ? match.id : '';
 }
+// ---- 真人活体认证（persona）：一个 persona = 一个真人 = 一个火山 Asset Group ----
+function avatarPersonas(){
+    return Array.isArray(assetLibrary?.personas) ? assetLibrary.personas.filter(Boolean) : [];
+}
+function personaOf(id){
+    return avatarPersonas().find(p => p.id === id) || null;
+}
+function activePersona(){
+    const list = avatarPersonas();
+    if(personaSelectedId){
+        const picked = personaOf(personaSelectedId);
+        if(picked) return picked;
+    }
+    const platform = providerAvatarPlatform(activeAvatarProvider());
+    return list.find(p => p.platform === platform && p.status === 'Pending')
+        || list.find(p => p.platform === platform && p.status === 'Verified')
+        || list.find(p => p.platform === platform)
+        || null;
+}
+function personaStatusTag(p){
+    if(!p) return '';
+    if(p.status === 'Verified') return '<span class="tag green">真人认证通过</span>';
+    if(p.status === 'Failed') return '<span class="tag" style="color:#f87171;background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.4);">认证未通过</span>';
+    return '<span class="tag amber">待真人认证</span>';
+}
+// 蓝盾（已认证）/灰盾（审核中）/红盾（未通过）内联 SVG，资产库与画布共用同一视觉
+function avatarShieldSvg(state='active', size=13){
+    const colors = {
+        active: {stroke:'#38bdf8', fill:'rgba(56,189,248,.18)', mark:'<path d="M9 12l2 2 4-4"/>'},
+        pending: {stroke:'#94a3b8', fill:'rgba(148,163,184,.12)', mark:'<circle cx="12" cy="11" r="3"/>'},
+        failed: {stroke:'#ef4444', fill:'rgba(239,68,68,.14)', mark:'<path d="M9 12h6"/>'},
+    }[state] || {stroke:'#38bdf8', fill:'rgba(56,189,248,.18)', mark:'<path d="M9 12l2 2 4-4"/>'};
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${colors.stroke}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex:none;"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z" fill="${colors.fill}"/>${colors.mark}</svg>`;
+}
+function personaBoundItems(p){
+    const ids = Array.isArray(p?.item_ids) ? p.item_ids : [];
+    return ids.map(id => findAssetItem(id)).filter(Boolean);
+}
+function personaAssetsReady(p){
+    return personaBoundItems(p).filter(item => avatarRegistrationOf(item, p.platform)?.status === 'Active').length;
+}
 function findAssetItem(id){
     for(const lib of assetLibraries()) for(const cat of lib.categories || []) for(const item of cat.items || []) if(item.id === id) return item;
     return null;
@@ -1197,6 +1242,8 @@ function render(){
     else if(activeTab === 'canvas-assets') renderCanvasAssetsManager();
     else renderAssetManager();
     refreshIcons();
+    mountPersonaQr();
+    schedulePersonaAutoPoll();
     if(scrollState.length){
         requestAnimationFrame(() => {
             document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll').forEach((el, index) => {
@@ -2101,12 +2148,23 @@ function renderAvatarSection(item){
     const noKey = selected && selected.has_key === false;
     const alreadyRegistered = supported && regs[selPlatform] && regs[selPlatform].task_id;
     const select = `<select class="avatar-provider-select" data-avatar-provider>${providers.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === selected?.id ? 'selected' : ''}>${escapeHtml(avatarProviderOptionLabel(p))}</option>`).join('')}</select>`;
+    // 火山平台默认走「真人认证」四步流；APIMart 保留原单素材提交流
+    if(supported && selPlatform === 'volcengine' && avatarMode !== 'virtual'){
+        return `<div class="avatar-section">
+            ${cards}
+            ${renderPersonaSection(item, selected, noKey)}
+        </div>`;
+    }
     let registerUI;
+    const modeToggle = supported && selPlatform === 'volcengine'
+        ? `<button class="btn small ghost" type="button" data-avatar-mode="real" style="margin-bottom:8px;">← 返回真人认证流程</button>`
+        : '';
     if(!supported){
         registerUI = `<div class="avatar-hint">认证是跨平台功能，但「${escapeHtml(selPlatform ? avatarPlatformLabel(selPlatform) : (selected?.name || selected?.id || '该平台'))}」的资产认证 API 尚未接入（待接入）。请选择已支持的平台，或继续使用官方控制台认证。</div>${select}`;
     } else {
         registerUI = `
-            <div class="avatar-hint">提交到 ${escapeHtml(avatarPlatformLabel(selPlatform))} 私域素材审核，通过后生成 asset:// 地址，可在该平台的视频生成中通过 @ 直接调用（一个素材可注册到多个平台，平台间互相隔离）。</div>
+            ${modeToggle}
+            <div class="avatar-hint">虚拟形象（非真人）提交到 ${escapeHtml(avatarPlatformLabel(selPlatform))} 私域素材审核，通过后生成 asset:// 地址，可在该平台的视频生成中通过 @ 直接调用（一个素材可注册到多个平台，平台间互相隔离）。</div>
             ${select}
             ${noKey ? '<div class="avatar-hint warn">该平台尚未配置 API Key。</div>' : ''}
             ${alreadyRegistered ? '<div class="avatar-hint">该平台已注册，再次提交会覆盖该平台的认证。</div>' : ''}
@@ -2116,6 +2174,85 @@ function renderAvatarSection(item){
         ${cards}
         <div class="avatar-head"><i data-lucide="user-round-cog"></i><span>注册到平台</span></div>
         ${registerUI}
+    </div>`;
+}
+// ---- 真人认证四步引导面板：创建素材组 → 真人认证(活体) → 素材入库(同人比对) → 认证可用 ----
+function renderPersonaSection(item, provider, noKey){
+    const persona = activePersona();
+    const personas = avatarPersonas().filter(p => p.platform === 'volcengine');
+    const personaSelect = personas.length ? `<select class="avatar-provider-select" data-persona-select>${personas.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === persona?.id ? 'selected' : ''}>${escapeHtml(`${p.name} · ${p.status === 'Verified' ? '已认证' : p.status === 'Failed' ? '未通过' : '认证中'}`)}</option>`).join('')}</select>` : '';
+    const steps = personaStepsHtml(persona);
+    return `<div class="persona-wrap">
+        <div class="avatar-head"><i data-lucide="scan-face"></i><span>真人认证</span>${persona ? personaStatusTag(persona) : ''}</div>
+        <div class="avatar-hint">火山引擎私域真人素材库：真人完成一次活体认证后，同组素材可反复入库（免重复认证），生成时通过 asset:// 地址直通推理并受肖像保护。</div>
+        ${noKey ? '<div class="avatar-hint warn">该平台尚未配置 API Key / AK-SK。</div>' : ''}
+        <div class="persona-steps">${steps}</div>
+        ${persona ? personaBodyHtml(item, persona) : personaEmptyHtml(item, provider, noKey)}
+        ${personas.length ? `<div class="persona-switch">${personaSelect}<button class="btn small ghost" type="button" data-persona-new-toggle><i data-lucide="user-round-plus"></i><span>新建认证</span></button></div>` : ''}
+        <div class="avatar-hint" style="margin-top:2px;">AI 生成形象？<button class="linklike" type="button" data-avatar-mode="virtual">走虚拟形象通道（免真人认证）</button></div>
+    </div>`;
+}
+function personaStepsHtml(persona){
+    const has = Boolean(persona);
+    const verified = persona?.status === 'Verified';
+    const failed = persona?.status === 'Failed';
+    const ready = persona ? personaAssetsReady(persona) : 0;
+    const bound = persona ? personaBoundItems(persona).length : 0;
+    const stepCls = (done, active) => done ? 'done' : (active ? 'active' : '');
+    return `
+        <div class="step ${stepCls(has, !has)}"><div class="dot">${has ? '✓' : '1'}</div><div class="lbl">创建<br>认证会话</div></div>
+        <div class="step ${stepCls(verified, has && !verified && !failed)}"><div class="dot">${verified ? '✓' : (failed ? '!' : '2')}</div><div class="lbl">真人认证<br>(活体)</div></div>
+        <div class="step ${stepCls(bound > 0 && verified, verified && bound === 0)}"><div class="dot">${bound > 0 && verified ? '✓' : '3'}</div><div class="lbl">素材入库<br>(同人比对)</div></div>
+        <div class="step ${stepCls(ready > 0, false)}"><div class="dot">${ready > 0 ? '✓' : '4'}</div><div class="lbl">认证可用<br>asset://</div></div>`;
+}
+function personaEmptyHtml(item, provider, noKey){
+    return `<div class="step-card">
+        <div class="sc-head">还没有真人认证记录</div>
+        <div class="sc-desc">输入形象名称并创建认证会话，把生成的认证链接发给真人本人扫码完成活体采集（一般 1~3 分钟）。</div>
+        <div class="persona-new-row">
+            <input class="persona-name-input" id="personaNameInput" type="text" placeholder="形象名称，如：男主·林一" maxlength="40">
+            <button class="btn small primary" type="button" data-persona-create ${noKey ? 'disabled' : ''}><i data-lucide="scan-face"></i><span>创建认证会话</span></button>
+        </div>
+    </div>`;
+}
+function personaBodyHtml(item, persona){
+    if(persona.status === 'Failed'){
+        return `<div class="step-card failed">
+            <div class="sc-head">认证未通过</div>
+            <div class="sc-desc">${escapeHtml(persona.detail || '认证失败，请重新发起。认证链接用一次即失效，需要重新创建会话。')}</div>
+            <button class="btn small primary" type="button" data-persona-create><i data-lucide="refresh-cw"></i><span>重新发起认证</span></button>
+        </div>`;
+    }
+    if(persona.status === 'Pending'){
+        return `<div class="step-card">
+            <div class="sc-head">等待真人认证<span class="tag amber">一般 1~3 分钟</span></div>
+            <div class="qr-row">
+                <div class="qr" id="personaQr"></div>
+                <div class="qr-actions">
+                    <div class="hint">请真人本人用手机扫码（或打开链接）完成活体人脸采集。认证通过后该素材组将唯一绑定此真人，链接用一次即失效。</div>
+                    <div style="display:flex; gap:7px; flex-wrap:wrap;">
+                        <button class="btn small primary" type="button" data-persona-check="${escapeAttr(persona.id)}"><i data-lucide="refresh-cw"></i><span>刷新认证状态</span></button>
+                        <button class="btn small" type="button" data-persona-copy="${escapeAttr(persona.h5_link || '')}"><i data-lucide="copy"></i><span>复制链接</span></button>
+                    </div>
+                    <div class="uri-box">${escapeHtml(persona.h5_link || '')}</div>
+                </div>
+            </div>
+        </div>`;
+    }
+    const bound = personaBoundItems(persona);
+    const rows = bound.map(it => {
+        const reg = avatarRegistrationOf(it, persona.platform) || {};
+        const st = reg.status || 'Processing';
+        const mark = st === 'Active' ? '<div class="dotok" title="已入库可用"></div>' : (st === 'Failed' ? '<div class="dotfail" title="入库失败"></div>' : '<div class="dotwait" title="平台比对中"></div>');
+        const tag = st === 'Active' ? '<span class="tag green">已入库</span>' : (st === 'Failed' ? `<span class="tag" style="color:#f87171;background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.4);">${escapeHtml(reg.detail || '未通过')}</span>` : '<span class="tag blue">比对中</span>');
+        return `<div class="asset-row"><div class="thumb"></div><span class="nm" title="${escapeAttr(it.url || '')}">${escapeHtml(it.name || 'asset')}</span>${tag}${mark}</div>`;
+    }).join('');
+    const currentBound = bound.some(it => it.id === item.id);
+    return `<div class="step-card">
+        <div class="sc-head">已认证真人 · ${escapeHtml(persona.name)}<span class="tag">素材组 ${escapeHtml((persona.group_id || '').slice(0, 24))}</span></div>
+        <div class="asset-list">${rows || '<div class="sc-desc">还没有提交素材。</div>'}</div>
+        <div class="sc-desc">入库时平台自动比对：与认证基准是否同一人 · 是否多脸（多脸即拒）· 内容合规。失败的素材不影响其他素材。</div>
+        <button class="btn small primary" type="button" data-persona-bind="${escapeAttr(persona.id)}" ${personaBusy || currentBound ? 'disabled' : ''}><i data-lucide="image-plus"></i><span>${currentBound ? '当前素材已在组内' : '把当前素材提交入库'}</span></button>
     </div>`;
 }
 function renderAssetDetail(item){
@@ -3398,6 +3535,14 @@ async function handleClick(event){
     if(avatarRegister){ await registerAssetAvatar(avatarRegister.dataset.avatarRegister || '', avatarRegister.dataset.avatarProv || ''); return; }
     const avatarCheck = target.closest?.('[data-avatar-check]');
     if(avatarCheck){ await checkAssetAvatarStatus(avatarCheck.dataset.avatarCheck || '', false, avatarCheck.dataset.avatarProv || ''); return; }
+    if(target.closest?.('[data-persona-create]')){ await createPersonaSession(); return; }
+    const personaCheck = target.closest?.('[data-persona-check]');
+    if(personaCheck){ await checkPersona(personaCheck.dataset.personaCheck || ''); return; }
+    const personaBind = target.closest?.('[data-persona-bind]');
+    if(personaBind){ await bindPersonaAsset(personaBind.dataset.personaBind || ''); return; }
+    const personaCopy = target.closest?.('[data-persona-copy]');
+    if(personaCopy){ await copyPersonaLink(personaCopy.dataset.personaCopy || ''); return; }
+    if(target.closest?.('[data-avatar-mode]')){ avatarMode = target.closest('[data-avatar-mode]').dataset.avatarMode === 'virtual' ? 'virtual' : 'real'; render(); return; }
     if(target.closest?.('[data-asset-classify-selected]')){ await runAssetClassifySelected(); return; }
     if(target.closest?.('[data-asset-download-selected]')){ await downloadSelectedAssets(); return; }
     if(target.closest?.('[data-asset-copy-to-canvas]')){ copySelectedAssetsToCanvas(); return; }
@@ -4078,6 +4223,138 @@ function scheduleAvatarPoll(id, providerId){
         }
     }, 6000);
 }
+// ---- 真人认证（persona）动作 ----
+async function createPersonaSession(){
+    const provider = activeAvatarProvider();
+    if(!provider){ setStatus('请先在 API 平台管理中添加并启用 API 平台'); return; }
+    if(providerAvatarPlatform(provider) !== 'volcengine'){ setStatus('真人活体认证目前仅火山引擎支持'); return; }
+    if(personaBusy) return;
+    const input = document.getElementById('personaNameInput');
+    const name = (input?.value || '').trim() || '真人形象';
+    personaBusy = true;
+    setStatus('正在创建真人认证会话…');
+    try {
+        const data = await apiJson('/api/asset-library/personas/create-session', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({library_id:activeAssetLibraryId, provider_id:provider.id, name})
+        });
+        assetLibrary = data.library || assetLibrary;
+        personaSelectedId = data.persona?.id || '';
+        setStatus('认证会话已创建，请把链接发给真人本人扫码完成活体认证');
+    } catch(err) {
+        setStatus(err.message || '创建认证会话失败');
+    } finally {
+        personaBusy = false;
+        render();
+    }
+}
+async function checkPersona(personaId){
+    const persona = personaOf(personaId);
+    if(!persona || personaBusy) return;
+    personaBusy = true;
+    const token = ++personaPollToken;
+    try {
+        const data = await apiJson('/api/asset-library/personas/check', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({library_id:activeAssetLibraryId, persona_id:personaId})
+        });
+        if(token !== personaPollToken) return;
+        assetLibrary = data.library || assetLibrary;
+        const updated = data.persona || {};
+        if(updated.status === 'Verified') setStatus(`真人认证通过（素材组 ${updated.group_id || ''}），可以把素材提交入库了`);
+        else if(updated.status === 'Failed') setStatus(updated.detail || '认证未通过，请重新发起');
+        else setStatus('真人还未完成认证，稍后会自动刷新…');
+    } catch(err) {
+        if(token === personaPollToken) setStatus(err.message || '查询认证状态失败');
+    } finally {
+        personaBusy = false;
+        render();
+        if(token === personaPollToken){
+            const latest = personaOf(personaId);
+            if(latest && latest.status === 'Pending') schedulePersonaPoll(personaId, token);
+        }
+    }
+}
+function schedulePersonaPoll(personaId, token){
+    setTimeout(() => {
+        if(token !== personaPollToken) return;
+        const persona = personaOf(personaId);
+        if(persona && persona.status === 'Pending') checkPersona(personaId);
+    }, 6000);
+}
+async function bindPersonaAsset(personaId){
+    const persona = personaOf(personaId);
+    const item = findAssetItem(selectedAssetId);
+    if(!persona || !item) return;
+    if(persona.status !== 'Verified'){ setStatus('该形象还没有完成真人认证'); return; }
+    if(personaBusy) return;
+    personaBusy = true;
+    setStatus(`正在把「${item.name || '素材'}」提交到 ${persona.name} 的素材组…`);
+    try {
+        const data = await apiJson('/api/asset-library/personas/bind-asset', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({library_id:activeAssetLibraryId, persona_id:personaId, item_id:item.id})
+        });
+        assetLibrary = data.library || assetLibrary;
+        setStatus('已提交入库，平台同人比对中，稍后自动刷新状态');
+        const providerId = persona.provider_id || '';
+        if(providerId) scheduleAvatarPoll(item.id, providerId);
+        schedulePersonaAssetPoll(personaId);
+    } catch(err) {
+        setStatus(err.message || '提交入库失败');
+    } finally {
+        personaBusy = false;
+        render();
+    }
+}
+function schedulePersonaAssetPoll(personaId){
+    setTimeout(async () => {
+        const persona = personaOf(personaId);
+        if(!persona || persona.status !== 'Verified') return;
+        const pending = personaBoundItems(persona).some(it => avatarRegistrationOf(it, persona.platform)?.status === 'Processing');
+        if(!pending) return;
+        for(const it of personaBoundItems(persona)){
+            const reg = avatarRegistrationOf(it, persona.platform);
+            if(reg?.task_id && reg.status === 'Processing') await checkAssetAvatarStatus(it.id, true, persona.provider_id || '');
+        }
+        if(personaOf(personaId)) schedulePersonaAssetPoll(personaId);
+    }, 6000);
+}
+async function copyPersonaLink(link){
+    const text = String(link || '').trim();
+    if(!text) return;
+    try {
+        await navigator.clipboard.writeText(text);
+        setStatus('认证链接已复制，发给真人本人用手机打开');
+    } catch(_) {
+        setStatus('复制失败，请手动选择链接复制');
+    }
+}
+function mountPersonaQr(){
+    const holder = document.getElementById('personaQr');
+    if(!holder) return;
+    const persona = activePersona();
+    const link = persona?.status === 'Pending' ? String(persona.h5_link || '') : '';
+    holder.innerHTML = '';
+    if(!link || typeof QRCode === 'undefined') return;
+    try {
+        new QRCode(holder, {text:link, width:76, height:76, colorDark:'#141518', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M});
+    } catch(_) {}
+}
+let personaAutoPollTimer = 0;
+function schedulePersonaAutoPoll(){
+    clearTimeout(personaAutoPollTimer);
+    const persona = activePersona();
+    if(!persona || persona.status !== 'Pending') return;
+    if(activeTab !== 'assets' || !selectedAssetId) return;
+    personaAutoPollTimer = setTimeout(() => {
+        const latest = personaOf(persona.id);
+        if(latest && latest.status === 'Pending') checkPersona(persona.id);
+    }, 8000);
+}
 async function deleteAssetItem(id){
     const item = findAssetItem(id);
     if(!item) return;
@@ -4529,6 +4806,13 @@ root.addEventListener('change', event => {
     if(avatarProvider){
         avatarRegisterProvider = avatarProvider.value || '';
         render();
+        return;
+    }
+    const personaSelect = event.target.closest?.('[data-persona-select]');
+    if(personaSelect){
+        personaSelectedId = personaSelect.value || '';
+        render();
+        return;
     }
 });
 root.addEventListener('dragover', event => {

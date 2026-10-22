@@ -80,10 +80,6 @@
         "192",
         0
       ],
-      "images.image_1": [
-        "472",
-        0
-      ],
       "vae": [
         "197",
         0
@@ -91,7 +87,7 @@
     },
     "class_type": "TextEncodeQwenImage21",
     "_meta": {
-      "title": "文本编码 Qwen 图像 2.1"
+      "title": "文本编码 Qwen Image 2.1"
     }
   },
   "419": {
@@ -176,15 +172,6 @@
     "class_type": "QwenImage21Cache",
     "_meta": {
       "title": "Qwen Image 2.1 缓存"
-    }
-  },
-  "472": {
-    "inputs": {
-      "image": "..simple.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
     }
   }
 }

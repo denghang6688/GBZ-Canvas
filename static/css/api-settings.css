@@ -6892,15 +6892,24 @@ body { background: #0e0e0f !important; }
 .model-protocol-select{flex:0 0 auto !important;}
 .model-row.has-tiers{grid-template-columns:minmax(0,1fr) auto 100px 36px !important;}
 .model-row.has-tiers .credit-tier-wrap{width:auto !important;}
-/* ===== grunge editorial dark theme (green accent) ===== */
-:root{
-  --accent:#00c07a !important;
-  --accent-strong:#00d589 !important;
+/* ===== grunge editorial dark theme（2026-10-22 用户要求：蓝紫主题色） ===== */
+/* theme.css 末尾 ModelScope 覆盖块用 html.theme-dark 级特异性写死绿色 accent，
+   这里必须用同等特异性 + 本文件后加载才能赢回蓝紫 */
+:root,
+html.theme-dark,
+body.theme-dark,
+html.studio-theme-dark,
+body.studio-theme-dark,
+html.theme-custom,
+body.theme-custom{
+  --studio-custom-color:#7c8cff !important;
+  --accent:#6c7bff !important;
+  --accent-strong:#8592ff !important;
 }
 html, body{
   background:#0a0a0a !important;
   background-image:
-    radial-gradient(ellipse at 20% 0%, rgba(0,192,122,.06), transparent 55%),
+    radial-gradient(ellipse at 20% 0%, rgba(108,123,255,.07), transparent 55%),
     repeating-linear-gradient(45deg, rgba(255,255,255,.012) 0 2px, transparent 2px 4px) !important;
   color:#f2f2f2 !important;
 }
@@ -6959,3 +6968,74 @@ a{color:var(--accent) !important;}
 }
 .recommend-badge, .tag, .pill, .chip{background:#0f0f0f !important; color:#ddd !important; border:1px solid rgba(255,255,255,.25) !important;}
 [class*=recommend] label, [class*=onboarding] label{color:#bbb !important;}
+/* ===== 2026-10-22 简洁化改版：站点头 / 官方余额 / 模型分类 ===== */
+.content-head.site-head{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-radius:14px; }
+.site-identity{ display:flex; align-items:center; gap:12px; min-width:0; }
+.site-logo{ width:40px; height:40px; border-radius:11px; display:grid; place-items:center; flex:0 0 auto; background:#232326; border:1px solid #313137; color:#cfcfd6; font-size:13px; font-weight:800; letter-spacing:.02em; }
+.site-head .editor-title{ font-size:18px; line-height:1.2; font-weight:800; }
+.site-pills{ display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
+.proto-pill-wrap{ position:relative; }
+.proto-pill{ display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 9px; border-radius:999px; border:1px solid #33333a; background:#232326; color:#b9b9c3; font-size:10.5px; font-weight:800; letter-spacing:.02em; }
+.proto-pill:hover:not(:disabled){ color:#fff; border-color:#4a4a55; }
+.proto-pill:disabled{ cursor:default; opacity:.8; }
+.proto-pill .proto-caret{ font-size:8px; opacity:.85; }
+.proto-menu{ position:absolute; top:26px; left:0; z-index:80; min-width:196px; padding:5px; border-radius:12px; background:#1d1d20; border:1px solid #34343b; box-shadow:0 18px 44px rgba(0,0,0,.6); }
+.proto-menu[hidden]{ display:none !important; }
+.proto-menu button{ display:block; width:100%; text-align:left; padding:7px 10px; border-radius:8px; border:0; background:transparent; color:#b9b9c3; font-size:11.5px; font-weight:750; }
+.proto-menu button:hover{ background:#26262b; color:#fff; }
+.proto-menu button.on{ background:rgba(108,123,255,.16); color:#aab4ff; }
+.state-pill{ display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 9px; border-radius:999px; border:1px solid rgba(108,123,255,.3); background:rgba(108,123,255,.10); color:#aab4ff; font-size:10.5px; font-weight:800; }
+.state-pill i{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+
+/* 官方余额 */
+.ob-card{ display:flex; align-items:center; gap:16px; padding:14px 18px; border-radius:14px; border:1px solid rgba(108,123,255,.26); background:linear-gradient(120deg, rgba(108,123,255,.12), rgba(108,123,255,.02)); }
+.ob-card[hidden]{ display:none !important; }
+.ob-label{ font-size:10.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#8a8fc0; }
+.ob-value{ margin-top:4px; font-size:26px; line-height:1.1; font-weight:800; color:#aab4ff; font-variant-numeric:tabular-nums; }
+.ob-value.ok{ color:#aab4ff; }
+.ob-value.na{ color:#8b8b98; font-size:14px; font-weight:700; }
+.ob-value.small{ color:#e8e8ec; font-size:13px; font-weight:650; line-height:1.5; }
+.ob-meta{ margin-top:6px; display:flex; align-items:center; gap:6px; font-size:11px; color:#8b8b98; font-weight:650; }
+.ob-dot{ width:7px; height:7px; border-radius:50%; background:#5a5a63; flex:0 0 auto; }
+.ob-dot.ok{ background:#8592ff; box-shadow:0 0 0 3px rgba(133,146,255,.16); }
+.ob-dot.no{ background:#5a5a63; }
+.ob-actions{ margin-left:auto; display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+
+/* 模型分类 chips + 筛选 */
+.model-kind-tabs{ display:flex; gap:6px; flex-wrap:wrap; padding:0 18px 12px; }
+.model-kind-tabs button{ height:26px; padding:0 11px; border-radius:999px; border:1px solid #2f2f36; background:#1f1f22; color:#9a9aa4; font-size:11.5px; font-weight:800; display:inline-flex; align-items:center; gap:6px; }
+.model-kind-tabs button em{ font-style:normal; font-size:10.5px; color:#6f6f78; }
+.model-kind-tabs button:hover{ color:#e8e8ec; border-color:#41414a; }
+.model-kind-tabs button.on{ color:#aab4ff; border-color:rgba(108,123,255,.45); background:rgba(108,123,255,.12); }
+.model-kind-tabs button.on em{ color:#aab4ff; }
+.models-band[data-mkind="image"] .model-grid > section:not([data-mkind="image"]),
+.models-band[data-mkind="video"] .model-grid > section:not([data-mkind="video"]),
+.models-band[data-mkind="chat"] .model-grid > section:not([data-mkind="chat"]),
+.models-band[data-mkind="audio"] .model-grid > section:not([data-mkind="audio"]){ display:none !important; }
+
+/* 模型行：移除积分输入后的列数（名称 / 协议 / 删除） */
+.model-row{ grid-template-columns:minmax(0,1fr) 36px !important; }
+.model-row.has-protocol{ grid-template-columns:minmax(0,1fr) 104px 36px !important; }
+.model-row.has-tiers{ grid-template-columns:minmax(0,1fr) 104px 36px !important; }
+.state-pill.bad{ border-color:rgba(232,200,106,.3); background:rgba(232,200,106,.1); color:#e8c86a; }
+.state-pill.pending{ border-color:#33333a; background:#232326; color:#9a9aa4; }
+.site-head .editor-title::before{ display:none !important; }
+/* 高级设置折叠行 */
+.adv-toggle{ display:inline-flex; align-items:center; gap:7px; padding:6px 0; border:0; background:transparent; color:var(--muted); font-size:12px; font-weight:750; cursor:pointer; }
+.adv-toggle:hover{ color:var(--text); }
+.adv-toggle .adv-chev{ font-size:9px; }
+.adv-settings[hidden]{ display:none !important; }
+.adv-settings .verify-action-row{ margin:6px 0 0; }
+
+/* 2026-10-22 用户要求：左侧接口行右侧显示官方余额徽标 */
+.provider-side-row{ display:flex; align-items:center; gap:5px; }
+.p-bal{
+  display:inline-flex; align-items:center; max-width:96px; height:16px; padding:0 7px;
+  border-radius:999px; border:1px solid #33333a; background:#232326;
+  color:#9a9aa4; font-size:9.5px; font-weight:800; line-height:1;
+  font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.p-bal.loading{ opacity:.55; }
+.p-bal.ok{ border-color:rgba(133,146,255,.42); background:rgba(108,123,255,.13); color:#aab4ff; }
+.p-bal.na{ opacity:.6; }
+.provider-card.active .p-bal.ok{ border-color:rgba(133,146,255,.6); background:rgba(108,123,255,.2); }

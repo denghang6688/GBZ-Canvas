@@ -2,6 +2,20 @@ let providers = [];
 let selectedId = '';
 const providerList = document.getElementById('providerList');
 const editorTitle = document.getElementById('editorTitle');
+// 2026-10-22：站点头（Logo / 协议下拉 / 状态）+ 官方余额卡
+const siteLogo = document.getElementById('siteLogo');
+const protocolPill = document.getElementById('protocolPill');
+const protocolPillLabel = document.getElementById('protocolPillLabel');
+const protocolMenu = document.getElementById('protocolMenu');
+const siteStatePill = document.getElementById('siteStatePill');
+const officialBalanceCard = document.getElementById('officialBalanceCard');
+const obValue = document.getElementById('obValue');
+const obMeta = document.getElementById('obMeta');
+const obDot = document.getElementById('obDot');
+const obQueryBtn = document.getElementById('obQueryBtn');
+const obConsoleLink = document.getElementById('obConsoleLink');
+const modelKindTabs = document.getElementById('modelKindTabs');
+const modelsBand = document.getElementById('modelsBand');
 const statusEl = document.getElementById('status');
 const nameInput = document.getElementById('nameInput');
 const idInput = document.getElementById('idInput');
@@ -2464,13 +2478,75 @@ function renderProviderList(){
                     <div class="provider-meta">${escapeHtml(item.base_url || '未配置地址')}</div>
                 </span>
                 <span class="provider-side-meta">
-                    <span class="provider-status-dot"></span>
-                    <span class="provider-protocol-pill">${escapeHtml(protocolLabel)}</span>
+                    <span class="p-bal" data-pbal="${escapeAttr(item.id + '|' + itemProtocol)}">…</span>
+                    <span class="provider-side-row">
+                        <span class="provider-status-dot"></span>
+                        <span class="provider-protocol-pill">${escapeHtml(protocolLabel)}</span>
+                    </span>
                 </span>
             </div>
         `;
     }).join('');
     refreshIcons();
+    scheduleBalanceBadges();
+}
+// 左侧接口行的官方余额徽标：与右侧官方余额卡同源同缓存（60s）
+let pbalSeq = 0;
+let pbalTimer = null;
+function scheduleBalanceBadges(){
+    clearTimeout(pbalTimer);
+    pbalTimer = setTimeout(refreshBalanceBadges, 300);
+}
+async function fetchOfficialBalanceData(item, proto){
+    if(proto === 'jimeng'){
+        const resp = await fetch('/api/jimeng/credit');
+        const payload = await resp.json();
+        const text = jimengCreditText(payload?.raw ?? payload) || '';
+        return text
+            ? { ok:true, supported:true, text, source:'即梦 CLI 官方账户' }
+            : { ok:false, supported:true, reason:'CLI 未返回余额' };
+    }
+    const resp = await fetch('/api/provider/balance', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ provider_id:item.id, protocol:proto, base_url:item.base_url || '' })
+    });
+    return await resp.json();
+}
+async function refreshBalanceBadges(){
+    const seq = ++pbalSeq;
+    const list = sortedProviders();
+    for(const item of list){
+        const proto = String(item.protocol || 'openai').toLowerCase();
+        const key = `${item.id}|${proto}`;
+        const el = providerList?.querySelector(`[data-pbal="${CSS.escape(key)}"]`);
+        if(!el) continue;
+        const cached = officialBalanceCache.get(key);
+        if(!cached || Date.now() - cached.ts >= 60000){
+            el.textContent = '…';
+            el.classList.add('loading');
+            let data = null;
+            try{ data = await fetchOfficialBalanceData(item, proto); }
+            catch(err){ data = { ok:false, supported:true, reason:'查询失败' }; }
+            if(seq !== pbalSeq) return;
+            officialBalanceCache.set(key, { ts:Date.now(), data });
+        }
+        if(seq !== pbalSeq) return;
+        const d = officialBalanceCache.get(key)?.data;
+        let label = '—';
+        if(d?.ok){
+            label = d.text || formatOfficialAmount(d);
+            if(d.text){
+                const num = String(d.text).split(':').pop().trim();
+                if(/^\d+(\.\d+)?$/.test(num)) label = `${num} 积分`;
+            }
+            if(label.length > 14) label = label.slice(0, 13) + '…';
+        }
+        el.textContent = label;
+        el.classList.remove('loading');
+        el.classList.toggle('ok', Boolean(d?.ok));
+        el.classList.toggle('na', !d?.ok);
+    }
 }
 function handleProviderDragStart(event, id){
     const item = providers.find(provider => provider.id === id);
@@ -2515,6 +2591,11 @@ function renderEditor(){
     const item = provider();
     if(!item) return;
     editorTitle.textContent = item.name || item.id;
+    // 站点头 Logo：拉丁名取前两位大写，中文取首字
+    if(siteLogo){
+        const raw = String(item.name || item.id || 'A').trim();
+        siteLogo.textContent = /^[\x00-\x7F]/.test(raw) ? raw.slice(0, 2).toUpperCase() : raw.slice(0, 1);
+    }
     nameInput.value = item.name || '';
     idInput.value = item.id || '';
     updateIdPreview();
@@ -2528,6 +2609,7 @@ function renderEditor(){
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id) || Boolean(lockedApi);
         protocolInput.title = lockedApi ? '推荐平台使用固定协议' : (protocolInput.disabled ? '内置平台使用固定协议' : '');
     }
+    syncProtocolPill();
     if(imageRequestModeInput){
         imageRequestModeInput.value = normalizeImageRequestMode(item.image_request_mode);
         imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
@@ -2638,6 +2720,7 @@ function renderEditor(){
     }
     const deleteBtn = document.getElementById('deleteBtn');
     if(deleteBtn) deleteBtn.style.display = isFixedProvider(item) ? 'none' : 'inline-flex';
+    setModelKindFilter('all');
     renderModels('image');
     renderModels('chat');
     renderModels('video');
@@ -2645,7 +2728,8 @@ function renderEditor(){
     if(isModelScope) renderMsLoras();
     else if(msLoraList) msLoraList.innerHTML = '';
     renderProviderList();
-    refreshBillingStats();
+    // 2026-10-22：原「积分系统」整块换成官方余额（只读，本地不再记账）
+    renderOfficialBalance();
 }
 function showVerifyResult(html){ const el = document.getElementById('verifyResult'); if(el){ el.style.display = 'block'; el.innerHTML = html; } }
 function clearVerifyResult(){ const el = document.getElementById('verifyResult'); if(el){ el.style.display = 'none'; el.innerHTML = ''; } }
@@ -3101,6 +3185,7 @@ async function testConnection(){
     const isCliProtocol = CLI_PROTOCOLS.has(currentProtocol);
     if(!baseUrl && !isJimeng && !isCliProtocol){ alert('请先填写请求地址'); return; }
     if(btn){ btn.disabled = true; btn.querySelector('span').textContent = tr('api.testingUrl') || '验证中...'; }
+    setSiteState('验证中…', 'pending');
     showVerifyResult(`<span style="color:var(--muted);font-size:11px;font-weight:700">验证中...</span>`);
     try {
         const apiKey = currentProviderApiKey(item);
@@ -3149,12 +3234,15 @@ async function testConnection(){
                 ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
                 : imageModeNote;
             showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}${grsaiNote}`);
+            setSiteState('已连接', 'ok');
         } else {
+            setSiteState('验证失败', 'bad');
             showVerifyResult(`
                 <div style="font-size:11px;font-weight:800;color:#b45309">⚠ 地址验证未通过 (HTTP ${data.status})</div>
                 <div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:3px">${escapeHtml((data.message || '').slice(0,200))}</div>`);
         }
     } catch(e){
+        setSiteState('验证失败', 'bad');
         showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}</div>`);
     } finally {
         if(btn){ btn.disabled = false; btn.querySelector('span').textContent = tr('api.testUrl') || '验证地址'; }
@@ -3375,36 +3463,46 @@ function renderModels(kind){
         return;
     }
     const showProtocol = providerSupportsModelProtocol(item);
-    item.model_credits = item.model_credits || {};
-    item.model_credit_tiers = item.model_credit_tiers || {};
-    const isImage = kind === 'image';
     list.innerHTML = models.map((model, index) => {
-        let creditHtml;
-        if(isImage){
-            const t = item.model_credit_tiers[model] || {};
-            creditHtml = `
-            <div class="credit-tier-wrap" title="按输出分辨率分档计费">
-                <label class="credit-tier"><span>1K</span><input type="number" min="0" step="1" value="${t['1k']||0}" placeholder="0" onchange="updateModelCreditTier('${escapeAttr(model)}','1k',this.value)"></label>
-                <label class="credit-tier"><span>2K</span><input type="number" min="0" step="1" value="${t['2k']||0}" placeholder="0" onchange="updateModelCreditTier('${escapeAttr(model)}','2k',this.value)"></label>
-                <label class="credit-tier"><span>4K</span><input type="number" min="0" step="1" value="${t['4k']||0}" placeholder="0" onchange="updateModelCreditTier('${escapeAttr(model)}','4k',this.value)"></label>
-            </div>`;
-        } else {
-            const credits = item.model_credits[model] || 0;
-            creditHtml = `
-            <div class="credit-input-wrap">
-                <input type="number" min="0" step="1" value="${credits}" placeholder="0" onchange="updateModelCredit('${escapeAttr(model)}', this.value)">
-                <span class="credit-label">积分</span>
-            </div>`;
-        }
+        // 2026-10-22（用户要求）：界面上不再露出每模型积分 / 分档积分，数据字段保持原样不动
         return `
-        <div class="model-row${showProtocol ? ' has-protocol' : ''}${isImage ? ' has-tiers' : ''}">
+        <div class="model-row${showProtocol ? ' has-protocol' : ''}">
             <input value="${escapeAttr(model)}" oninput="updateModel('${kind}', ${index}, this.value)">
-            ${creditHtml}
             ${modelProtocolSelectHtml(kind, index, model, item)}
             <button class="icon-btn" type="button" onclick="removeModel('${kind}', ${index})" title="删除"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
         </div>`;
     }).join('');
     refreshIcons();
+    updateModelKindCounts();
+}
+// 2026-10-22：模型分类 chips 的数量与当前筛选状态
+function updateModelKindCounts(){
+    const item = provider();
+    const counts = {
+        all: (item?.image_models?.length || 0) + (item?.chat_models?.length || 0) + (item?.video_models?.length || 0) + (item?.audio_models?.length || 0),
+        image: item?.image_models?.length || 0,
+        video: item?.video_models?.length || 0,
+        chat: item?.chat_models?.length || 0,
+        audio: item?.audio_models?.length || 0,
+    };
+    const map = { all:'mkCountAll', image:'mkCountImage', video:'mkCountVideo', chat:'mkCountChat', audio:'mkCountAudio' };
+    Object.entries(map).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if(el) el.textContent = counts[k];
+    });
+    applyModelKindFilter();
+}
+function setModelKindFilter(kind){
+    if(modelsBand) modelsBand.dataset.mkind = kind || 'all';
+    if(modelKindTabs){
+        modelKindTabs.querySelectorAll('[data-mkind]').forEach(b => b.classList.toggle('on', b.dataset.mkind === (kind || 'all')));
+    }
+    applyModelKindFilter();
+}
+function applyModelKindFilter(){
+    if(!modelKindTabs) return;
+    const kind = modelsBand?.dataset.mkind || 'all';
+    modelKindTabs.querySelectorAll('[data-mkind]').forEach(b => b.classList.toggle('on', b.dataset.mkind === kind));
 }
 function msLoraTargetOptions(selected){
     const item = provider();
@@ -3875,14 +3973,8 @@ window.onload = () => {
     if(window.StudioI18n) window.StudioI18n.apply();
     syncRecommendView();
     loadProviders();
-    // 加载计费配置
-    (function(){
-        var cfg = getBillingConfig();
-        var balEl = document.getElementById('balanceInput');
-        var rateEl = document.getElementById('creditRateInput');
-        if(balEl) { balEl.value = cfg.balance || ''; balEl.addEventListener('input', saveBillingConfig); }
-        if(rateEl) { rateEl.value = cfg.credit_per_yuan || 100; rateEl.addEventListener('input', saveBillingConfig); }
-    })();
+    // 2026-10-22：站点头（协议下拉）与模型分类 chips
+    initApiSiteHead();
     // 平台名输入时实时预览生成的 ID
     if(nameInput) nameInput.addEventListener('input', updateIdPreview);
     if(protocolInput) protocolInput.addEventListener('change', updateProtocolFromInput);
@@ -3909,6 +4001,199 @@ window.onload = () => {
         });
     });
 };
+
+// === 2026-10-22：站点头（协议下拉）+ 官方余额（替换原积分系统） ===
+const PROTOCOL_LABELS = {
+    openai: 'OpenAI 直连',
+    apimart: '异步协议（APIMart）',
+    gemini: 'Gemini 协议',
+    grsai: 'GRsai 原生协议',
+    volcengine: '方舟 / Ark 任务协议',
+    runninghub: 'RunningHub OpenAPI',
+    jimeng: '即梦 CLI',
+    codex: 'OpenAI Codex CLI',
+    'gemini-cli': 'Antigravity CLI'
+};
+function syncProtocolPill(){
+    const cur = String(protocolInput?.value || 'openai');
+    if(protocolPillLabel) protocolPillLabel.textContent = PROTOCOL_LABELS[cur] || cur;
+    if(protocolPill){
+        const locked = Boolean(protocolInput?.disabled);
+        protocolPill.disabled = locked;
+        protocolPill.title = locked ? '内置平台使用固定协议' : '切换协议';
+        protocolPill.classList.toggle('locked', locked);
+    }
+    if(protocolMenu){
+        protocolMenu.querySelectorAll('[data-proto]').forEach(b => b.classList.toggle('on', b.dataset.proto === cur));
+    }
+}
+function buildProtocolMenu(){
+    if(!protocolMenu || protocolMenu.dataset.ready) return;
+    protocolMenu.innerHTML = Object.entries(PROTOCOL_LABELS)
+        .map(([value, label]) => `<button type="button" data-proto="${escapeAttr(value)}">${escapeHtml(label)}</button>`).join('');
+    protocolMenu.dataset.ready = '1';
+}
+function toggleProtocolMenu(force){
+    buildProtocolMenu();
+    if(!protocolMenu || protocolPill?.disabled) return;
+    const show = force !== undefined ? force : protocolMenu.hidden;
+    protocolMenu.hidden = !show;
+    if(show) syncProtocolPill();
+}
+// 站点头状态胶囊：已连接 / 验证中 / 验证失败
+function setSiteState(text, state){
+    if(!siteStatePill) return;
+    siteStatePill.innerHTML = `<i></i>${escapeHtml(text || '')}`;
+    siteStatePill.classList.toggle('bad', state === 'bad');
+    siteStatePill.classList.toggle('pending', state === 'pending');
+}
+// 高级设置（协议 / 图片接口）折叠
+function toggleAdvSettings(){
+    const row = document.getElementById('advSettingsRow');
+    const btn = document.getElementById('advToggleBtn');
+    if(!row) return;
+    row.hidden = !row.hidden;
+    if(btn){
+        const chev = btn.querySelector('.adv-chev');
+        if(chev) chev.textContent = row.hidden ? '▸' : '▾';
+        btn.classList.toggle('open', !row.hidden);
+    }
+}
+function initApiSiteHead(){
+    buildProtocolMenu();    protocolPill?.addEventListener('click', e => { e.stopPropagation(); toggleProtocolMenu(); });
+    protocolMenu?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-proto]');
+        if(!btn) return;
+        e.stopPropagation();
+        if(protocolInput){
+            protocolInput.value = btn.dataset.proto;
+            protocolInput.dispatchEvent(new Event('change', { bubbles:true }));
+        }
+        toggleProtocolMenu(false);
+        syncProtocolPill();
+    });
+    document.addEventListener('click', e => {
+        if(protocolMenu && !protocolMenu.hidden && !e.target.closest('.proto-pill-wrap')) toggleProtocolMenu(false);
+    });
+    modelKindTabs?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-mkind]');
+        if(!btn) return;
+        setModelKindFilter(btn.dataset.mkind);
+    });
+}
+
+// —— 官方余额 ——
+const officialBalanceCache = new Map();
+let officialBalanceSeq = 0;
+function formatOfficialAmount(data){
+    if(!data) return '—';
+    const n = Number(data.amount);
+    if(!Number.isFinite(n)) return '—';
+    const symbol = data.currency === 'CNY' ? '¥' : data.currency === 'USD' ? '$' : '';
+    return `${symbol}${n.toFixed(2)}${data.unit ? ' ' + data.unit : ''}`;
+}
+function setOfficialBalanceState(state, data, hint){
+    if(!officialBalanceCard) return;
+    const item = provider();
+    const base = String(item?.base_url || '').trim();
+    if(obConsoleLink){
+        if(base) { obConsoleLink.href = base; } else { obConsoleLink.hidden = true; }
+    }
+    if(obValue) obValue.classList.remove('small', 'ok', 'na');
+    if(obDot) obDot.className = 'ob-dot';
+    const showQuery = state !== 'unsupported';
+    if(obQueryBtn) obQueryBtn.style.display = showQuery ? '' : 'none';
+    if(obConsoleLink) obConsoleLink.hidden = !(state === 'unsupported' || (state === 'idle' && !showQuery)) || !base;
+    if(state === 'loading'){
+        if(obValue) obValue.textContent = '查询中…';
+        if(obMeta) obMeta.textContent = '正在请求平台接口';
+        return;
+    }
+    if(state === 'ok' && data){
+        if(obValue){
+            obValue.textContent = data.text || formatOfficialAmount(data);
+            obValue.classList.add(data.text ? 'small' : 'ok');
+        }
+        if(obDot) obDot.className = 'ob-dot ok';
+        if(obMeta){
+            const time = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+            obMeta.textContent = `${data.source || '平台官方接口'} · ${time} 更新`;
+        }
+        return;
+    }
+    if(state === 'unsupported'){
+        if(obValue){ obValue.textContent = '官方未提供余额接口'; obValue.classList.add('na'); }
+        if(obDot) obDot.className = 'ob-dot no';
+        if(obMeta) obMeta.textContent = data?.reason || '额度以平台官网控制台为准';
+        if(obConsoleLink && base) obConsoleLink.hidden = false;
+        return;
+    }
+    if(state === 'error'){
+        if(obValue){ obValue.textContent = data?.hint ? '待配置凭证' : '查询失败'; obValue.classList.add('na'); }
+        if(obDot) obDot.className = 'ob-dot no';
+        if(obMeta) obMeta.textContent = data?.reason || '稍后重试';
+        if(data?.hint && obConsoleLink){
+            const item0 = provider();
+            const b0 = String(item0?.base_url || '').trim();
+            if(b0){ obConsoleLink.href = b0; obConsoleLink.hidden = false; }
+        }
+        return;
+    }
+    // idle
+    if(obValue){ obValue.textContent = '—'; obValue.classList.add('na'); }
+    if(obDot) obDot.className = 'ob-dot no';
+    if(obMeta) obMeta.textContent = hint || '尚未查询';
+}
+async function queryOfficialBalance(manual){
+    const item = provider();
+    if(!item) return;
+    const proto = String(protocolInput?.value || item.protocol || 'openai').toLowerCase();
+    const seq = ++officialBalanceSeq;
+    setOfficialBalanceState('loading');
+    let data = null;
+    try{
+        if(proto === 'jimeng'){
+            const resp = await fetch('/api/jimeng/credit');
+            const payload = await resp.json();
+            const text = jimengCreditText(payload?.raw ?? payload) || '';
+            data = text
+                ? { ok:true, supported:true, text, source:'即梦 CLI 官方账户' }
+                : { ok:false, supported:true, reason:'CLI 未返回余额，请先登录即梦 CLI' };
+        } else {
+            const resp = await fetch('/api/provider/balance', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json' },
+                body: JSON.stringify({ provider_id:item.id, protocol:proto, base_url:item.base_url || '' })
+            });
+            data = await resp.json();
+        }
+    }catch(err){
+        data = { ok:false, supported:true, reason:'查询失败：' + (err.message || err) };
+    }
+    if(seq !== officialBalanceSeq) return;   // 查询期间切了平台，丢弃旧结果
+    officialBalanceCache.set(`${item.id}|${proto}`, { ts:Date.now(), data });
+    const state = data?.ok ? 'ok' : (data?.supported === false ? 'unsupported' : 'error');
+    setOfficialBalanceState(state, data);
+    if(manual && state === 'error' && data?.reason) setStatus(data.reason);
+}
+function renderOfficialBalance(auto = true){
+    const item = provider();
+    if(!officialBalanceCard) return;
+    officialBalanceCard.hidden = !item;
+    if(!item) return;
+    const proto = String(protocolInput?.value || item.protocol || 'openai').toLowerCase();
+    const cached = officialBalanceCache.get(`${item.id}|${proto}`);
+    if(cached && Date.now() - cached.ts < 60000){
+        setOfficialBalanceState(cached.data?.ok ? 'ok' : (cached.data?.supported === false ? 'unsupported' : 'error'), cached.data);
+        return;
+    }
+    if(proto === 'jimeng'){
+        setOfficialBalanceState('idle', null, '即梦余额由本机 CLI 查询，点「查询余额」获取');
+        return;
+    }
+    if(auto) queryOfficialBalance(false);
+    else setOfficialBalanceState('idle');
+}
 
 // === 积分系统（API 设置 · 平台编辑区） ===
 let billingStatsCache = null;

@@ -37,7 +37,7 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -141,6 +141,197 @@ async def billing_set_rate(req: dict):
         data["rate"] = rate
         save_billing(data)
     return {"ok": True}
+
+# ===== 2026-10-22（用户要求）：官方余额查询（只读展示，不参与本地扣费） =====
+# 设计原则：能拿到官方余额就直接显示；拿不到就明确返回 supported=False，绝不用本地估算冒充实盘。
+def _balance_api_root(base_url: str) -> str:
+    root = str(base_url or "").strip().rstrip("/")
+    if root.endswith("/v1"):
+        root = root[:-3]
+    return root
+
+async def _newapi_query_balance(client, base_url: str, api_key: str):
+    """标准 new-api / one-api 中转站：billing/subscription + usage。"""
+    if not base_url:
+        return {"ok": False, "supported": False, "reason": "未填写请求地址"}
+    root = _balance_api_root(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        sub = await client.get(f"{root}/v1/dashboard/billing/subscription", headers=headers)
+    except Exception as exc:
+        return {"ok": False, "supported": False, "reason": f"该平台未提供余额接口（{exc}）"}
+    if sub.status_code in (401, 403):
+        return {"ok": False, "supported": True, "reason": "密钥无效或无余额查询权限"}
+    if sub.status_code != 200:
+        return {"ok": False, "supported": False, "reason": f"该平台未提供余额接口（HTTP {sub.status_code}）"}
+    try:
+        payload = sub.json() or {}
+        total = float(payload.get("hard_limit_usd") or payload.get("system_hard_limit_usd") or 0)
+    except Exception:
+        return {"ok": False, "supported": False, "reason": "返回内容不是标准 billing 格式"}
+    used = 0.0
+    try:
+        usage = await client.get(f"{root}/v1/dashboard/billing/usage", headers=headers)
+        if usage.status_code == 200:
+            used = float((usage.json() or {}).get("total_usage") or 0) / 100.0
+    except Exception:
+        used = 0.0
+    return {
+        "ok": True,
+        "supported": True,
+        "amount": round(total - used, 4),
+        "currency": "USD",
+        "total": round(total, 4),
+        "used": round(used, 4),
+        "source": "平台 billing 接口",
+    }
+
+async def _runninghub_query_balance(client, provider):
+    root = str(provider.get("base_url") or "https://www.runninghub.cn").strip().rstrip("/")
+    if not root.startswith("http"):
+        root = "https://www.runninghub.cn"
+    api_key = runninghub_api_key(provider, use_wallet=True)
+    if not api_key:
+        return {"ok": False, "supported": True, "reason": "请先保存 RH 账户余额 API Key"}
+    try:
+        resp = await client.post(f"{root}/uc/openapi/accountStatus", json={"apiKey": api_key})
+    except Exception as exc:
+        return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
+    if resp.status_code != 200:
+        return {"ok": False, "supported": True, "reason": f"查询失败（HTTP {resp.status_code}）"}
+    try:
+        data = resp.json() or {}
+    except Exception:
+        return {"ok": False, "supported": True, "reason": "返回内容解析失败"}
+    body = data.get("data") if isinstance(data.get("data"), dict) else data
+    coin = body.get("remainCoin", body.get("remainCoins"))
+    money = body.get("remainMoney", body.get("remainAmount"))
+    if isinstance(coin, (int, float)):
+        return {"ok": True, "supported": True, "amount": round(float(coin), 2), "currency": "", "unit": "RH币", "source": "RunningHub 官方账户"}
+    if isinstance(money, (int, float)):
+        return {"ok": True, "supported": True, "amount": round(float(money), 2), "currency": "CNY", "source": "RunningHub 官方账户"}
+    return {"ok": False, "supported": False, "reason": "该接口未返回余额字段"}
+
+def _volc_billing_sign_get_headers(ak: str, sk: str, action: str, version: str,
+                                   region: str = "cn-beijing", service: str = "billing",
+                                   host: str = "open.volcengineapi.com") -> Dict[str, str]:
+    """火山引擎 OpenAPI GET 形式签名 V4（官方费用中心文档示例的调用方式）。"""
+    method = "GET"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    x_date = now.strftime("%Y%m%dT%H%M%SZ")
+    short_date = x_date[:8]
+    canonical_query = f"Action={urllib.parse.quote(action, safe='')}&Version={urllib.parse.quote(version, safe='')}"
+    canonical_headers = f"host:{host}\nx-date:{x_date}\n"
+    signed_headers = "host;x-date"
+    payload_hash = hashlib.sha256(b"").hexdigest()
+    canonical_request = "\n".join([method, "/", canonical_query, canonical_headers, signed_headers, payload_hash])
+    credential_scope = f"{short_date}/{region}/{service}/request"
+    string_to_sign = "\n".join([
+        "HMAC-SHA256", x_date, credential_scope,
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+    ])
+    k_date = _volc_hmac(sk.encode("utf-8"), short_date)
+    k_region = _volc_hmac(k_date, region)
+    k_service = _volc_hmac(k_region, service)
+    k_signing = _volc_hmac(k_service, "request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return {
+        "Host": host,
+        "X-Date": x_date,
+        "Authorization": (
+            f"HMAC-SHA256 Credential={ak}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+    }
+
+
+async def _volcengine_query_balance(client):
+    """火山引擎官方费用中心 QueryBalanceAcct，需要 AK/SK 签名（与方舟资产共用同一对凭证）。"""
+    ak = volcengine_access_key_value()
+    sk = volcengine_secret_key_value()
+    if not ak or not sk:
+        return {
+            "ok": False, "supported": True,
+            "reason": "需配置火山 AK/SK（VOLCENGINE_ACCESS_KEY_ID / VOLCENGINE_SECRET_ACCESS_KEY，与方舟资产共用）",
+            "hint": True,
+        }
+    host = "open.volcengineapi.com"
+    headers = _volc_billing_sign_get_headers(ak, sk, "QueryBalanceAcct", "2022-01-01", host=host)
+    try:
+        resp = await client.get(f"https://{host}/?Action=QueryBalanceAcct&Version=2022-01-01", headers=headers)
+    except Exception as exc:
+        return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
+    try:
+        payload = resp.json() or {}
+    except Exception:
+        return {"ok": False, "supported": True, "reason": f"返回非 JSON（HTTP {resp.status_code}）"}
+    meta = payload.get("ResponseMetadata") if isinstance(payload, dict) else None
+    if isinstance(meta, dict) and isinstance(meta.get("Error"), dict):
+        err = meta["Error"]
+        code = str(err.get("Code") or "")
+        if code in {"SignatureDoesNotMatch", "InvalidCredential", "AuthFailure", "InvalidAccessKey"}:
+            return {"ok": False, "supported": True, "reason": "AK/SK 无效或签名不匹配"}
+        return {"ok": False, "supported": True, "reason": f"官方接口报错：{err.get('Code')} {err.get('Message')}"}
+    result = payload.get("Result") if isinstance(payload.get("Result"), dict) else payload
+    available = result.get("AvailableBalance")
+    if available is None:
+        return {"ok": False, "supported": True, "reason": "接口未返回余额字段"}
+    try:
+        available = float(available)
+    except (TypeError, ValueError):
+        return {"ok": False, "supported": True, "reason": "余额字段格式异常"}
+    cash = result.get("CashBalance")
+    parts = [f"可用 ¥{available:.2f}"]
+    if cash is not None:
+        try:
+            parts.append(f"现金 ¥{float(cash):.2f}")
+        except (TypeError, ValueError):
+            pass
+    return {
+        "ok": True, "supported": True,
+        "amount": round(available, 2),
+        "currency": str(result.get("Currency") or "CNY"),
+        "text": " · ".join(parts),
+        "source": "火山引擎费用中心",
+    }
+
+
+@app.post("/api/provider/balance")
+async def provider_balance(req: dict):
+    pid = str(req.get("provider_id") or "").strip()
+    protocol = str(req.get("protocol") or "").strip().lower()
+    providers = load_api_providers()
+    provider = next((p for p in providers if p.get("id") == pid), None)
+    if not provider:
+        return {"ok": False, "supported": False, "reason": "平台不存在"}
+    if not protocol:
+        protocol = str(provider.get("protocol") or "openai").strip().lower()
+    base_url = str(req.get("base_url") or provider.get("base_url") or "").strip()
+    if protocol == "jimeng":
+        # 即梦余额由本机 CLI 查询（前端走 /api/jimeng/credit），这里不重复拉起进程
+        return {"ok": False, "supported": True, "query": "cli", "reason": "即梦余额需用本机 CLI 查询"}
+    if protocol == "volcengine":
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+                return await _volcengine_query_balance(client)
+        except Exception as exc:
+            return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
+    if protocol in {"gemini", "codex", "gemini-cli"}:
+        return {"ok": False, "supported": False, "reason": "该平台未提供余额查询接口"}
+    if protocol == "runninghub":
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+                return await _runninghub_query_balance(client, provider)
+        except Exception as exc:
+            return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
+    api_key = provider_env_key_value(pid)
+    if not api_key:
+        return {"ok": False, "supported": True, "reason": "请先保存 API Key"}
+    try:
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            return await _newapi_query_balance(client, base_url, api_key)
+    except Exception as exc:
+        return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
 
 def billing_deduct(provider_id, model, credits, task_id=""):
     """成功生成后扣费。返回是否成功。"""
@@ -348,7 +539,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "V26.10.21.1"
+APP_VERSION = "V26.10.22.1"
 # === GBZ智能画布 更新源（发布地址绑定作者账号；换账号/仓库名只改这里） ===
 GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认）
 GITHUB_REPO_NAME = "GBZ-Canvas"
@@ -3372,6 +3563,23 @@ class AssetAvatarRegisterRequest(BaseModel):
     provider_id: str = ""
     project_name: str = "default"
     group_name: str = ""
+
+class PersonaCreateSessionRequest(BaseModel):
+    """真人活体认证会话：一个 persona 绑定一个真人（火山 Asset Group）。"""
+    library_id: str = ""
+    provider_id: str = ""
+    name: str = ""
+    project_name: str = "default"
+
+class PersonaCheckRequest(BaseModel):
+    library_id: str = ""
+    persona_id: str = ""
+
+class PersonaBindAssetRequest(BaseModel):
+    """把素材提交进已认证真人的素材组（同人面部比对入库）。"""
+    library_id: str = ""
+    persona_id: str = ""
+    item_id: str = ""
 
 class AssetLibraryClassifyRequest(BaseModel):
     library_id: str = ""
@@ -7116,6 +7324,197 @@ async def playable_video(url: str):
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法生成可播放视频：{exc}") from exc
 
+# ===== 2026-10-22（用户要求：视频截取片段，右侧连出新节点）=====
+# 胶片条：均匀抽 N 帧 base64 JPEG（前端截取编辑器用）；截取：ffmpeg 流复制裁剪，
+# 失败自动降级重编码。产物落 assets/output/，前端作为普通视频素材节点接住。
+
+def probe_local_video_duration_seconds(path: str) -> Optional[float]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        if proc.returncode != 0:
+            return None
+        duration = float(str(proc.stdout or "").strip())
+        return duration if math.isfinite(duration) and duration > 0 else None
+    except Exception:
+        return None
+
+VIDEO_TRIM_MIN_SECONDS = 0.5
+
+@app.get("/api/video/filmstrip")
+async def video_filmstrip(url: str, count: int = 10, w: int = 160):
+    """均匀抽取 N 帧缩略图（base64 JPEG 数组 + 视频总时长），给视频截取胶片条用。"""
+    path = output_file_from_url(url)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    if not is_video_preview_file(path):
+        raise HTTPException(status_code=415, detail="不支持的文件格式")
+    duration = await asyncio.to_thread(probe_local_video_duration_seconds, path)
+    if not duration:
+        raise HTTPException(status_code=415, detail="无法读取视频时长")
+    count = max(2, min(16, int(count or 10)))
+    width = max(48, min(320, int(w or 160)))
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(status_code=500, detail="未找到 ffmpeg")
+
+    def _build() -> list:
+        frames = []
+        fd_base = tempfile.mkdtemp(prefix="filmstrip_")
+        try:
+            # 单趟 fps 过滤器：每 D/N 秒出一帧，恰好 N 帧（比逐帧起 ffmpeg 快一个量级）
+            fps_expr = f"{count}/{duration:.6f}"
+            cmd = [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-i", path,
+                "-vf", f"fps={fps_expr},scale='min({width},iw)':-2",
+                "-frames:v", str(count),
+                os.path.join(fd_base, "%03d.jpg"),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if proc.returncode == 0:
+                names = sorted(os.listdir(fd_base))
+                for name in names:
+                    fp = os.path.join(fd_base, name)
+                    try:
+                        if os.path.getsize(fp) > 0:
+                            with open(fp, "rb") as fh:
+                                frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
+                    except OSError:
+                        continue
+        except Exception:
+            pass
+        finally:
+            try:
+                shutil.rmtree(fd_base, ignore_errors=True)
+            except Exception:
+                pass
+        if not frames:
+            # 兜底：逐帧起 ffmpeg（fps 过滤器对个别封装失效时）
+            for i in range(count):
+                t = duration * (i + 0.5) / count
+                fd, tmp = tempfile.mkstemp(prefix="filmstrip_", suffix=".jpg")
+                os.close(fd)
+                try:
+                    cmd = [
+                        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                        "-ss", f"{t:.3f}", "-i", path,
+                        "-frames:v", "1",
+                        "-vf", f"scale='min({width},iw)':-2",
+                        tmp,
+                    ]
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+                        with open(tmp, "rb") as fh:
+                            frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
+                except Exception:
+                    continue
+                finally:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+        return frames
+
+    frames = await asyncio.to_thread(_build)
+    if not frames:
+        raise HTTPException(status_code=415, detail="未能抽取视频帧")
+    return {"duration": duration, "frames": frames}
+
+class VideoTrimRequest(BaseModel):
+    url: str
+    start: float
+    end: float
+
+@app.post("/api/video/trim")
+async def video_trim(payload: VideoTrimRequest):
+    """截取视频片段：优先 -c copy 流复制（不重编码、秒级、无损），失败降级重编码。"""
+    path = output_file_from_url(payload.url)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    if not is_video_preview_file(path):
+        raise HTTPException(status_code=415, detail="不支持的文件格式")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(status_code=500, detail="未找到 ffmpeg")
+
+    duration = await asyncio.to_thread(probe_local_video_duration_seconds, path)
+    try:
+        start = max(0.0, float(payload.start or 0))
+        end = float(payload.end or 0)
+    except Exception:
+        raise HTTPException(status_code=400, detail="起止时间无效")
+    if not (math.isfinite(start) and math.isfinite(end)) or end - start < VIDEO_TRIM_MIN_SECONDS:
+        raise HTTPException(status_code=400, detail=f"片段长度不能小于 {VIDEO_TRIM_MIN_SECONDS} 秒")
+    if duration:
+        if start >= duration - 0.05:
+            raise HTTPException(status_code=400, detail="起点超出视频时长")
+        end = min(end, duration)
+    trim_duration = end - start
+
+    src_ext = os.path.splitext(path)[1].lower()
+    out_ext = ".webm" if src_ext == ".webm" else ".mp4"
+    out_name = f"trim_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{out_ext}"
+    out_path = os.path.join(OUTPUT_OUTPUT_DIR, out_name)
+    os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
+
+    def _run(cmd) -> Tuple[bool, str]:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            return False, "ffmpeg 处理超时"
+        ok = proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0
+        return ok, (proc.stderr or "").strip()[-400:]
+
+    seek = ["-ss", f"{start:.3f}", "-i", path, "-t", f"{trim_duration:.3f}"]
+    if out_ext == ".mp4":
+        fast_cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *seek,
+                    "-map", "0", "-c", "copy", "-movflags", "+faststart",
+                    "-avoid_negative_ts", "make_zero", out_path]
+        slow_cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *seek,
+                    "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
+                    "-movflags", "+faststart", out_path]
+    else:
+        fast_cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *seek,
+                    "-map", "0", "-c", "copy", out_path]
+        slow_cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *seek,
+                    "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libvpx-vp9",
+                    "-b:v", "2M", "-c:a", "libopus", out_path]
+
+    ok, err = await asyncio.to_thread(_run, fast_cmd)
+    if ok:
+        # 流复制起点会吸附到关键帧，可能偏长——偏差大就删掉改走精确重编码
+        actual = await asyncio.to_thread(probe_local_video_duration_seconds, out_path)
+        if actual and abs(actual - trim_duration) > 0.75:
+            ok = False
+            err = "流复制起点偏离关键帧"
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+    if not ok:
+        ok, err2 = await asyncio.to_thread(_run, slow_cmd)
+        if not ok:
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+            detail = (err2 or err or "ffmpeg 截取失败").strip()[-300:]
+            raise HTTPException(status_code=500, detail=f"视频截取失败：{detail}")
+    return {
+        "url": f"/assets/output/{out_name}",
+        "start": round(start, 3),
+        "end": round(end, 3),
+        "duration": round(trim_duration, 3),
+    }
+
 @app.get("/api/image-jpeg")
 async def image_jpeg(url: str, w: int = 0):
     """把任意图片转成 JPEG 返回（带缓存）。给不支持 WebP 等格式显示的客户端（PS UXP）用。
@@ -8936,6 +9335,65 @@ def volcengine_media_reference_url(value, max_image_size=1536):
         return reference_to_data_url({"url": value}, max_size=max_image_size)
     return value
 
+def image_bytes_to_data_url(data: bytes, max_size=1536) -> str:
+    """图片字节 → data URL（压缩到 max_size 内）。失败返回空串。"""
+    try:
+        with Image.open(BytesIO(data)) as img:
+            img.load()
+            if max_size and max(img.size) > max_size:
+                img.thumbnail((max_size, max_size), Image.LANCZOS)
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            buf = BytesIO()
+            fmt = "PNG" if img.mode == "RGBA" else "JPEG"
+            img.save(buf, format=fmt, quality=88 if fmt == "JPEG" else None)
+            mime = "image/png" if fmt == "PNG" else "image/jpeg"
+            return f"data:{mime};base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
+    except Exception as e:
+        print(f"image bytes -> data URL failed: {e}")
+        return ""
+
+async def volcengine_normalize_reference_url_async(value, max_image_size=1536):
+    """火山方舟参考图规范化（2026-10-22 修复 invalid image format）。
+    方舟对图片 URL 有硬要求：必须以 .jpeg/.jpg/.png/.webp 等扩展名结尾、公网可访问、
+    不接受需要登录态/带过期签名的链接（否则报 invalid image format detected ''）。
+    官方明确支持 data:image/...;base64（小写 mime）。
+    因此：本地路径转 data URL；远程 http(s) 图只要带查询参数或没有图片扩展名
+    （签名链、过期链、图床动态链等），一律下载转成 data URL，规避 URL 形态问题。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if is_private_asset_url(text):
+        return text
+    if text.startswith("/output/") or text.startswith("/assets/"):
+        return reference_to_data_url({"url": text}, max_size=max_image_size)
+    if not text.startswith(("http://", "https://")):
+        return text
+    parsed = urllib.parse.urlsplit(text)
+    host = (parsed.hostname or "").lower()
+    if host in {"127.0.0.1", "localhost", "::1"} or re.match(r"^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)", host):
+        local_path = urllib.parse.unquote(parsed.path or "")
+        if output_file_from_url(local_path):
+            return reference_to_data_url({"url": local_path}, max_size=max_image_size)
+        return text
+    if looks_like_image_media_url(text) and not parsed.query:
+        return text
+    # 形态不合规（带签名/查询参数、缺图片扩展名）：下载转 data URL
+    try:
+        timeout = httpx.Timeout(connect=15.0, read=60.0, write=30.0, pool=15.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(text)
+            resp.raise_for_status()
+            data = resp.content
+        data_url = image_bytes_to_data_url(data, max_size=max_image_size)
+        if data_url:
+            return data_url
+        print(f"volcengine reference normalize: downloaded bytes not an image, passthrough: {text[:120]}")
+        return text
+    except Exception as exc:
+        print(f"volcengine reference normalize failed, passthrough: {exc} | {text[:120]}")
+        return text
+
 def looks_like_image_media_url(value: str) -> bool:
     text = str(value or "").strip().lower()
     if not text:
@@ -9794,6 +10252,47 @@ def volcengine_public_asset_url(url: str) -> str:
     if public:
         return public
     return "ERR:火山要求素材是公网可访问的 http/https URL；本地画布文件需配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 暴露为公网地址。"
+
+# ---- 火山真人活体认证（H5）：CreateVisualValidateSession + GetVisualValidateResult ----
+# 官方流程：创建认证会话拿 H5Link → 真人手机完成活体 → 回调带 resultCode（10000=成功）
+# → 用 BytedToken 调 GetVisualValidateResult 换取 GroupId（一个 Group 唯一绑定一个真人）。
+# BytedToken/H5Link 短时效（约 30 分钟，H5Link 用一次即失效）；未完成时 GetVisualValidateResult 报 ValidatePending。
+
+async def volcengine_realperson_session(project_name: str, callback_url: str) -> Dict[str, Any]:
+    """创建一次真人认证会话。返回 {byted_token, h5_link, callback_url}；出错抛 HTTPException。"""
+    if not callback_url:
+        raise HTTPException(status_code=400, detail="真人认证需要公网可访问的回调地址；请先在 API/.env 配置 PUBLIC_BASE_URL（内网穿透地址）。")
+    async with httpx.AsyncClient(timeout=60) as client:
+        result = await volcengine_ark_asset_call(client, "CreateVisualValidateSession", {
+            "CallbackURL": callback_url,
+            "ProjectName": (project_name or "default").strip() or "default",
+        })
+    token = str(result.get("BytedToken") or "").strip()
+    h5_link = str(result.get("H5Link") or "").strip()
+    if not token or not h5_link:
+        raise HTTPException(status_code=502, detail=f"火山 CreateVisualValidateSession 返回缺少 BytedToken/H5Link：{str(result)[:300]}")
+    return {"byted_token": token, "h5_link": h5_link, "callback_url": callback_url}
+
+async def volcengine_realperson_result(byted_token: str, project_name: str = "default") -> Dict[str, Any]:
+    """查询真人认证结果。返回 {status: Pending/Verified/Failed, group_id, detail}。"""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            result = await volcengine_ark_asset_call(client, "GetVisualValidateResult", {
+                "BytedToken": str(byted_token or ""),
+                "ProjectName": (project_name or "default").strip() or "default",
+            })
+    except HTTPException as exc:
+        # 未完成认证时火山报 ValidatePending——这是正常等待态，不算失败
+        detail = str(exc.detail or "")
+        if "ValidatePending" in detail:
+            return {"status": "Pending", "group_id": "", "detail": "等待真人完成活体认证"}
+        if "InvalidParameter" in detail or "Expired" in detail or "TokenExpired" in detail:
+            return {"status": "Failed", "group_id": "", "detail": "认证凭证已过期或无效，请重新发起认证"}
+        raise
+    group_id = str(result.get("GroupId") or "").strip()
+    if group_id:
+        return {"status": "Verified", "group_id": group_id, "detail": ""}
+    return {"status": "Pending", "group_id": "", "detail": "认证结果尚未就绪"}
 
 def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/")) -> str:
     ref_url = str(ref_url or "").strip()
@@ -11537,6 +12036,10 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
+    # 2026-10-22：Grsai 站点的 nano-banana 系列必须走原生 /v1/draw/nano-banana
+    # （aspectRatio + imageSize），OpenAI 兼容通道的 size 会被上游忽略回落 1K。
+    if provider_protocol(provider) == "grsai" and is_grsai_draw_model(model):
+        return await generate_grsai_draw_image(prompt, size, model, reference_images, provider)
     is_gpt2 = is_gpt_image_2_model(model)
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
@@ -15110,6 +15613,13 @@ GRSAI_RESOLUTIONS = {"480p", "768p", "1080p"}
 GRSAI_VIDEO_MAX_IMAGES = 9
 GRSAI_VIDEO_MAX_AUDIOS = 3
 
+# 2026-10-22（用户反馈：2K 出 1K 图）Grsai 原生绘画接口。OpenAI 兼容通道只认
+# size=WxH，Grsai 的 nano-banana 系列会把它整个丢掉并回落 1K；原生接口用
+# aspectRatio（auto/1:1/16:9/...）+ imageSize（1K/2K/4K）两个参数才真正生效。
+GRSAI_DRAW_PATH = "/v1/draw/nano-banana"
+GRSAI_DRAW_RESULT_PATH = "/v1/draw/result"
+GRSAI_DRAW_ASPECTS = {"auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"}
+
 # Grsai 没有 /v1/models 模型列表接口，验证/拉取模型时用这份内置清单兜底
 GRSAI_DEFAULT_VIDEO_MODELS = ["minimax-h3"]
 GRSAI_DEFAULT_IMAGE_MODELS = [
@@ -15220,6 +15730,78 @@ def grsai_media_input(value):
         return reference_to_data_url({"url": text})
     except Exception:
         return text
+
+def is_grsai_draw_model(model=""):
+    """nano-banana 系列走 Grsai 原生 /v1/draw/nano-banana，其余模型仍走 OpenAI 兼容通道。"""
+    return bool(re.search(r"nano[-_\s]?banana", str(model or "").lower()))
+
+async def generate_grsai_draw_image(prompt, size, model, reference_images=None, provider=None):
+    """Grsai 原生绘画流程：/v1/draw/nano-banana 提交（webHook="-1" 立即拿 id）+
+    /v1/draw/result 轮询。返回 (image_data, raw)。"""
+    api_key = provider_env_key_value((provider or {}).get("id") or "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider.get('id')} 的 API Key，请在 API 平台管理中填写。")
+    aspect_ratio, resolution = apimart_size_resolution(size, model)
+    if aspect_ratio not in GRSAI_DRAW_ASPECTS:
+        aspect_ratio = "auto"
+    # nano-banana-fast 上游最高只到 2K，4K 会直接报错
+    if "fast" in str(model or "").lower() and str(resolution).lower() == "4k":
+        resolution = "2k"
+    urls = []
+    for ref in (reference_images or [])[:GRSAI_VIDEO_MAX_IMAGES]:
+        item = grsai_media_input(str(ref.get("url") or "").strip())
+        if item:
+            urls.append(item)
+    root = grsai_api_base_url(provider)
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": bearer_auth_value(api_key),
+    }
+    body = {
+        "model": model,
+        "prompt": str(prompt or "").strip(),
+        "aspectRatio": aspect_ratio,
+        "imageSize": str(resolution or "1k").upper(),
+        "urls": urls,
+        # 异步模式：立刻返回任务 id，再用 /v1/draw/result 轮询，避免长连接被网关掐断
+        "webHook": "-1",
+        "shutProgress": True,
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
+        submit = await client.post(f"{root}{GRSAI_DRAW_PATH}", headers=headers, json=body)
+        submit.raise_for_status()
+        raw = submit.json()
+        task_id = ""
+        if isinstance(raw, dict):
+            data = raw.get("data")
+            if isinstance(data, dict):
+                task_id = str(data.get("id") or "")
+            task_id = task_id or str(raw.get("id") or "")
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"Grsai 生图没有返回任务 id：{json.dumps(raw, ensure_ascii=False)[:300]}")
+        deadline = time.monotonic() + AI_REQUEST_TIMEOUT
+        last_payload = raw
+        while time.monotonic() < deadline:
+            await asyncio.sleep(max(IMAGE_POLL_INTERVAL, 3.0))
+            result = await client.post(f"{root}{GRSAI_DRAW_RESULT_PATH}", headers=headers, json={"id": task_id})
+            result.raise_for_status()
+            data = (result.json() or {}).get("data") or {}
+            last_payload = data
+            status = str(data.get("status") or "").lower()
+            if status == "succeeded":
+                url = ""
+                for item in (data.get("results") or []):
+                    if isinstance(item, dict) and item.get("url"):
+                        url = str(item["url"])
+                        break
+                if not url:
+                    raise HTTPException(status_code=502, detail=f"Grsai 生图成功但没有返回图片：{json.dumps(data, ensure_ascii=False)[:300]}")
+                return {"type": "url", "value": url}, data
+            if status == "failed":
+                reason = str(data.get("failure_reason") or data.get("error") or "未知原因")
+                raise HTTPException(status_code=502, detail=f"Grsai 生图任务失败：{reason}")
+        raise HTTPException(status_code=504, detail=f"Grsai 生图任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
 
 def looks_like_unsupported_endpoint(status_code, text):
     """判断上游是在说「我这没这个入口/模型」，还是「你参数写错了」。
@@ -15743,7 +16325,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         return True
 
                     for ref in payload.images[:9]:
-                        url = volcengine_media_reference_url(ref.url, max_image_size=1536)
+                        url = await volcengine_normalize_reference_url_async(ref.url, max_image_size=1536)
                         if not url:
                             continue
                         role = volcengine_content_role(ref.role, "image")
@@ -15759,7 +16341,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         text_url = str(url or "").strip()
                         if not text_url:
                             continue
-                        media_url = volcengine_media_reference_url(text_url, max_image_size=1536 if looks_like_image_media_url(text_url) else None)
+                        media_url = await volcengine_normalize_reference_url_async(text_url, max_image_size=1536 if looks_like_image_media_url(text_url) else None)
                         if not media_url:
                             continue
                         if media_url in image_like_urls or looks_like_image_media_url(media_url):
@@ -17384,6 +17966,133 @@ async def check_asset_library_avatar(item_id: str, payload: AssetAvatarRegisterR
     target_item["registrations"] = regs
     save_asset_library(lib)
     return {"library": lib, "item": target_item}
+
+# ---- 真人活体认证（persona）：一个 persona = 一个真人 = 一个火山 Asset Group ----
+
+def _find_persona_in_library(lib, persona_id: str):
+    for persona in lib.get("personas") or []:
+        if isinstance(persona, dict) and str(persona.get("id") or "") == str(persona_id or ""):
+            return persona
+    return None
+
+def _avatar_callback_url() -> str:
+    base = public_base_url()
+    return f"{base}/api/asset-library/avatar/callback" if base else ""
+
+@app.post("/api/asset-library/personas/create-session")
+async def create_persona_session(payload: PersonaCreateSessionRequest):
+    """创建真人认证会话：火山 CreateVisualValidateSession，返回 H5Link 供真人扫码。"""
+    lib = load_asset_library()
+    provider = get_api_provider(payload.provider_id)
+    platform = avatar_platform_for_provider(provider)
+    if platform != "volcengine":
+        raise HTTPException(status_code=400, detail="真人活体认证目前仅火山引擎支持；APIMart 请使用原有的单素材提交方式。")
+    project_name = str(payload.project_name or provider.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME
+    callback = _avatar_callback_url()
+    session = await volcengine_realperson_session(project_name, callback)
+    lib.setdefault("personas", [])
+    persona = {
+        "id": f"persona_{int(now_ms())}_{os.urandom(3).hex()}",
+        "name": (payload.name or "真人形象").strip()[:40] or "真人形象",
+        "platform": "volcengine",
+        "provider_id": provider["id"],
+        "project_name": project_name,
+        "status": "Pending",
+        "byted_token": session["byted_token"],
+        "h5_link": session["h5_link"],
+        "callback_url": session["callback_url"],
+        "group_id": "",
+        "detail": "等待真人完成活体认证",
+        "created_at": now_ms(),
+        "item_ids": [],
+    }
+    lib["personas"].append(persona)
+    save_asset_library(lib)
+    return {"library": lib, "persona": persona}
+
+@app.post("/api/asset-library/personas/check")
+async def check_persona_session(payload: PersonaCheckRequest):
+    """轮询真人认证结果：拿到 GroupId 即 Verified（后续素材都进这个组）。"""
+    lib = load_asset_library()
+    persona = _find_persona_in_library(lib, payload.persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="认证形象不存在")
+    if persona.get("platform") != "volcengine":
+        raise HTTPException(status_code=400, detail="该形象不是火山真人认证流程")
+    if persona.get("status") == "Verified":
+        return {"library": lib, "persona": persona}
+    result = await volcengine_realperson_result(persona.get("byted_token") or "", persona.get("project_name") or "default")
+    persona["status"] = result["status"]
+    persona["detail"] = result.get("detail") or ""
+    if result["status"] == "Verified" and result.get("group_id"):
+        persona["group_id"] = result["group_id"]
+        persona["detail"] = ""
+    save_asset_library(lib)
+    return {"library": lib, "persona": persona}
+
+@app.post("/api/asset-library/personas/bind-asset")
+async def bind_persona_asset(payload: PersonaBindAssetRequest):
+    """把素材提交进已认证真人的素材组（CreateAsset 到 group_id，同人面部比对后入库）。"""
+    lib = load_asset_library()
+    persona = _find_persona_in_library(lib, payload.persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="认证形象不存在")
+    if persona.get("status") != "Verified" or not persona.get("group_id"):
+        raise HTTPException(status_code=400, detail="该形象还没有完成真人认证，无法提交素材")
+    target_item = find_asset_item_in_library(lib, payload.item_id, payload.library_id)
+    if not target_item:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    public_url = volcengine_public_asset_url(target_item.get("url") or "")
+    if public_url.startswith("ERR:"):
+        raise HTTPException(status_code=400, detail=public_url[4:])
+    kind = str(target_item.get("kind") or "image").lower()
+    if kind not in ("image", "video", "audio"):
+        kind = "image"
+    async with httpx.AsyncClient(timeout=120) as client:
+        created = await volcengine_ark_asset_call(client, "CreateAsset", {
+            "GroupId": persona["group_id"],
+            "URL": public_url,
+            "AssetType": apimart_avatar_asset_type(kind),
+            "Name": (target_item.get("name") or "asset")[:60],
+            "ProjectName": persona.get("project_name") or "default",
+        })
+    asset_id = str(created.get("Id") or "").strip()
+    if not asset_id:
+        raise HTTPException(status_code=502, detail=f"火山 CreateAsset 未返回素材 ID：{str(created)[:200]}")
+    regs = target_item.get("registrations") if isinstance(target_item.get("registrations"), dict) else {}
+    regs["volcengine"] = {
+        "provider_id": persona.get("provider_id") or "",
+        "project_name": persona.get("project_name") or "default",
+        "task_id": asset_id,
+        "persona_id": persona["id"],
+        "status": "Processing",
+        "detail": "已提交入库，平台同人比对中",
+        "asset_uri": "",
+        "asset_id": "",
+        "registered_at": now_ms(),
+    }
+    target_item["registrations"] = regs
+    item_ids = persona.get("item_ids") if isinstance(persona.get("item_ids"), list) else []
+    if payload.item_id not in item_ids:
+        item_ids.append(payload.item_id)
+    persona["item_ids"] = item_ids
+    save_asset_library(lib)
+    return {"library": lib, "persona": persona, "item": target_item}
+
+@app.get("/api/asset-library/avatar/callback")
+async def avatar_realperson_callback():
+    """真人认证完成后的手机端落点页：结果以 BytedToken 轮询为准，这里只做友好提示。"""
+    return HTMLResponse("""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>认证完成</title>
+<style>body{font-family:system-ui,-apple-system,"PingFang SC",sans-serif;background:#141518;color:#e8e8ea;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{text-align:center;padding:36px 28px;max-width:320px}
+.icon{width:58px;height:58px;margin:0 auto 16px;border-radius:50%;background:rgba(34,197,94,.14);
+display:flex;align-items:center;justify-content:center}svg{width:30px;height:30px}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13px;color:#9a9ba3;line-height:1.7;margin:0}</style></head>
+<body><div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e"
+stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
+<h1>认证操作已完成</h1><p>请返回电脑端的画布页面查看认证结果，<br>后续素材入库会自动进行。</p></div></body></html>""")
 
 @app.delete("/api/asset-library/items/{item_id}")
 async def delete_asset_library_item(item_id: str):
@@ -20145,20 +20854,38 @@ def workflow_path_from_name(name: str) -> str:
 def workflow_config_path(name: str) -> str:
     return workflow_path_from_name(name).replace(".json", ".config.json")
 
-# ===== ComfyUI 工作流分类（2026-10-15，用户要求：生图 / 生视频 / 生音频 / 放大 / 其他）=====
+# ===== ComfyUI 工作流分类（2026-10-22，用户要求：生图 / 图像编辑 / 生视频 / 音频 / 放大扩图 / 工具）=====
 # 设计口径：
-#   · 分类是"单值"的，key 固定 5 个，顺序即 UI 展示顺序。
+#   · 分类是"单值"的，key 固定 6 个，顺序即 UI 展示顺序。
 #   · 手动分类写进工作流自己的 .config.json（category + category_source='manual'），
 #     跟着工作流 zip 导出/导入走，局域网多端一致；只要 config 里有 category 就以它为准，
 #     手动设置永不被自动推断覆盖。
-#   · 没有 category 的工作流：每次按工作流 JSON 的输出节点实时推断（带 mtime 缓存，未落盘），
+#   · 没有 category 的工作流：每次按"工作流名称关键词 + 输出节点"实时推断（带 mtime 缓存，未落盘），
 #     这样新导入的工作流自动有合理分类，且不会因为推断而往仓库里写 config 文件。
-WORKFLOW_CATEGORY_KEYS = ("image", "video", "audio", "upscale", "other")
+#   · 2026-10-22：新增 edit（图像编辑）。⚠ 编辑类工作流与生图类输出节点完全相同
+#     （都是 SaveImage），结构上分不出来（Z-Image / Flux2-Klein 这些生图流内部同样有
+#     LoadImage + VAEEncode），所以"编辑 vs 生图"只能靠名称关键词兜底；判不准就落在生图，
+#     交给前端「批量归类」面板一次配好，不追求"假装很准"的自动分类。
+WORKFLOW_CATEGORY_KEYS = ("image", "edit", "video", "audio", "upscale", "other")
 WORKFLOW_CATEGORY_ALIASES = {
-    "image": "image", "video": "video", "audio": "audio", "upscale": "upscale", "other": "other",
-    "生图": "image", "生视频": "video", "生音频": "audio", "放大": "upscale", "其他": "other",
+    "image": "image", "edit": "edit", "video": "video", "audio": "audio",
+    "upscale": "upscale", "other": "other",
+    # 显示名（新旧都认）
+    "生图": "image", "图像编辑": "edit", "编辑": "edit", "改图": "edit",
+    "生视频": "video", "生音频": "audio", "音频": "audio",
+    "放大": "upscale", "放大扩图": "upscale", "扩图": "upscale",
+    "其他": "other", "工具": "other",
 }
-# 优先级：视频 > 音频 > 放大 > 生图 > 其他。
+# 名称关键词：优先级 upscale > edit > video > audio，命中即定（生图/编辑靠名字区分）。
+# ⚠「扩图」必须先判，否则 FLUX2扩图 / F2K扩图 会被"图"字带进生图。
+_WORKFLOW_CATEGORY_NAME_MARKERS = (
+    ("upscale", ("扩图", "放大", "超分", "upscale", "outpaint", "seedvr")),
+    ("edit", ("编辑", "迁移", "融图", "洗图", "增强", "重绘", "修复", "换装", "换脸",
+              "inpaint", "edit", "enhance", "retouch")),
+    ("video", ("视频", "video", "i2v", "t2v", "ref2va")),
+    ("audio", ("音频", "配音", "声音克隆", "tts", "audio")),
+)
+# 节点判定：优先级 视频 > 音频 > 放大 > 图像编辑 > 生图。
 # 判定顺序很关键——seedvr/upscale 这类工作流同时带 SaveImage，先判 upscale 才不会被当成生图；
 # H3 这类视频工作流带 MiniMaxH3* 采样链，先判 video 才不会被当成音频。
 _WORKFLOW_CATEGORY_MARKERS = (
@@ -20170,7 +20897,9 @@ _WORKFLOW_CATEGORY_MARKERS = (
     #   几乎每个工作流都有（实测把它们当放大标志会把 18 个工作流里的 14 个误判成放大）。
     ("upscale", ("seedvr", "upscalemodel", "imageupscalewithmodel", "supir", "ultimatesdupscale",
                  "sdupscale", "upscale")),
-    # 只认 SaveImage（真正落盘出图）；PreviewImage 是纯预览，单独出现时归"其他"更准
+    # 局部重绘 / 遮罩类节点是"编辑"的硬信号；ImageCompositeMasked 不算（扩图合成也在用）。
+    ("edit", ("inpaintmodelconditioning", "setlatentnoisemask", "loadimagemask", "maskdetailer", "inpaint")),
+    # 只认 SaveImage（真正落盘出图）；PreviewImage 是纯预览，单独出现时归"工具"更准
     # （例如"改尺寸工作流"只有 PreviewImage，它就是工具而不是生成器）。
     ("image", ("saveimage",)),
 )
@@ -20234,10 +20963,19 @@ def cached_workflow_class_types(name: str) -> List[str]:
     return classes
 
 def infer_workflow_category(name: str, cfg: Optional[Dict[str, Any]] = None) -> str:
-    """推断工作流分类：config 里显式写过的优先，否则按输出节点判，兜底 other。"""
+    """推断工作流分类：config 显式值 > 名称关键词 > 节点构成，兜底 other。
+
+    2026-10-22：新增「名称关键词」这一道，因为 edit（图像编辑）与 image（生图）的输出节点完全一样，
+    只能靠名字区分（F2K图像编辑 / Z-Image-Enhance / 洗图 / F2K万物迁移 …）。名称没命中时仍按
+    节点判，判不出来落 other，前端会用「批量归类」面板兜住。
+    """
     explicit = normalize_workflow_category((cfg or {}).get("category"))
     if explicit:
         return explicit
+    base = os.path.basename(str(name or "")).rsplit(".", 1)[0].lower()
+    for category, markers in _WORKFLOW_CATEGORY_NAME_MARKERS:
+        if any(marker in base for marker in markers):
+            return category
     classes = cached_workflow_class_types(name)
     if not classes:
         return "other"
@@ -20248,7 +20986,7 @@ def infer_workflow_category(name: str, cfg: Optional[Dict[str, Any]] = None) -> 
     return "other"
 
 def workflow_category_payload(name: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-    """给前端用的分类信息：category 恒为 5 个 key 之一，category_source 说明这个值是人定的还是推断的。"""
+    """给前端用的分类信息：category 恒为 6 个 key 之一，category_source 说明这个值是人定的还是推断的。"""
     cfg = cfg if isinstance(cfg, dict) else {}
     stored = normalize_workflow_category(cfg.get("category"))
     if stored:

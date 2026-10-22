@@ -347,15 +347,22 @@ let idlePortMagnetState = null;
 let saveTimer = null;
 let apiProviders = [];
 let comfyWorkflows = [];
-// 2026-10-15（用户要求）ComfyUI 工作流分 5 类：生图 / 生视频 / 生音频 / 放大 / 其他。
-// 分类值来自后端（工作流 .config.json 里手写的 category，或后端按输出节点推断的 category），
+// 2026-10-22（用户要求）ComfyUI 工作流分 6 类：生图 / 图像编辑 / 生视频 / 音频 / 放大扩图 / 工具。
+// 分类值来自后端（工作流 .config.json 里手写的 category，或后端按名称关键词 + 输出节点推断的 category），
 // 这里只负责展示与筛选；手动改分类走 PUT /api/workflows/{name}/category。
+// 「图像编辑」和「生图」节点结构一致、自动归类只能靠名字，判不准的用「批量归类」面板一次配好。
 const COMFY_WORKFLOW_CATEGORY_DEFS = [
     {key:'image',   i18n:'smart.wfcatImage',   fallback:'生图'},
+    {key:'edit',    i18n:'smart.wfcatEdit',    fallback:'图像编辑'},
     {key:'video',   i18n:'smart.wfcatVideo',   fallback:'生视频'},
-    {key:'audio',   i18n:'smart.wfcatAudio',   fallback:'生音频'},
-    {key:'upscale', i18n:'smart.wfcatUpscale', fallback:'放大'},
-    {key:'other',   i18n:'smart.wfcatOther',   fallback:'其他'}
+    {key:'audio',   i18n:'smart.wfcatAudio',   fallback:'音频'},
+    {key:'upscale', i18n:'smart.wfcatUpscale', fallback:'放大扩图'},
+    {key:'other',   i18n:'smart.wfcatOther',   fallback:'工具'}
+];
+// 内置分类名占用名单：新建自定义分类时不许撞名（中英文都算）
+const COMFY_WF_RESERVED_CAT_NAMES = [
+    'image','edit','video','audio','upscale','other',
+    '生图','图像编辑','编辑','改图','生视频','生音频','音频','放大','放大扩图','扩图','其他','工具'
 ];
 const COMFY_WORKFLOW_CATEGORY_KEY = 'smart_comfy_workflow_category';
 let comfyWorkflowCategory = (() => {
@@ -1058,7 +1065,11 @@ function smartVideoNodeHtml(itemOrUrl, size=512, attrs=''){
 // 几百个同屏创建会卡死主线程几十秒（实测 653 个 video → GC 风暴、加载期间点击无响应）。
 // 每次全量渲染只挂载 SMART_VIDEO_MOUNT_BUDGET 个真 video（用户激活过的永不降级），
 // 其余渲染成海报 <img data-preview-kind="video">；hover/点击时 smartActivateVideoPreview 会把海报升级为播放器，交互不变。
-const SMART_VIDEO_MOUNT_BUDGET = 12;
+// 2026-10-21（用户要求：所有视频统一显示真播放器样式，点击可以直接播放）：
+// 预算从 12 放宽到 200 —— <video preload="metadata" muted> 本身很轻（不预载完整视频流），
+// 当年 653 个 video 卡死主线程的根因是坏 URL 数据（[object Object] src 触发错误兜底循环），
+// 已在数据层根治（flattenNestedMediaItem）。保留机制作为兜底，超预算仍降级海报模式。
+const SMART_VIDEO_MOUNT_BUDGET = 200;
 let smartVideoMountUsed = 0;
 // 2026-10-15 刚上传/拖入的视频优先挂真 video：
 // 懒海报模式显示的是服务端抽帧图（/api/media-preview），而抽帧是首次请求才现场跑 ffmpeg，
@@ -1184,6 +1195,7 @@ function smartVideoCanvasControlsHtml(){
         <span class="smart-video-canvas-duration" data-video-duration>0:00</span>
         <button class="smart-video-canvas-mute" type="button" title="静音/取消静音" aria-label="静音/取消静音"><i data-lucide="volume-2"></i></button>
         <button class="smart-video-canvas-download" type="button" title="下载视频" aria-label="下载视频"><i data-lucide="download"></i></button>
+        <button class="smart-video-canvas-trim" type="button" title="截取片段" aria-label="截取片段"><i data-lucide="scissors"></i></button>
         ${smartVideoFrameExportMenuHtml()}
     </div>`;
 }
@@ -1197,11 +1209,271 @@ function formatSmartVideoTime(seconds){
     if(hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     return `${minutes}:${String(secs).padStart(2, '0')}`;
 }
+// ===== 2026-10-22（用户要求：视频截取片段 → 右侧连出新「剪辑」节点）=====
+// 交互：控制条剪刀 → 底部弹出胶片条（/api/video/filmstrip 抽帧）双手柄拖拽选区
+// → 确认后 POST /api/video/trim（后端 ffmpeg 流复制裁剪）→ 新视频节点落在原节点右侧并自动连线。
+const VIDEO_TRIM_MIN_SECONDS = 0.5;
+let smartVideoTrimState = null;
+
+function smartTrimNextTitle(){
+    let max = 0;
+    (nodes || []).forEach(n => {
+        const m = /^剪辑(?: (\d+))?$/.exec(String(n?.title || '').trim());
+        if(m) max = Math.max(max, Number(m[1] || 1));
+    });
+    return max > 0 ? `剪辑 ${max + 1}` : '剪辑';
+}
+
+function smartTrimFormatTime(seconds){
+    const value = Number(seconds);
+    if(!Number.isFinite(value) || value < 0) return '0:00.0';
+    const minutes = Math.floor(value / 60);
+    const secs = value - minutes * 60;
+    return `${minutes}:${secs < 10 ? '0' : ''}${secs.toFixed(1)}`;
+}
+
+function closeSmartVideoTrimPanel(){
+    const state = smartVideoTrimState;
+    if(!state) return;
+    smartVideoTrimState = null;
+    try {
+        window.removeEventListener('keydown', state.onKey, true);
+        state.video?.removeEventListener('timeupdate', state.onTimeUpdate);
+        if(state.video) state.video.muted = state.prevMuted;
+        state.overlay?.remove();
+    } catch(_) {}
+}
+
+function openSmartVideoTrimPanel(video, url, nodeId){
+    closeSmartVideoTrimPanel();
+    const duration = Number(video?.duration);
+    if(!Number.isFinite(duration) || duration <= 0){ toast('视频时长未就绪，请稍后再试'); return; }
+    if(duration < VIDEO_TRIM_MIN_SECONDS + 0.2){ toast('视频太短，无需截取'); return; }
+    const overlay = document.createElement('div');
+    overlay.className = 'vtm-overlay';
+    overlay.innerHTML = `
+        <div class="vtm-bar" role="dialog" aria-label="截取视频片段">
+            <button type="button" class="vtm-x" title="取消">✕</button>
+            <div class="vtm-strip">
+                <div class="vtm-frames"></div>
+                <div class="vtm-frames-loading">正在生成胶片条…</div>
+                <div class="vtm-sel"></div>
+                <div class="vtm-badge">-- s</div>
+                <div class="vtm-hdl vtm-hdl-l" title="起点"></div>
+                <div class="vtm-hdl vtm-hdl-r" title="终点"></div>
+            </div>
+            <div class="vtm-ops">
+                <button type="button" class="vtm-reset" title="重置为全片">⟲</button>
+                <button type="button" class="vtm-ok" title="确认截取">✓</button>
+            </div>
+        </div>
+        <div class="vtm-times">
+            <span class="vtm-tl">0:00.0</span>
+            <span class="vtm-hint">拖动白色手柄选择片段 · 双击时长可键入起止秒数</span>
+            <span class="vtm-tr">0:00.0</span>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    const strip = overlay.querySelector('.vtm-strip');
+    const sel = overlay.querySelector('.vtm-sel');
+    const badge = overlay.querySelector('.vtm-badge');
+    const hL = overlay.querySelector('.vtm-hdl-l');
+    const hR = overlay.querySelector('.vtm-hdl-r');
+    const tL = overlay.querySelector('.vtm-tl');
+    const tR = overlay.querySelector('.vtm-tr');
+    const hint = overlay.querySelector('.vtm-hint');
+    const okBtn = overlay.querySelector('.vtm-ok');
+    const state = {
+        video, url, nodeId, duration, overlay,
+        start: 0, end: duration, busy: false,
+        prevMuted: video.muted,
+        onKey: null, onTimeUpdate: null,
+    };
+    smartVideoTrimState = state;
+    try { video.pause?.(); } catch(_) {}
+    video.muted = true;
+
+    // 选区循环预览：播到出点自动回入点
+    state.onTimeUpdate = () => {
+        if(state.busy) return;
+        if(!Number.isFinite(video.currentTime)) return;
+        if(video.currentTime >= state.end - 0.05 || video.currentTime < state.start - 0.3){
+            try { video.currentTime = state.start; } catch(_) {}
+        }
+    };
+    video.addEventListener('timeupdate', state.onTimeUpdate);
+
+    const render = () => {
+        const pct = s => `${(s / duration * 100).toFixed(3)}%`;
+        sel.style.left = pct(state.start);
+        sel.style.width = `${((state.end - state.start) / duration * 100).toFixed(3)}%`;
+        hL.style.left = `calc(${pct(state.start)} - 8px)`;
+        hR.style.left = `calc(${pct(state.end)} - 8px)`;
+        badge.textContent = `${(state.end - state.start).toFixed(1)} s`;
+        tL.textContent = smartTrimFormatTime(state.start);
+        tR.textContent = smartTrimFormatTime(state.end);
+        const isFull = duration - (state.end - state.start) < 0.1;
+        okBtn.disabled = isFull || state.busy;
+        okBtn.classList.toggle('is-same', isFull && !state.busy);
+        hint.textContent = isFull ? '片段与原片相同，请先拖出手柄' : '拖动白色手柄选择片段 · 双击时长可键入起止秒数';
+        try { video.currentTime = state.start; } catch(_) {}
+    };
+
+    const clampSelection = (isLeft, value) => {
+        const v = Math.max(0, Math.min(duration, value));
+        if(isLeft) state.start = Math.min(v, state.end - VIDEO_TRIM_MIN_SECONDS);
+        else state.end = Math.max(v, state.start + VIDEO_TRIM_MIN_SECONDS);
+        render();
+    };
+    const bindHandle = (handle, isLeft) => {
+        handle.addEventListener('pointerdown', e => {
+            if(state.busy) return;
+            e.preventDefault(); e.stopPropagation();
+            handle.setPointerCapture?.(e.pointerId);
+            const move = ev => clampSelection(isLeft, (ev.clientX - strip.getBoundingClientRect().left) / strip.clientWidth * duration);
+            const up = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', up);
+        });
+    };
+    bindHandle(hL, true);
+    bindHandle(hR, false);
+    strip.addEventListener('click', e => {
+        if(state.busy || e.target.closest('.vtm-hdl')) return;
+        const v = (e.clientX - strip.getBoundingClientRect().left) / strip.clientWidth * duration;
+        if(Math.abs(v - state.start) <= Math.abs(v - state.end)) clampSelection(true, v);
+        else clampSelection(false, v);
+    });
+    badge.addEventListener('dblclick', e => {
+        e.stopPropagation();
+        if(state.busy) return;
+        const raw = window.prompt('输入起止秒数（用空格或 ~ 分隔，例如 3 15.8）', `${state.start.toFixed(1)} ${state.end.toFixed(1)}`);
+        if(!raw) return;
+        const parts = String(raw).trim().split(/[\s~,-]+/).map(Number).filter(v => Number.isFinite(v));
+        if(parts.length < 2){ toast('格式：起点 终点（秒）'); return; }
+        let [s, t] = parts;
+        if(s > t) [s, t] = [t, s];
+        if(t - s < VIDEO_TRIM_MIN_SECONDS){ toast(`片段长度不能小于 ${VIDEO_TRIM_MIN_SECONDS} 秒`); return; }
+        state.start = Math.max(0, Math.min(duration, s));
+        state.end = Math.max(0, Math.min(duration, t));
+        render();
+    });
+
+    // 胶片条：后端均匀抽帧
+    fetch(`/api/video/filmstrip?url=${encodeURIComponent(url)}&count=10&w=160`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('胶片条生成失败')))
+        .then(data => {
+            if(smartVideoTrimState !== state) return;
+            const framesBox = overlay.querySelector('.vtm-frames');
+            overlay.querySelector('.vtm-frames-loading')?.remove();
+            (data.frames || []).forEach(src => {
+                const img = document.createElement('img');
+                img.className = 'vtm-frame';
+                img.src = src;
+                img.draggable = false;
+                framesBox.appendChild(img);
+            });
+        })
+        .catch(err => {
+            if(smartVideoTrimState !== state) return;
+            const box = overlay.querySelector('.vtm-frames-loading');
+            if(box) box.textContent = err.message || '胶片条生成失败';
+        });
+
+    overlay.querySelector('.vtm-x').addEventListener('click', () => closeSmartVideoTrimPanel());
+    overlay.querySelector('.vtm-reset').addEventListener('click', () => {
+        if(state.busy) return;
+        state.start = 0; state.end = duration; render();
+    });
+    okBtn.addEventListener('click', async () => {
+        if(state.busy || okBtn.disabled) return;
+        state.busy = true;
+        okBtn.classList.add('is-loading');
+        hint.textContent = '正在截取片段…（不重编码，通常几秒完成）';
+        try {
+            const res = await fetch('/api/video/trim', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, start: state.start, end: state.end }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+            closeSmartVideoTrimPanel();
+            smartTrimCreateResultNode(url, nodeId, data);
+        } catch(err) {
+            state.busy = false;
+            okBtn.classList.remove('is-loading');
+            hint.textContent = err.message || '截取失败';
+            toast(`截取失败：${err.message || '未知错误'}`);
+        }
+    });
+
+    state.onKey = e => {
+        if(e.key === 'Escape' && !state.busy){ e.stopPropagation(); closeSmartVideoTrimPanel(); }
+    };
+    window.addEventListener('keydown', state.onKey, true);
+    overlay.addEventListener('mousedown', e => {
+        if(e.target === overlay && !state.busy) closeSmartVideoTrimPanel();
+    });
+
+    // 定位在视频卡正下方居中，超出视口时兜底
+    requestAnimationFrame(() => {
+        const bar = overlay.querySelector('.vtm-bar');
+        const times = overlay.querySelector('.vtm-times');
+        if(!bar?.isConnected) return;
+        const card = video.closest('.media-video-card,.video-thumb,.upload-preview-card,.upload-preview-media,.image-wrap,.image-node') || video;
+        const rect = card.getBoundingClientRect();
+        const center = Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2));
+        const top = Math.min(window.innerHeight - 150, rect.bottom + 10);
+        bar.style.left = `${center}px`;
+        bar.style.top = `${Math.max(8, top)}px`;
+        if(times){ times.style.left = `${center}px`; times.style.top = `${Math.max(8, top) + 62}px`; }
+    });
+    render();
+}
+
+function smartTrimCreateResultNode(sourceUrl, nodeId, data){
+    if(!data?.url){ toast('截取结果地址缺失'); return; }
+    const srcNode = nodes.find(n => n.id === nodeId) || null;
+    const name = decodeURIComponent(String(data.url).split('/').pop().split('?')[0]) || '剪辑.mp4';
+    const title = smartTrimNextTitle();
+    const item = { url: data.url, kind: 'video', name, generatedResult: true };
+    let x, y;
+    const rect = srcNode ? nodeRect(srcNode) : null;
+    if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
+    else { const c = viewportCenter(); x = c.x; y = c.y; }
+    pushUndo();
+    const node = createNode(x, y, [item], { skipUndo: true });
+    if(node){
+        node.title = title;
+        if(srcNode) connectInputNode(srcNode.id, node.id);
+        scheduleSave();
+        render();
+        toast(`已生成「${title}」（${(Number(data.duration) || 0).toFixed(1)} s）`);
+    } else {
+        scheduleSave();
+        toast('片段已生成，但节点创建失败，可从日志重新插入');
+    }
+}
 // 原生 video 控件的暂停键和进度条不暴露内部 DOM，统一通过媒体事件锁定
 // 用户状态：点击暂停或拖动 seek 后保持暂停，画布重渲染也不会自动续播。
 function bindSmartVideoPlaybackControls(root=document){
     root.querySelectorAll?.('video[data-url]:not([data-smart-video-controls-bound])').forEach(video => {
         video.dataset.smartVideoControlsBound = '1';
+        // 2026-10-21（用户要求：点击视频直接播放）：点击视频画面本身即播放/暂停切换。
+        // 拖拽不受影响（mouseup 落在别处不触发 click）；控制条按钮各自 stopPropagation 也不受影响。
+        if(!video.dataset.smartVideoClickBound){
+            video.dataset.smartVideoClickBound = '1';
+            video.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                if(video.paused) video.play?.().catch(() => {});
+                else video.pause?.();
+            });
+        }
         const durationValue = () => Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
         // 2026-10-11（修复：控制条时间永远 0:00）：此前在绑定时把按钮/滑块/时间标签缓存进闭包，
         // 但控制条 DOM 可能晚于绑定出现（重渲染时序），闭包里全是 null 且永不重查 → 标签不刷新、按钮失灵。
@@ -1305,6 +1577,24 @@ function bindSmartVideoPlaybackControls(root=document){
         };
         syncStateButton();
         syncCanvasControls();
+        // 2026-10-22（用户反馈：视频首尾时间都是 0:00）：总时长标签只靠
+        // loadedmetadata/durationchange 事件刷新——元数据一直不加载（preload="none"、
+        // 代理地址不支持 Range、加载停滞）时首尾永远 0:00 且没有任何兜底。
+        // 这里加双重兜底：① 没元数据就主动改成 preload="metadata" 并 load() 拉一次；
+        // ② 有界轮询 sync 直到拿到 duration（拿到即停，不常驻）。
+        if(!durationValue()){
+            try {
+                if(video.preload === 'none') video.preload = 'metadata';
+                if(video.readyState === 0 && video.networkState !== 3) video.load();
+            } catch(e) {}
+            let metadataPollTries = 0;
+            const metadataPoll = window.setInterval(() => {
+                metadataPollTries += 1;
+                syncCanvasControls();
+                if(durationValue() || metadataPollTries >= 40 || !video.isConnected) window.clearInterval(metadataPoll);
+            }, 500);
+            video.addEventListener('durationchange', () => window.clearInterval(metadataPoll), { once: true });
+        }
         const syncModelState = paused => {
             const itemEl = video.closest('[data-image-index]');
             const nodeEl = video.closest('.image-node');
@@ -3371,11 +3661,62 @@ function stripTitleResolutionSuffix(title=''){
     // `数字 × 数字` / `数字 x 数字` 形态的分辨率（避免左名称与右分辨率重复）。
     return String(title || '').replace(/\s*\d+\s*[x×*]\s*\d+\s*$/i, '').trim();
 }
+// 2026-10-22（用户要求，方案 A）：素材节点标题直接显示文件名。
+// 口径：
+//   · 用户手动改过的标题优先，永远不被文件名覆盖；
+//   · 上传 / 拖入 / 素材库导入的素材用真实文件名（去扩展名、去尾部分辨率）；
+//   · 生成产物（generatedResult / aiGenerated）没有语义文件名，维持「图片节点 1」这类自动命名；
+//   · image-1 / output-3 / 一长串 hex 这类无意义文件名同样回退到自动命名。
+const MATERIAL_AUTO_TITLES = new Set([
+    'Image','Video','Audio','上传','API生图','视频生成','音频生成','生图节点','ComfyUI生成',
+    'MS生成','RunningHub','MiniMax H3','素材','素材组','图片组','Group','File','文件'
+]);
+const MATERIAL_MEDIA_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|tiff?|mp4|mov|webm|m4v|mkv|mp3|wav|flac|m4a|aac|ogg|opus|txt|md|psd|zip)$/i;
+const MATERIAL_MEANINGLESS_NAME_RE = /^(image|img|output|out|download|file|blob|canvas-output|comfy[-_]?temp|comfy-recovered|tts|audio|video|upload|unknown|untitled)[-_]?\d*$/i;
+function isGeneratedMediaItem(item){
+    return Boolean(item && typeof item === 'object' && (item.generatedResult === true || item.aiGenerated === true));
+}
+// 从素材条目里取「可读文件名」；取不到有意义的名字就返回空串，交给自动命名兜底。
+function materialFileNameForTitle(item){
+    if(!item || typeof item !== 'object') return '';
+    if(isGeneratedMediaItem(item)) return '';
+    const raw = String(item.name || '').trim() || fileNameFromUrl(item.url || '');
+    let name = String(raw || '').split('?')[0].split('#')[0].trim();
+    if(!name) return '';
+    if(/^(data|blob):/i.test(name)) return '';
+    if(MATERIAL_MEDIA_EXT_RE.test(name)) name = name.replace(MATERIAL_MEDIA_EXT_RE, '');
+    name = stripTitleResolutionSuffix(name);
+    if(!name) return '';
+    if(MATERIAL_MEANINGLESS_NAME_RE.test(name)) return '';
+    // 纯 hash / uuid / 时间戳（生成图常见）→ 不是可读名字
+    if(/^[0-9a-f]{8,}([-_][0-9a-f]{2,})*$/i.test(name)) return '';
+    if(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(name)) return '';
+    if(/^\d{10,}$/.test(name)) return '';
+    return name;
+}
+function materialRawFileName(item){
+    if(!item || typeof item !== 'object') return '';
+    return String(item.name || '').trim() || fileNameFromUrl(item.url || '') || '';
+}
+function smartNodeTitleTooltip(node, imgs=[]){
+    // 标题被省略号截断时，悬停看完整文件名（多图列出全部）。
+    if(!Array.isArray(imgs) || !imgs.length) return '';
+    const rawTitle = String(node?.title || '').trim();
+    if(rawTitle && !MATERIAL_AUTO_TITLES.has(rawTitle)) return '';
+    if(imgs.length === 1){
+        const item = imageForDisplay(imgs[0]) || {};
+        // 只有标题确实用了文件名时才给提示，否则（自动命名兜底）不挂一个对不上的文件名。
+        return materialFileNameForTitle(item) ? materialRawFileName(item) : '';
+    }
+    const names = imgs.map(item => imageForDisplay(item) || {}).filter(item => materialFileNameForTitle(item)).map(item => materialRawFileName(item));
+    return names.length > 1 ? names.join('\n') : '';
+}
 function smartMaterialNodeTitle(node, img){
     const kind = mediaKindForItem(imageForDisplay(img));
     const rawTitle = String(node?.title || '').trim();
-    const generatedTitles = new Set(['Image','Video','Audio','上传','API生图','视频生成','音频生成','生图节点','ComfyUI生成','MS生成','RunningHub','MiniMax H3']);
-    if(rawTitle && !generatedTitles.has(rawTitle)) return stripTitleResolutionSuffix(rawTitle);
+    if(rawTitle && !MATERIAL_AUTO_TITLES.has(rawTitle)) return stripTitleResolutionSuffix(rawTitle);
+    const fileName = materialFileNameForTitle(imageForDisplay(img) || img);
+    if(fileName) return fileName;
     const ordinal = smartMaterialNodeOrdinal(node, kind);
     return `${smartMaterialKindLabel(kind)}${ordinal > 0 ? ` ${ordinal}` : ''}`;
 }
@@ -3421,8 +3762,10 @@ function smartNodeTitle(node, imgs=[]){    if(node?.type === 'workflow-group') r
     // 避免多图生图/历史数据里冒出令人困惑的"素材组"框。自定义改名优先，兜底用中性的"图片组"。
     if(imgs.length > 1){
         const rawTitle = String(node?.title || '').trim();
-        const autoTitles = new Set(['素材组','智能分组','图片组','Image','Video','Audio']);
-        if(rawTitle && !autoTitles.has(rawTitle)) return stripTitleResolutionSuffix(rawTitle);
+        if(rawTitle && !MATERIAL_AUTO_TITLES.has(rawTitle)) return stripTitleResolutionSuffix(rawTitle);
+        // 2026-10-22（方案 A）：多图节点标题 = 首个文件名 + 张数，悬停列出全部文件名。
+        const firstName = materialFileNameForTitle(imageForDisplay(imgs[0]));
+        if(firstName) return `${firstName} 等 ${imgs.length} 张`;
         return '图片组';
     }
     return tr('smart.createImportNode');
@@ -6015,6 +6358,28 @@ function shouldAutoRunPromptLLMNode(node){
         && String(node.llmInstruction || '').trim()
         && !node.running);
 }
+// 2026-10-22（用户要求）：没写输入文本也能跑的情形——「执行等价于调用系统提示词」。
+// ① 开了「系统提示词」开关且有内容：系统提示词就是这次任务的全部要求，配合节点挂的图片/素材即可产出；
+// ② 规则智能体开启（规则内容整段当系统提示词，2026-10-20 已支持单节点，这里让工作流组也能跑）。
+// 默认占位系统词（没写过内容时由 ensurePromptNodeLlmDefaults 填的），不算"用户开了系统提示词"
+const PROMPT_LLM_DEFAULT_SYSTEM = 'You are a helpful prompt assistant.';
+function promptNodeSystemPromptText(node){
+    const text = String(node?.llmSystemPrompt || '').trim();
+    return text === PROMPT_LLM_DEFAULT_SYSTEM ? '' : text;
+}
+function promptNodeCanRunBySystemPrompt(node){
+    if(!node || node.type !== 'smart-prompt' || node.llmEnabled !== true) return false;
+    return node.llmSystemEnabled === true && Boolean(promptNodeSystemPromptText(node));
+}
+function promptNodeCanRunWithoutText(node){
+    if(!node || node.type !== 'smart-prompt') return false;
+    if(promptNodeCanRunBySystemPrompt(node)) return true;
+    if(node.llmPromptOptimize === true){
+        const rule = getCurrentLlmRule();
+        if(String(rule?.content || '').trim() && llmRuleMode(rule) === 'agent') return true;
+    }
+    return false;
+}
 function promptNodeExpandedHeight(node){
     return PROMPT_NODE_LLM_EXPANDED_HEIGHT + smartNodeInputThumbsHeight(promptNodeInputImages(node));
 }
@@ -8604,6 +8969,33 @@ function renderVideoTrustedAssetControl(){
         <button type="button" class="smart-pill trusted-src-pill ${src === 'cloud' ? 'active' : ''}" data-trusted-source="cloud" title="把当前输入图片/视频上传到云端直链"><i data-lucide="upload-cloud"></i><span>上传云端</span></button>
         <button type="button" class="smart-pill trusted-src-pill ${src === 'manual' ? 'active' : ''}" data-trusted-source="manual" title="手动输入媒体 URL 或 asset:// 地址"><i data-lucide="link"></i><span>输入网址</span></button>
     </div>`;
+    // 2026-10-21 认证素材平台匹配前置提示：生成前就知道 asset:// 能否直通，
+    // 替代原来「生成时才发现回退」的 toast（runApiVideoGeneration 的兜底 toast 保留）。
+    html += smartTrustedAssetPreviewHtml();
+    return html;
+}
+function smartTrustedAssetPreviewHtml(){
+    const src = ['library','cloud','manual'].includes(settings.videoTrustedSource) ? settings.videoTrustedSource : 'library';
+    if(!settings.videoTrustedAsset || src !== 'library') return '';
+    let refs = [];
+    try { refs = visibleReferenceImagesFor(activeComposerNode() || selectedNode()) || []; } catch(_) { refs = []; }
+    const certified = (refs || []).filter(ref => ref?.asset_uris && typeof ref.asset_uris === 'object' && Object.keys(ref.asset_uris).length);
+    if(!certified.length) return '';
+    const targetPlatform = videoProviderPlatform(settings.videoProvider || '');
+    const matched = certified.filter(ref => targetPlatform && ref.asset_uris[targetPlatform]);
+    const mismatched = certified.filter(ref => !(targetPlatform && ref.asset_uris[targetPlatform]));
+    const labels = {apimart:'APIMart', volcengine:'火山引擎'};
+    let html = '';
+    if(matched.length){
+        html += `<div class="smart-trusted-ok-row">${smartShieldSvg('active', 12)}<span>${matched.length} 张认证素材将以 asset:// 直通推理（${escapeHtml(labels[targetPlatform] || targetPlatform)}）</span></div>`;
+    }
+    if(mismatched.length){
+        const names = mismatched.map(ref => ref.alias || ref.name || '素材').slice(0, 3).join('、');
+        const more = mismatched.length > 3 ? ` 等 ${mismatched.length} 项` : '';
+        const targetLabel = labels[targetPlatform] || (targetPlatform || '当前平台');
+        const volcProvider = (apiProviders || []).find(p => videoProviderPlatform(p.id) === 'volcengine' && p.id !== settings.videoProvider);
+        html += `<div class="smart-trusted-mismatch"><div>⚠ <span>「${escapeHtml(names)}${more}」未认证到「${escapeHtml(targetLabel)}」，生成时会回退为普通素材（无肖像保护）。<div class="smart-trusted-mismatch-actions">${volcProvider ? `<button type="button" class="primary" data-trusted-switch-provider="${escapeAttr(volcProvider.id)}">切换到火山引擎</button>` : ''}<button type="button" data-trusted-open-asset>去资产库认证</button></div></span></div></div>`;
+    }
     return html;
 }
 function h3OptimizerRequestForActiveComposer(fallbackPrompt=''){
@@ -8758,11 +9150,23 @@ function showH3OptimizeHover(anchorEl){
     popup.className = 'h3-opt-hover-popup' + (state.prompt ? '' : ' is-empty');
     const timeLabel = state.at ? new Date(state.at).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
     const body = state.prompt || state.status || '暂无优化结果。请保持魔棒开启并点击运行；优化成功后这里会显示优化后的提示词，优化失败时会继续使用输入框原文。';
-    popup.innerHTML = '<div class="h3-opt-hover-head"><span>' + (state.prompt ? '优化后的提示词' : '提示词优化状态') + '</span>' + (timeLabel ? '<small>' + escapeHtml(timeLabel) + '</small>' : '') + '</div>'
+    popup.innerHTML = '<div class="h3-opt-hover-head"><span>' + (state.prompt ? '优化后的提示词' : '提示词优化状态') + '</span>'
+        + (state.prompt ? '<button type="button" class="h3-opt-copy-btn" title="复制优化后的提示词" aria-label="复制优化后的提示词"><i data-lucide="copy"></i></button>' : '')
+        + (timeLabel ? '<small>' + escapeHtml(timeLabel) + '</small>' : '') + '</div>'
         + '<div class="h3-opt-hover-body">' + escapeHtml(body) + '</div>';
     popup.onmouseenter = () => clearTimeout(_h3OptimizeHoverHideTimer);
     popup.onmouseleave = () => hideH3OptimizeHover();
     document.body.appendChild(popup);
+    if(state.prompt){
+        // 复制按钮：点了不关弹层（鼠标还在按钮上），复制成功给 toast
+        popup.querySelector('.h3-opt-copy-btn')?.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const ok = await copyTextToClipboard(state.prompt);
+            toast(ok ? '已复制优化后的提示词' : '复制失败，请手动选中复制');
+        });
+        refreshIcons();
+    }
     const rect = anchorEl.getBoundingClientRect();
     const margin = 10;
     const pw = popup.offsetWidth;
@@ -9118,6 +9522,7 @@ function renderApiVideoParams(){
         ${renderVideoModeControl()}
         ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
+        ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
     `;
@@ -9207,6 +9612,7 @@ function renderVolcengineVideoParams(){
         ${renderVideoModeControl()}
         ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
+        ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
     `;
@@ -9588,7 +9994,7 @@ function renderUpscalePill(paramKey, current){
 const COMFY_WF_CUSTOM_CATS_KEY = 'smart_comfy_wf_custom_cats';
 const COMFY_WF_PINS_KEY = 'smart_comfy_wf_pins';
 const COMFY_WF_CAT_COLORS = {
-    image:'#4ade80', video:'#38bdf8', audio:'#f472b6', upscale:'#fbbf24', other:'#8e8e9a'
+    image:'#4ade80', edit:'#a78bfa', video:'#38bdf8', audio:'#f472b6', upscale:'#fbbf24', other:'#8e8e9a'
 };
 const COMFY_WF_CUSTOM_PALETTE = ['#a78bfa','#f97316','#22d3ee','#e879f9','#84cc16','#fb7185','#60a5fa','#facc15'];
 function comfyWorkflowCategoryKey(workflow){
@@ -9687,6 +10093,7 @@ function openComfyWorkflowCategoryMenu(workflowName, clientX, clientY){
         ${defs.map(def => `<button type="button" class="${def.key === activeKey ? 'active' : ''}" data-comfy-wf-set="${escapeAttr(def.key)}"><span class="wf-dot" style="background:${def.color}"></span><span>${escapeHtml(def.label)}</span>${def.key === activeKey ? '<i data-lucide="check"></i>' : ''}</button>`).join('')}
         <div class="comfy-wf-cat-menu-sep"></div>
         <button type="button" class="new-cat" data-comfy-wf-new><i data-lucide="plus"></i><span>新建分类…</span></button>
+        <button type="button" class="batch" data-comfy-wf-batch><i data-lucide="list-checks"></i><span>批量归类…</span></button>
         <button type="button" class="manage" data-comfy-wf-manage><i data-lucide="settings-2"></i><span>管理分类…</span></button>
         <div class="comfy-wf-cat-menu-sep"></div>
         <button type="button" class="auto${isManual ? '' : ' current'}" data-comfy-wf-set="auto" ${isManual ? '' : 'disabled'} title="${escapeAttr(tr('smart.wfcatAuto'))}"><i data-lucide="wand-2"></i><span>${escapeHtml(tr('smart.wfcatAuto'))}</span>${isManual ? '' : '<i data-lucide="check"></i>'}</button>`;
@@ -9714,11 +10121,17 @@ function openComfyWorkflowCategoryMenu(workflowName, clientX, clientY){
         const clean = String(name || '').trim();
         if(!clean) return;
         if(clean.length > 12 || /[\\/:*?"<>|]/.test(clean)){ toast('分类名最多 12 个字，且不能包含 \\ / : * ? " < > |'); return; }
-        if(['image','video','audio','upscale','other','生图','生视频','生音频','放大','其他'].includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
+        if(COMFY_WF_RESERVED_CAT_NAMES.includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
         saveComfyCustomCategoryList([...comfyCustomCategoryList(), clean]);
         comfyWorkflowCategory = clean;
         persistComfyWorkflowCategory(clean);
         await setComfyWorkflowCategory(workflowName, clean);
+    });
+    menu.querySelector('[data-comfy-wf-batch]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeComfyWorkflowCategoryMenu();
+        openComfyWorkflowBatchPanel();
     });
     menu.querySelector('[data-comfy-wf-manage]')?.addEventListener('click', event => {
         event.preventDefault();
@@ -9786,7 +10199,102 @@ async function setComfyWorkflowCategoryBulk(names, value){
     renderDynamicParams();
     return { total:list.length, failed };
 }
-// 管理分类：内置 5 类固定（名称与颜色随主题），自定义类可新建 / 改名 / 删除
+// 2026-10-22（用户要求）：批量归类面板。
+// 为什么需要它：图像编辑和生图的工作流节点结构完全一样（都有 LoadImage + VAEEncode + SaveImage），
+// 自动归类只能靠名称关键词猜，英文名/新导入的工作流必然有猜不准的时候。与其把精力花在"猜得准"，
+// 不如给一个能一次把全部工作流点完的面板：每行点一下分类，立即写进各自 config，之后永久准确。
+function openComfyWorkflowBatchPanel(){
+    document.querySelector('.wf-batch-mask')?.remove();
+    const defs = comfyWorkflowCategoryDefs();
+    // 按当前分类排序，同分类内按显示名排，避免列表每次打开顺序乱跳
+    const list = (Array.isArray(comfyWorkflows) ? comfyWorkflows : []).slice().sort((a, b) => {
+        const ka = comfyWorkflowCategoryKey(a), kb = comfyWorkflowCategoryKey(b);
+        const ia = defs.findIndex(d => d.key === ka), ib = defs.findIndex(d => d.key === kb);
+        const oa = ia < 0 ? 99 : ia, ob = ib < 0 ? 99 : ib;
+        if(oa !== ob) return oa - ob;
+        return comfyWorkflowDisplayTitle(a).localeCompare(comfyWorkflowDisplayTitle(b), 'zh');
+    });
+    // 仓库里可能有同名文件（custom/ 前缀与根目录各一份），标题重复时补目录后缀区分
+    const dupTitles = (() => {
+        const seen = new Map();
+        list.forEach(w => {
+            const t = comfyWorkflowDisplayTitle(w);
+            seen.set(t, (seen.get(t) || 0) + 1);
+        });
+        return seen;
+    })();
+    const batchRowLabel = w => {
+        const title = comfyWorkflowDisplayTitle(w);
+        if((dupTitles.get(title) || 0) <= 1) return title;
+        const parts = String(w.name || '').replace(/\\/g, '/').split('/');
+        parts.pop();
+        // 没有目录时退回文件名（去 .json），保证重复标题也能区分开
+        const folder = parts.pop() || String(w.name || '').replace(/\.json$/i, '');
+        return `${title} · ${folder}`;
+    };
+    const legendHtml = () => defs.map(def => {
+        const count = list.filter(w => comfyWorkflowCategoryKey(w) === def.key).length;
+        return `<span class="wf-batch-lg"><span class="wf-dot" style="background:${def.color}"></span>${escapeHtml(def.label)}<small>${count}</small></span>`;
+    }).join('');
+    const mask = document.createElement('div');
+    mask.className = 'wf-cat-mask wf-batch-mask';
+    mask.innerHTML = `<div class="wf-cat-modal wf-batch-modal" role="dialog" aria-label="批量归类工作流">
+        <div class="wf-cat-modal-head">
+            <div><h3>批量归类</h3><p>点每行的分类立即生效，共 ${list.length} 个工作流。「自动」= 系统按名称推断的，可随时改。</p></div>
+            <button type="button" class="wf-cat-x" data-close aria-label="关闭">✕</button>
+        </div>
+        <div class="wf-batch-legend">${legendHtml()}</div>
+        <div class="wf-batch-rows">
+            ${list.map(w => {
+                const key = comfyWorkflowCategoryKey(w);
+                const manual = String(w.category_source || '') === 'manual';
+                return `<div class="wf-batch-row" data-name="${escapeAttr(w.name)}">
+                    <span class="wf-batch-nm" title="${escapeAttr(w.name)}">${escapeHtml(batchRowLabel(w))}</span>
+                    <span class="wf-batch-opts">${defs.map(def => `<button type="button" class="${def.key === key ? 'active' : ''}" data-bcat="${escapeAttr(def.key)}" style="--c:${def.color}">${escapeHtml(def.label)}</button>`).join('')}</span>
+                    <span class="wf-batch-src ${manual ? 'man' : 'auto'}">${manual ? '手动' : '自动'}</span>
+                </div>`;
+            }).join('')}
+        </div>
+        <div class="wf-cat-tip">手动归类写进工作流自己的 config，导出/导入与多端同步都跟着走；「恢复自动归类」在单卡右键菜单里。</div>
+    </div>`;
+    document.body.appendChild(mask);
+    const close = () => { document.removeEventListener('keydown', onKey, true); mask.remove(); };
+    const onKey = event => { if(event.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey, true);
+    mask.addEventListener('mousedown', event => { if(event.target === mask) close(); });
+    mask.querySelector('[data-close]').onclick = close;
+    mask.addEventListener('click', async event => {
+        const btn = event.target.closest('[data-bcat]');
+        if(!btn) return;
+        const row = btn.closest('.wf-batch-row');
+        const name = row?.dataset?.name;
+        const value = btn.dataset.bcat;
+        if(!name || btn.classList.contains('active') || row.classList.contains('busy')) return;
+        row.classList.add('busy');
+        try {
+            const res = await fetch(`/api/workflows/${encodeURIComponent(name)}/category`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({category:value, source:'manual'})
+            });
+            if(!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            const workflow = (comfyWorkflows || []).find(item => item.name === name);
+            if(workflow){ workflow.category = data.category; workflow.category_source = data.category_source; }
+            row.querySelectorAll('[data-bcat]').forEach(el => el.classList.toggle('active', el.dataset.bcat === data.category));
+            const src = row.querySelector('.wf-batch-src');
+            if(src){ src.textContent = '手动'; src.classList.remove('auto'); src.classList.add('man'); }
+            const legend = mask.querySelector('.wf-batch-legend');
+            if(legend) legend.innerHTML = legendHtml();
+            renderDynamicParams();
+        } catch(e){
+            toast(`${tr('smart.wfcatFail')}：${e.message || e}`);
+        } finally {
+            row.classList.remove('busy');
+        }
+    });
+}
+// 管理分类：内置 6 类固定（名称与颜色随主题），自定义类可新建 / 改名 / 删除
 function openComfyWorkflowCategoryManager(){
     document.querySelector('.wf-cat-mask')?.remove();
     const defs = comfyWorkflowCategoryDefs();
@@ -9794,7 +10302,7 @@ function openComfyWorkflowCategoryManager(){
     mask.className = 'wf-cat-mask';
     mask.innerHTML = `<div class="wf-cat-modal" role="dialog" aria-label="管理工作流分类">
         <div class="wf-cat-modal-head">
-            <div><h3>管理工作流分类</h3><p>内置分类不可删除；自定义分类可改名、删除（删除后工作流归入「其他」）。</p></div>
+            <div><h3>管理工作流分类</h3><p>内置分类不可删除；自定义分类可改名、删除（删除后工作流归入「工具」）。</p></div>
             <button type="button" class="wf-cat-x" data-close aria-label="关闭">✕</button>
         </div>
         <div class="wf-cat-rows">
@@ -9820,7 +10328,7 @@ function openComfyWorkflowCategoryManager(){
         const clean = String(name || '').trim();
         if(!clean) return;
         if(clean.length > 12 || /[\\/:*?"<>|]/.test(clean)){ toast('分类名最多 12 个字，且不能包含 \\ / : * ? " < > |'); return; }
-        if(['image','video','audio','upscale','other','生图','生视频','生音频','放大','其他'].includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
+        if(COMFY_WF_RESERVED_CAT_NAMES.includes(clean)){ toast('这个名称已经被内置分类占用了'); return; }
         saveComfyCustomCategoryList([...comfyCustomCategoryList(), clean]);
         comfyWorkflowCategory = clean;
         persistComfyWorkflowCategory(clean);
@@ -9849,7 +10357,7 @@ function openComfyWorkflowCategoryManager(){
         row.querySelector('[data-del]')?.addEventListener('click', async () => {
             if(isBuiltin) return;
             const names = (comfyWorkflows || []).filter(w => comfyWorkflowCategoryKey(w) === key).map(w => w.name);
-            if(!window.confirm(`删除分类「${key}」？${names.length ? `\n其中 ${names.length} 个工作流会归入「其他」。` : ''}`)) return;
+            if(!window.confirm(`删除分类「${key}」？${names.length ? `\n其中 ${names.length} 个工作流会归入「工具」。` : ''}`)) return;
             if(names.length) await setComfyWorkflowCategoryBulk(names, 'other');
             saveComfyCustomCategoryList(comfyCustomCategoryList().filter(k => k !== key));
             if(comfyWorkflowCategory === key){ comfyWorkflowCategory = 'other'; persistComfyWorkflowCategory('other'); }
@@ -11359,6 +11867,27 @@ function bindDynamicParams(){
             }
         };
     });
+    // 2026-10-21 认证素材前置黄条动作：一键切接口 / 打开资产库认证
+    dynamicParams.querySelectorAll('[data-trusted-switch-provider]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const pid = btn.dataset.trustedSwitchProvider;
+            if(!pid) return;
+            settings.videoProvider = pid;
+            persistActiveSmartSettings();
+            renderDynamicParams();
+            scheduleSave();
+            toast('已切换视频接口，认证素材可直通推理');
+        };
+    });
+    dynamicParams.querySelectorAll('[data-trusted-open-asset]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.open('/static/asset-manager.html', '_blank');
+        };
+    });
     dynamicParams.querySelectorAll('[data-comfy-bool]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -12422,8 +12951,35 @@ function markSmartNodeImagesEdited(node, at=Date.now()){
     if(node) node.imagesEditedAt = Number(at || Date.now());
     return node;
 }
+// 2026-10-21 修复「输入提示词不能跑」：历史版本写入或跨窗口合并进来的 queued 残留
+// （无 running/pending/任务队列/运行令牌支撑）会让 smartNodeInFlight 把节点判成
+// 「生成中」，运行按钮永久灰禁。这里对无任务支撑的 queued 做自愈清理。
+function smartNodeHasLiveRunSupport(node){
+    if(!node) return false;
+    if(node.running || node.jimengPending) return true;
+    if(Number(node.pending || 0) > 0) return true;
+    if(smartPendingTasks(node).length) return true;
+    if(smartNodeRunTokens.has(node.id)) return true;
+    if(smartCascadeIsLoopRunning(node.id)) return true;
+    return false;
+}
+function clearStaleQueuedRunState(node){
+    if(!node || !node.queued) return false;
+    if(smartNodeHasLiveRunSupport(node)) return false;
+    clearSmartNodeBusyState(node);
+    scheduleSave();
+    return true;
+}
+function clearStaleQueuedRunStateAll(){
+    let changed = false;
+    (nodes || []).forEach(node => {
+        if(clearStaleQueuedRunState(node)) changed = true;
+    });
+    return changed;
+}
 function smartNodeInFlight(node){
     if(smartNodeHasCompletedResult(node)) return false;
+    if(node?.queued && !smartNodeHasLiveRunSupport(node)) clearStaleQueuedRunState(node);
     return Boolean(node && (node.running || node.pending || node.queued || node.jimengPending || smartPendingTasks(node).length));
 }
 function canStartConcurrentImageRun(node, runSettings=null){
@@ -13070,6 +13626,9 @@ function applyMergedServerCanvas(serverCanvas){
     const cleanedState = clearCompletedNodeBusyStates();
     const recoveredCompletedOutputs = recoverCompletedNodeOutputsFromLogs();
     const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
+    // 远端快照可能带着历史版本遗留的 stale queued（无任务支撑），合并进来前先自愈，
+    // 否则节点会被 smartNodeInFlight 判成「生成中」，运行按钮永久灰禁。
+    const clearedStaleQueued = clearStaleQueuedRunStateAll();
     canvas.updated_at = Number(serverCanvas.updated_at || canvas.updated_at || 0);
     if(canvas.title !== serverCanvas.title && serverCanvas.title){
         canvas.title = serverCanvas.title;
@@ -13079,7 +13638,7 @@ function applyMergedServerCanvas(serverCanvas){
     render();
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
     // 墓碑有增长时必须回存一次，把删除意图传播给其它窗口/设备。
-    if(cleanedState || recoveredCompletedOutputs || recoveredLoopOutputs || tombstonesGrew) scheduleSave();
+    if(cleanedState || recoveredCompletedOutputs || recoveredLoopOutputs || clearedStaleQueued || tombstonesGrew) scheduleSave();
     resumeSmartPendingTasks();
     resumeJimengPendingNodes();
     return true;
@@ -13221,6 +13780,15 @@ function assetNodeImageFromItem(item, fallbackName='asset'){
     };
     copyMediaSizeFields(item, image);
     if(item?.asset_uris && typeof item.asset_uris === 'object') image.asset_uris = {...item.asset_uris};
+    // 2026-10-21 真人认证：把注册状态快照带上画布（蓝盾/灰盾/红盾角标数据源）。
+    // asset_uris 只在 Active 后才有，画布上要区分「审核中/未通过」就需要这份快照。
+    if(item?.registrations && typeof item.registrations === 'object'){
+        const cert = {};
+        for(const [plat, reg] of Object.entries(item.registrations)){
+            if(reg && typeof reg === 'object' && reg.task_id) cert[plat] = {status:String(reg.status || 'Processing'), detail:String(reg.detail || '')};
+        }
+        if(Object.keys(cert).length) image.asset_cert = cert;
+    }
     return image;
 }
 function assetThumbHtml(item){
@@ -14022,8 +14590,30 @@ async function redirectToRecentCanvasIfMissingId(){
         return false;
     }
 }
+// 2026-10-21 拖入视频/图片「立刻响应」：先用本地 blob: URL 建节点直接显示，
+// 上传在后台跑，完成后把 URL 换成正式地址。期间禁止落盘（blob: 存进画布 JSON 刷新即失效）。
+let pendingLocalMediaUploads = 0;
+let pendingLocalUploadSince = 0;
+function beginPendingLocalUpload(){
+    pendingLocalMediaUploads += 1;
+    if(!pendingLocalUploadSince) pendingLocalUploadSince = Date.now();
+}
+function endPendingLocalUpload(){
+    pendingLocalMediaUploads = Math.max(0, pendingLocalMediaUploads - 1);
+    if(!pendingLocalMediaUploads){ pendingLocalUploadSince = 0; scheduleSave(); }
+}
 function scheduleSave(){
     clearTimeout(saveTimer);
+    // 还有本地 blob 预览没换成正式 URL 时，延后保存，避免把 blob: 写进画布。
+    // 兜底：上传即使卡死也不能永久阻塞保存（超过 60s 就按当前状态落盘）。
+    if(pendingLocalMediaUploads > 0 && pendingLocalUploadSince && Date.now() - pendingLocalUploadSince < 60000){
+        saveTimer = setTimeout(scheduleSave, 400);
+        return;
+    }
+    if(pendingLocalMediaUploads > 0){
+        pendingLocalMediaUploads = 0;
+        pendingLocalUploadSince = 0;
+    }
     saveTimer = setTimeout(saveCanvas, 450);
 }
 async function saveCanvas(){
@@ -15049,11 +15639,51 @@ function imageNameLabel(img, fallback='image'){
     const raw = String(img?.name || fileNameFromUrl(img?.url || '') || fallback || 'image').trim();
     return raw || 'image';
 }
+// ---- 2026-10-21 真人认证蓝盾角标（与资产库/参考产品同一视觉语言）----
+// active=已认证(Active) 蓝盾；pending=审核中 灰盾；failed=未通过 红盾。
+// 数据源：item.asset_cert（入库快照，含状态）或 item.asset_uris（仅 Active 后才有）。
+function smartShieldSvg(state='active', size=12){
+    const palette = {
+        active: {stroke:'#38bdf8', fill:'rgba(56,189,248,.18)', mark:'<path d="M9 12l2 2 4-4"/>'},
+        pending: {stroke:'#94a3b8', fill:'rgba(148,163,184,.14)', mark:'<circle cx="12" cy="11" r="3"/>'},
+        failed: {stroke:'#f87171', fill:'rgba(239,68,68,.16)', mark:'<path d="M9 12h6"/>'},
+    }[state] || {stroke:'#38bdf8', fill:'rgba(56,189,248,.18)', mark:'<path d="M9 12l2 2 4-4"/>'};
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${palette.stroke}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z" fill="${palette.fill}"/>${palette.mark}</svg>`;
+}
+function smartAssetCertState(img){
+    const cert = (img?.asset_cert && typeof img.asset_cert === 'object') ? img.asset_cert : null;
+    if(cert && Object.keys(cert).length){
+        const plats = Object.keys(cert);
+        if(plats.some(p => cert[p]?.status === 'Active')) return {state:'active', plats};
+        if(plats.some(p => cert[p]?.status === 'Failed')) return {state:'failed', plats};
+        return {state:'pending', plats};
+    }
+    if(img?.asset_uris && typeof img.asset_uris === 'object' && Object.keys(img.asset_uris).length){
+        return {state:'active', plats:Object.keys(img.asset_uris)};
+    }
+    return null;
+}
+function smartAssetCertTip(img){
+    const info = smartAssetCertState(img);
+    if(!info) return '';
+    const labels = {apimart:'APIMart', volcengine:'火山引擎'};
+    const names = info.plats.map(p => labels[p] || p).join(' / ');
+    if(info.state === 'active') return `已认证素材 · ${names}\n生成时可直通推理（asset://）`;
+    if(info.state === 'pending') return `认证审核中 · ${names}`;
+    const cert = img.asset_cert || {};
+    const reason = info.plats.map(p => cert[p]?.detail).filter(Boolean).join('；');
+    return `认证未通过 · ${names}${reason ? `\n${reason}` : ''}`;
+}
+function smartAssetCertBadgeHtml(img){
+    const info = smartAssetCertState(img);
+    if(!info) return '';
+    return `<span class="smart-asset-cert" data-asset-cert="${info.state}" title="${escapeAttr(smartAssetCertTip(img))}">${smartShieldSvg(info.state)}</span>`;
+}
 function imageNameBadgeHtml(img, options={}){
     if(!img?.url) return '';
     const label = imageNameLabel(img);
     const outsideClass = options.outside ? ' image-name-badge-outside' : '';
-    return `<span class="image-name-badge${outsideClass}" data-image-name="1" title="${escapeAttr(label)}">${escapeHtml(label)}</span>`;
+    return `<span class="image-name-badge${outsideClass}" data-image-name="1" title="${escapeAttr(label)}">${escapeHtml(label)}${smartAssetCertBadgeHtml(img)}</span>`;
 }
 function thumbDisplaySize(img, maxSize){
     const limit = Math.max(28, Math.round(Number(maxSize) || 96));
@@ -16346,7 +16976,7 @@ function promptFormatControlsHtml(node, {includeExpand=true}={}){
         <button class="prompt-format-btn ${style.bold ? 'active' : ''}" type="button" data-prompt-bold title="加粗"><b>B</b></button>
         <button class="prompt-format-btn ${style.italic ? 'active' : ''}" type="button" data-prompt-italic title="倾斜"><i>I</i></button>
         <span class="prompt-format-divider"></span>
-        <button class="prompt-format-btn prompt-format-translate" type="button" data-prompt-translate title="翻译提示词" aria-label="翻译提示词"><span class="prompt-format-translate-icon">文A</span></button>
+        <button class="prompt-format-btn prompt-format-translate ${node.translatingPrompt ? 'is-loading' : ''}" type="button" data-prompt-translate title="${node.translatingPrompt ? '翻译中…' : '翻译提示词'}" aria-label="翻译提示词"${node.translatingPrompt ? ' disabled' : ''}>${node.translatingPrompt ? '<i data-lucide="loader-2" class="prompt-translate-spinner"></i>' : '<span class="prompt-format-translate-icon">文A</span>'}</button>
         ${includeExpand ? '<span class="prompt-format-divider"></span><button class="prompt-format-btn prompt-node-expand-btn" type="button" title="放大编辑" aria-label="放大编辑"><i data-lucide="maximize-2"></i></button>' : ''}`;
 }
 function promptNodeFormatToolbarHtml(node){
@@ -20026,8 +20656,10 @@ function workflowGroupProcessNodes(group){
     const ids = new Set(members.map(node => node.id));
     const candidates = members.filter(node => {
         if(node?.type === 'smart-prompt'){
-            if(!shouldAutoRunPromptLLMNode(node)) return false;
-            return Boolean(promptNodeLLMInputText(node).trim());
+            if(shouldAutoRunPromptLLMNode(node) && promptNodeLLMInputText(node).trim()) return true;
+            // 2026-10-22（用户要求）：只开了「系统提示词」的 LLM 节点也要算可执行——
+            // 执行它等价于调用系统提示词（配合挂的素材），否则工作流组里这类节点会被直接跳过。
+            return node.llmEnabled === true && !node.running && promptNodeCanRunWithoutText(node);
         }
         if(!isSmartImageNode(node) || isHistoryGroupNode(node) || smartNodeInFlight(node)) return false;
         const runSettings = smartSettingsForNode(node);
@@ -20723,6 +21355,8 @@ function render(){
         const imgs = node.images || [];
         const title = smartNodeTitle(node, imgs);
         const titleHtml = smartNodeTitleHtml(node, imgs);
+        // 2026-10-22（方案 A）：标题是文件名时，悬停显示完整文件名（含扩展名 / 多图全部名称）。
+        const titleTip = smartNodeTitleTooltip(node, imgs);
         const scale = nodeScale(node);
         let layout = imageLayout(imgs, scale, node);
         // 2026-10-14（循环节点 B1）：状态栏占位。旧画布里存的 h 不含状态栏，这里只增不减地
@@ -20778,7 +21412,7 @@ function render(){
         const hideGeneratedGroupHead = false;
         const portInHtml = isUploadEntry ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>';
         const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
-            ${uploadPreviewOnly || hideGeneratedGroupHead || isWorkflowGroup ? '' : uploadPreviewOnly ? `<div class="node-head upload-entry-node-head"><div class="node-title">${titleHtml}</div></div>` : `<div class="node-head"><div class="node-title">${titleHtml}</div>${nodeResolutionHtml(node, imgs)}<div class="node-actions">${deleteBtn}${smartGroupResizeBtn}</div></div>`}
+            ${uploadPreviewOnly || hideGeneratedGroupHead || isWorkflowGroup ? '' : uploadPreviewOnly ? `<div class="node-head upload-entry-node-head"><div class="node-title"${titleTip ? ` title="${escapeAttr(titleTip)}"` : ''}>${titleHtml}</div></div>` : `<div class="node-head"><div class="node-title"${titleTip ? ` title="${escapeAttr(titleTip)}"` : ''}>${titleHtml}</div>${nodeResolutionHtml(node, imgs)}<div class="node-actions">${deleteBtn}${smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${isPending ? '' : (isGridSplitGroup ? gridSplitGroupToolbarHtml(node) : smartNodeToolbarHtml(node))}${smartTransformEditorHtml(node)}${smartGroupToolbarHtml(node)}${workflowGroupToolbarHtml(node)}
@@ -22851,6 +23485,28 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 btn.setAttribute('aria-expanded', open ? 'true' : 'false');
             }, true);
         });
+        // 2026-10-22（用户要求：视频截取片段）：剪刀按钮打开底部胶片条截取编辑器。
+        el.querySelectorAll('.smart-video-canvas-trim').forEach(btn => {
+            if(btn.dataset.trimBound === '1') return;
+            btn.dataset.trimBound = '1';
+            ['pointerdown', 'mousedown'].forEach(type => btn.addEventListener(type, e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+            }, true));
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                const video = btn.closest('.media-video-card,.video-thumb,.upload-preview-card,.thumb-item,.image-wrap')?.querySelector('video[data-url]')
+                    || btn.closest('.image-node')?.querySelector('video[data-url]');
+                if(!video){ toast('未找到可截取的视频'); return; }
+                const url = video.dataset.url || video.getAttribute('data-url');
+                if(!url){ toast('视频地址缺失，无法截取'); return; }
+                const nodeId = btn.closest('.image-node')?.dataset?.id || '';
+                openSmartVideoTrimPanel(video, url, nodeId);
+            }, true);
+        });
         // 2026-10-12（用户要求）：生成的视频悬停显示下载按钮——点击下载原视频文件。
         // 同日追加：下载按钮不挤在底部控制条，搬移到右上角与垃圾桶（删除）按钮并排；
         // 没有垃圾桶的容器（如单视频节点）落在视频区右上角（.smart-video-download-solo）。
@@ -23222,7 +23878,7 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 }
                 const payload = await resolveSmartImageDropPayload(e.dataTransfer);
                 if(payload.type === 'none') return;
-                await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
+                await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true, optimistic:true});
                 return;
             }
             if(assetRaw){
@@ -27621,6 +28277,8 @@ function loadPromptDraft(subject){
         refreshIcons();
     }
     syncPromptChipHint();
+    // 老草稿里的 @ 引用 chip 还是「文件名」结构，加载时统一刷成 Picture N / Video N
+    refreshMentionRefLabels();
     delete promptInput.dataset.promptDraftDirty;
 }
 function positionComposerForNode(node){
@@ -27776,9 +28434,12 @@ function renderInputThumbsRow(node){
     const audioEngine = audioRs ? String(audioRs.engine || '').toLowerCase() : '';
     const audioRefNode = Boolean(node && isApiLikeEngine(audioEngine) && audioRs.apiKind === 'audio');
     const acceptsRefs = acceptsImageRefs || audioRefNode;
-    const dedup = node ? (audioRefNode
+    const dedupRaw = node ? (audioRefNode
         ? manualReferenceImagesFor(node).filter(img => (img.kind || mediaKindForItem(img)) === 'audio')
         : (acceptsImageRefs ? visibleReferenceImagesFor(node) : [])) : [];
+    // 2026-10-22（用户要求）引用图右上角 × 可清除：被清除（blocked）的引用不显示、不参与生成与编号。
+    const blockedRefKeys = blockedInputRefKeys(node);
+    const dedup = blockedRefKeys.size ? dedupRaw.filter(img => !blockedRefKeys.has(inputRefKey(img))) : dedupRaw;
     // MiniMax H3 每种模式能带多少参考素材：超出的缩略图会被画成黑色并标注「不生效」，
     // 提交时也不会发给 ComfyUI（见 runComfyGeneration / generateComfyUrlsWithSettings）。
     // 不是 H3 节点时 h3LimitByKind 为 null —— 普通 ComfyUI / API 生成不受这套限额约束。
@@ -27799,6 +28460,7 @@ function renderInputThumbsRow(node){
         node: node?.id || '',
         items: dedup.map(img => `${inputRefKey(img)}@${img.url || ''}`),
         manual: [...manualRefKeys],
+        blocked: [...blockedRefKeys],
         add: addActive,
         acceptsImageRefs,
         audioRefNode,
@@ -27857,8 +28519,10 @@ function renderInputThumbsRow(node){
         const label = isLocalPreview ? '局部' : (shortRef || `${refLabelPrefix(kind)}${count}`);
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
-        const removable = manualRefKeys.has(key);
-        const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-input-remove-reference="${escapeHtml(inputRefKey(img))}" title="删除参考图" aria-label="删除参考图">×</button>` : '';
+        // 2026-10-22（用户要求）所有引用缩略图右上角都有极简 ×：手动引用=直接删除；
+        // 上游连线/自身引用=清除（blocked，不参与生成，可再点恢复通道见 toggleInputRefBlocked）
+        const isManualRef = manualRefKeys.has(key);
+        const removeBtn = acceptsRefs ? `<button class="input-thumb-remove" type="button" ${isManualRef ? `data-input-remove-reference="${escapeHtml(key)}"` : `data-input-block-reference="${escapeHtml(key)}"`} title="${isManualRef ? '删除参考图' : '清除该引用图（不再参与本次生成）'}" aria-label="移除参考图">×</button>` : '';
         // 超出当前 H3 模式上限的：整个缩略图显示黑色 + 角标「不生效」，鼠标悬停说明超了哪一条。
         const limitUnit = kind === 'video' ? '个视频' : kind === 'audio' ? '个音频' : '张图';
         const limitNote = overLimit ? ` · 当前模式最多 ${kindLimit} ${limitUnit}，这张不生效` : (frameExcluded ? ' · 首尾帧模式只使用前 2 张图（首帧/尾帧），这张不参与生成' : '');
@@ -27867,7 +28531,7 @@ function renderInputThumbsRow(node){
         const limitBadge = frameRoleBadge
             ? `<button type="button" class="input-thumb-role-badge${frameRoleBadge === '尾帧' ? ' is-last' : ''}${frameRoleToggleable ? ' toggleable' : ''}"${frameRoleToggleable ? ' data-frame-role-toggle="1"' : ''} title="${escapeHtml(frameRoleToggleable ? '点击切换：首帧 ⇄ 尾帧' : '首尾帧模式下图1=首帧、图2=尾帧')}">${escapeHtml(frameRoleBadge)}</button>`
             : (overLimitFinal ? `<span class="input-thumb-limit-badge">${escapeHtml('不参与')}</span>` : '');
-        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimitFinal ? ' input-thumb-limit' : ''}${frameRoleBadge ? ' has-frame-role' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
+        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${isManualRef ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimitFinal ? ' input-thumb-limit' : ''}${frameRoleBadge ? ' has-frame-role' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
     }).join('');
     inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
@@ -27914,6 +28578,19 @@ function bindInputThumbReferenceActions(){
             event.preventDefault();
             event.stopPropagation();
             removeManualReferenceFromSelectedNode(btn.dataset.inputRemoveReference || '');
+        });
+    });
+    // 2026-10-22（用户要求）上游/自身引用的 ×：清除该引用（blocked，不参与生成与编号；Ctrl+Z 可撤销恢复）
+    inputThumbsRow?.querySelectorAll('[data-input-block-reference]').forEach(btn => {
+        btn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = btn.dataset.inputBlockReference || '';
+            const node = selectedNode();
+            if(!node || !key) return;
+            const img = visibleReferenceImagesFor(node).find(item => inputRefKey(item) === key)
+                || manualReferenceImagesFor(node).find(item => inputRefKey(item) === key);
+            if(img) toggleInputRefBlocked(node, img);
         });
     });
     bindInputThumbHoverPreview();
@@ -28653,9 +29330,84 @@ async function importSmartLocalImages(paths){
     });
     return data.files || [];
 }
+// 2026-10-21 拖入即显示：本地文件先以 blob: 预览建节点（视频直接播本地文件，
+// 不等上传、不等服务端抽帧/转码），上传完成后无缝换成正式 URL；失败则回滚。
+const SMART_LOCAL_PREVIEW_MAX_BYTES = 100 * 1024 * 1024;
+async function dropLocalFilesOptimistic(files, targetId='', opts={}){
+    const list = [...(files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
+    if(!list.length) return null;
+    const accepted = [];
+    list.forEach(file => {
+        if((file.size || 0) > SMART_LOCAL_PREVIEW_MAX_BYTES){
+            toast(`${file.name || '文件'} 超过 100MB，无法上传`);
+            return;
+        }
+        accepted.push(file);
+    });
+    if(!accepted.length) return null;
+    const localItems = accepted.map(file => {
+        const kind = mediaKindForFile(file);
+        const item = {url: URL.createObjectURL(file), name: file.name || 'media', kind, localPreview:true};
+        if(kind === 'video') markSmartFreshUploadedVideo(item);
+        return item;
+    });
+    if(!opts.skipUndo) pushUndo();
+    beginPendingLocalUpload();
+    const node = appendImagesToSmartNode(localItems.map(item => ({...item})), targetId, {...opts, optimistic:false, skipUndo:true});
+    if(!node){
+        endPendingLocalUpload();
+        localItems.forEach(item => { try { URL.revokeObjectURL(item.url); } catch(_){} });
+        return null;
+    }
+    const blobUrls = localItems.map(item => item.url);
+    try {
+        const uploaded = await uploadFiles(accepted);
+        // 按顺序把节点里的 blob 条目替换成正式 URL；上传缺项就删掉该条
+        const images = Array.isArray(node.images) ? node.images.slice() : [];
+        const next = [];
+        images.forEach(image => {
+            const idx = blobUrls.indexOf(image?.url);
+            if(idx < 0){ next.push(image); return; }
+            const real = uploaded[idx];
+            if(real) next.push({...image, ...real, kind: real.kind || image.kind || mediaKindForFile(accepted[idx])});
+        });
+        node.images = next;
+        if(opts.forceNew && !next.length){
+            // 一个都没上传成功：不留空节点
+            const index = nodes.findIndex(n => n.id === node.id);
+            if(index >= 0) nodes.splice(index, 1);
+            if(selectedId === node.id){ selectedId = ''; selectedIds = []; selectedImage = {nodeId:'', index:-1}; }
+        }
+        render();
+        setTimeout(() => blobUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch(_){} }), 2000);
+        if(!uploaded.length) toast(tr('smart.toastUploadFail'));
+    } catch(e) {
+        toast(e?.message || tr('smart.toastUploadFail'));
+        const images = Array.isArray(node.images) ? node.images.slice() : [];
+        node.images = images.filter(image => blobUrls.indexOf(image?.url) < 0);
+        if(!node.images.length){
+            const index = nodes.findIndex(n => n.id === node.id);
+            if(index >= 0) nodes.splice(index, 1);
+            if(selectedId === node.id){ selectedId = ''; selectedIds = []; selectedImage = {nodeId:'', index:-1}; }
+        }
+        blobUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch(_){} });
+        render();
+    } finally {
+        endPendingLocalUpload();
+        scheduleSave();
+    }
+    return node;
+}
 async function handleSmartImageDropPayload(payload, targetId='', opts={}){
     try {
-        if(payload.type === 'files') await handleFiles(payload.files, targetId, opts);
+        if(payload.type === 'files'){
+            // 拖放新节点走乐观渲染（本地 blob 立刻可见）；落到已有节点仍走原来的上传后追加
+            if(opts.optimistic && opts.forceNew){
+                await dropLocalFilesOptimistic(payload.files, targetId, opts);
+                return;
+            }
+            await handleFiles(payload.files, targetId, opts);
+        }
         else if(payload.type === 'localPaths') {
             if(!opts.skipUndo) pushUndo();
             appendImagesToSmartNode(await importSmartLocalImages(payload.localPaths), targetId, opts);
@@ -29187,12 +29939,16 @@ function applyAppendPendingPreviewBox(node){
     node.h = Math.round(keepManualSize ? Math.max(Number(previousH), compactBox.h) : compactBox.h);
     return layout;
 }
+function mentionTokenKindLabel(kind){
+    // 2026-10-21（用户要求）：@ 引用 chip 不再显示文件名，改显「Picture 1 / Video 1 / Audio 1」
+    return kind === 'audio' ? 'Audio' : kind === 'video' ? 'Video' : 'Picture';
+}
 function mentionTokenHtml(img){
     if(!img?.url) return '';
     const kind = mediaKindForItem(img);
     const name = img.alias || img.name || (kind === 'audio' ? '音频' : kind === 'video' ? '视频' : '图片');
     const media = mentionTokenMediaHtml(img, kind);
-    return `<span class="mention-image-token" contenteditable="false" data-url="${escapeHtml(img.url)}" data-kind="${escapeHtml(kind)}" data-name="${escapeHtml(name)}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${escapeHtml(img.imageIndex ?? '')}">${media}<span>${escapeHtml(name)}</span></span>`;
+    return `<span class="mention-image-token" contenteditable="false" data-url="${escapeHtml(img.url)}" data-kind="${escapeHtml(kind)}" data-name="${escapeHtml(name)}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${escapeHtml(img.imageIndex ?? '')}">${media}<span>${mentionTokenKindLabel(kind)}</span>${smartAssetCertBadgeHtml(img)}</span>`;
 }
 function mentionTokenMediaHtml(img, kind=mediaKindForItem(img)){
     if(kind === 'audio'){
@@ -30932,7 +31688,7 @@ function insertMentionToken(img){
     token.dataset.nodeId = img.nodeId || '';
     token.dataset.imageIndex = String(img.imageIndex ?? '');
     token.dataset.assetUris = JSON.stringify(img.asset_uris || {});
-    token.innerHTML = `${mentionTokenMediaHtml(img, token.dataset.kind)}<span>${escapeHtml(token.dataset.name)}</span>`;
+    token.innerHTML = `${mentionTokenMediaHtml(img, token.dataset.kind)}<span>${mentionTokenKindLabel(token.dataset.kind)}</span>${smartAssetCertBadgeHtml(img)}`;
     range.insertNode(token);
     bindSmartPreviewImageFallbacks(token);
     const spacer = document.createTextNode(' ');
@@ -31073,23 +31829,16 @@ function refreshMentionRefLabels(){
     const labels = computeMentionRefLabels(selectedNode());
     tokens.forEach(token => {
         const label = labels.get(token.dataset.url || '') || '';
-        let el = token.querySelector('.mention-ref-label');
-        if(!label){
-            if(el) el.remove();
-            delete token.dataset.mentionLabel;
-            return;
-        }
-        if(!el){
-            el = document.createElement('b');
-            el.className = 'mention-ref-label';
-            const nameEl = token.querySelector('span');
-            token.insertBefore(el, nameEl || null);
-        }
-        // chip 上只放短标 P1 / V1（窄），完整标签 <Picture 1> 悬停可见
-        const short = shortRefLabel(label) || label;
-        if(el.textContent !== short) el.textContent = short;
-        token.dataset.mentionLabel = label;
-        token.title = `${label} · ${token.dataset.name || ''}（写入提示词即此编号）`;
+        const kindLabel = mentionTokenKindLabel(token.dataset.kind || 'image');
+        // 2026-10-21（用户要求）：chip 文本直接显示「Picture 1 / Video 1」，不再显示文件名；
+        // 旧的 P1/V1 小角标结构一并清理（老画布草稿兼容）
+        token.querySelector('.mention-ref-label')?.remove();
+        const nameEl = token.querySelector('span');
+        let text = kindLabel;
+        const m = /<([A-Za-z]+)\s+(\d+)>/.exec(label || '');
+        if(m) text = `${m[1]} ${m[2]}`;
+        if(nameEl && nameEl.textContent !== text) nameEl.textContent = text;
+        token.title = label ? `${label} · ${token.dataset.name || ''}（写入提示词即此编号）` : `${token.dataset.name || ''}`;
     });
     if(refManifestPop && !refManifestPop.hidden) renderRefManifest();
 }
@@ -34270,6 +35019,7 @@ async function translatePromptNodeText(nodeId){
     promptTranslateAbortControllers.set(nodeId, controller);
     node.translatingPrompt = true;
     render();
+    refreshPromptExpandToolbar(node);
     try {
         const savedTranslateProvider = localStorage.getItem('smart_translate_provider') || '';
         const savedTranslateModel = localStorage.getItem('smart_translate_model') || '';
@@ -34308,6 +35058,7 @@ async function translatePromptNodeText(nodeId){
         if(promptTranslateAbortControllers.get(nodeId) === controller) promptTranslateAbortControllers.delete(nodeId);
         node.translatingPrompt = false;
         render();
+        refreshPromptExpandToolbar(node);
     }
 }
 async function runPromptLLMNode(nodeId, options={}){
@@ -34336,7 +35087,12 @@ async function runPromptLLMNode(nodeId, options={}){
     // 规则内容整段作为系统提示词，配合节点引用的图片/素材即可执行（如九宫格拼图只挂图不写字）。
     // 此时用一句兜底指令驱动模型按规则处理素材；非智能体模式仍要求非空输入。
     const agentRuleActive = useLlmRule && llmRuleModeNow === 'agent';
-    const finalMessage = message || (agentRuleActive ? '请按照系统提示词中的规则处理本次任务与附带的素材。' : '');
+    // 2026-10-22（用户要求）：开了「系统提示词」时，输入为空也允许运行——
+    // 执行等价于调用系统提示词，用一句兜底指令驱动模型按系统词处理附带素材。
+    const systemPromptOnlyRun = !agentRuleActive && promptNodeCanRunBySystemPrompt(node);
+    const finalMessage = message || (agentRuleActive
+        ? '请按照系统提示词中的规则处理本次任务与附带的素材。'
+        : (systemPromptOnlyRun ? '请按照系统提示词中的要求处理本次任务与附带的素材，直接输出结果。' : ''));
     if(!finalMessage){ toast(tr('smart.promptLlmNeedText')); return; }
     const runDownstream = options.runDownstream === true;
     const writeMode = options.writeMode === 'append' ? 'append' : 'overwrite';
@@ -34752,6 +35508,8 @@ const LLM_RULE_CURRENT_KEY = 'smart_llm_optimize_rule_current';
 // 规则类型（决定图标与默认分类）｜分类（菜单分组）
 const LLM_RULE_TYPES = ['视频反推', '图像反推', '提示词扩写', '通用润色', '自定义'];
 const LLM_RULE_CATS = ['反推', '扩写', '润色', '未分类'];
+// 2026-10-22（用户要求）智能体分类：给智能体加业务分类维度，菜单里可筛选/分组
+const LLM_RULE_AGENT_CATS = ['视频类', '图像类', '文案类', '通用'];
 const LLM_RULE_TYPE_ICONS = {'视频反推':'▣', '图像反推':'◨', '提示词扩写':'⇢', '通用润色':'✦', '自定义':'◇'};
 const LLM_RULE_TYPE_CATS = {'视频反推':'反推', '图像反推':'反推', '提示词扩写':'扩写', '通用润色':'润色', '自定义':'未分类'};
 // 内置「智能体」规则：内容就是完整系统提示词（像截图里的 Role 写法），原文是喂给它的材料
@@ -34816,9 +35574,9 @@ const BUILTIN_LLM_RULES = [
     {name:'文案写作', type:'通用润色', cat:'润色', mode:'polish', content:'明确目标人群、平台与字数；给出标题/正文/标签三段结构；语气具体到可感知（不写"高级感"这类空词）；附一个示例句子。'},
     {name:'视频提示词生成', type:'通用润色', cat:'润色', mode:'polish', content:'产出可直接交给视频模型执行的提示词：主体与场景具体、动作按时间顺序、镜头运动可执行、时长明确；不要写心理活动与旁白总结。'},
     // —— 智能体型：规则内容整段作为系统提示词，直接产出结果 ——
-    {name:'视频复刻与重构', type:'视频反推', cat:'反推', mode:'agent', content:LLM_AGENT_VIDEO},
-    {name:'图像反推提示词', type:'图像反推', cat:'反推', mode:'agent', content:LLM_AGENT_IMAGE},
-    {name:'提示词扩写', type:'提示词扩写', cat:'扩写', mode:'agent', content:LLM_AGENT_EXPAND}
+    {name:'视频复刻与重构', type:'视频反推', cat:'反推', acat:'视频类', mode:'agent', content:LLM_AGENT_VIDEO},
+    {name:'图像反推提示词', type:'图像反推', cat:'反推', acat:'图像类', mode:'agent', content:LLM_AGENT_IMAGE},
+    {name:'提示词扩写', type:'提示词扩写', cat:'扩写', acat:'文案类', mode:'agent', content:LLM_AGENT_EXPAND}
 ];
 // 统一字段：mode(agent|polish) / type / cat / showOnNode / showOnAssistant / enabled
 // 兼容旧数据：mode 的 replace→agent、append→polish
@@ -34831,6 +35589,7 @@ function normalizeLlmRule(raw, base){
         name: String(src.name || base?.name || '').trim(),
         content: String(src.content != null ? src.content : (base?.content || '')),
         mode, type, cat,
+        acat: LLM_RULE_AGENT_CATS.includes(src.acat) ? src.acat : (base?.acat || ''),
         showOnNode: src.showOnNode !== undefined ? src.showOnNode !== false : (base ? base.showOnNode !== false : true),
         showOnAssistant: src.showOnAssistant !== undefined ? src.showOnAssistant !== false : (base ? base.showOnAssistant !== false : true),
         enabled: src.enabled !== false,
@@ -34973,43 +35732,153 @@ function syncPromptLlmOptimizeUI(node){
     if(promptLlmOptRule) promptLlmOptRule.title = `当前规则：${rule?.name || '指令清晰化'}（${llmRuleMode(rule) === 'agent' ? '智能体' : '润色'}）`;
 }
 // —— 规则菜单 ——
+// 2026-10-22（用户要求）菜单只服务「智能体 · 系统提示词」：润色型规则不再出现在此菜单
+// （润色规则本身与既有节点对它的引用都保留，只是这里不列出）
 let llmOptMenuEl = null;
+let llmOptMenuCat = '';       // '' = 全部；否则为智能体分类（含「未分类」）
+// 2026-10-22（用户要求）常用置顶：置顶名单单独存一个 key，不写进规则对象，
+// 这样内置规则的覆盖/停用逻辑完全不受影响，取消置顶也不会动规则内容。
+const LLM_RULE_PIN_KEY = 'smart_llm_optimize_rule_pins';
+function getLlmPinnedRuleNames(){
+    try{
+        const arr = JSON.parse(localStorage.getItem(LLM_RULE_PIN_KEY) || '[]');
+        return Array.isArray(arr) ? arr.filter(n => typeof n === 'string' && n) : [];
+    }catch(err){ return []; }
+}
+function saveLlmPinnedRuleNames(names){
+    localStorage.setItem(LLM_RULE_PIN_KEY, JSON.stringify(Array.isArray(names) ? names : []));
+}
+function toggleLlmRulePin(name){
+    const list = getLlmPinnedRuleNames();
+    const idx = list.indexOf(name);
+    if(idx >= 0) list.splice(idx, 1);
+    else if(name) list.push(name);
+    saveLlmPinnedRuleNames(list);
+    return idx < 0;
+}
 function closeLlmOptMenu(){
     if(llmOptMenuEl){ llmOptMenuEl.remove(); llmOptMenuEl = null; }
+}
+function llmOptMenuAgentCat(rule){
+    return LLM_RULE_AGENT_CATS.includes(rule?.acat) ? rule.acat : '未分类';
+}
+function llmOptMenuCatWeight(cat){
+    if(cat === '未分类') return 99;
+    const i = LLM_RULE_AGENT_CATS.indexOf(cat);
+    return i < 0 ? 50 : i;
+}
+// 纯函数：只取智能体 → 按分类出 chips → 按分类分节；「全部」视图顶部单列「常用置顶」
+function llmOptMenuView(rules){
+    const list = (Array.isArray(rules) ? rules : []).filter(r => llmRuleMode(r) === 'agent');
+    const pinned = getLlmPinnedRuleNames().map(n => list.find(r => r.name === n)).filter(Boolean);
+    const pinnedSet = new Set(pinned.map(r => r.name));
+    const countOf = cat => list.filter(r => llmOptMenuAgentCat(r) === cat).length;
+    const unclassified = countOf('未分类');
+    const chips = [
+        {key:'', label:'全部', count:list.length},
+        ...LLM_RULE_AGENT_CATS.map(c => ({key:c, label:c, count:countOf(c)})),
+        ...(unclassified ? [{key:'未分类', label:'未分类', count:unclassified}] : [])
+    ];
+    const filtered = llmOptMenuCat ? list.filter(r => llmOptMenuAgentCat(r) === llmOptMenuCat) : list;
+    const sections = [];
+    filtered.forEach(r => {
+        const key = llmOptMenuAgentCat(r);
+        let sec = sections.find(s => s.key === key);
+        if(!sec){ sec = {key, items:[]}; sections.push(sec); }
+        sec.items.push(r);
+    });
+    sections.sort((a, b) => llmOptMenuCatWeight(a.key) - llmOptMenuCatWeight(b.key));
+    // 「全部」视图：置顶项只在顶部「常用置顶」里出现一次，下方分类里不再重复
+    const pinnedItems = (!llmOptMenuCat && pinned.length) ? pinned : [];
+    if(pinnedItems.length){
+        sections.forEach(sec => { sec.items = sec.items.filter(r => !pinnedSet.has(r.name)); });
+        for(let i = sections.length - 1; i >= 0; i--){ if(!sections[i].items.length) sections.splice(i, 1); }
+    }
+    return {chips, sections, pinnedItems, total:list.length};
 }
 function openLlmOptMenu(){
     closeLlmOptMenu();
     if(!promptLlmOptRule) return;
-    const rules = getLlmRules();
-    const cur = getCurrentLlmRule();
-    const cats = [];
-    rules.forEach(r => { if(!cats.includes(r.cat)) cats.push(r.cat); });
-    cats.sort((a, b) => {
-        const ai = LLM_RULE_CATS.indexOf(a), bi = LLM_RULE_CATS.indexOf(b);
-        return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-    });
+    llmOptMenuCat = '';
     const el = document.createElement('div');
     el.className = 'llm-opt-menu';
-    const groupHtml = cats.map(cat => `<div class="llm-opt-menu-group">${escapeHtml(cat)}</div>`
-        + rules.filter(r => r.cat === cat).map(r => `<button type="button" class="llm-opt-menu-row ${r.name === cur?.name ? 'active' : ''} ${r.enabled === false ? 'is-off' : ''}" data-rule="${escapeAttr(r.name)}">
+    const cur = getCurrentLlmRule();
+    const pinnedNow = new Set(getLlmPinnedRuleNames());
+    const ruleRowHtml = r => `<button type="button" class="llm-opt-menu-row ${r.name === cur?.name ? 'active' : ''} ${r.enabled === false ? 'is-off' : ''}" data-rule="${escapeAttr(r.name)}">
             <span class="llm-opt-menu-ico">${escapeHtml(LLM_RULE_TYPE_ICONS[r.type] || '◇')}</span>
             <span class="llm-opt-menu-name">${escapeHtml(r.name)}</span>
-            ${r.enabled === false ? '<em class="off">已停用</em>' : `<em class="${llmRuleMode(r)}">${llmRuleMode(r) === 'agent' ? '智能体' : '润色'}</em>`}
-        </button>`).join('')).join('');
-    el.innerHTML = `<div class="llm-opt-menu-head"><span>规则智能体 · 系统提示词</span><span data-close>收起</span></div>`
-        + groupHtml
-        + `<div class="llm-opt-menu-foot"><button type="button" class="llm-opt-menu-add" data-edit>编辑当前规则</button><button type="button" class="llm-opt-menu-add new" data-new>+ 新建规则</button></div>`;
+            ${r.name === cur?.name ? '<em class="cur">当前</em>' : ''}
+            ${r.enabled === false ? '<em class="off">已停用</em>' : ''}
+            <span class="llm-opt-menu-pin ${pinnedNow.has(r.name) ? 'on' : ''}" role="button" data-pin="${escapeAttr(r.name)}" title="${pinnedNow.has(r.name) ? '取消置顶' : '置顶到常用'}">${pinnedNow.has(r.name) ? '⚑' : '⚐'}</span>
+        </button>`;
+    const secHtml = (key, items, isPin) => `<div class="llm-opt-menu-sec ${isPin ? 'pin' : ''}">${escapeHtml(key)} <span class="n">${items.length}</span></div>`
+        + `<div class="llm-opt-menu-cols">${items.map(ruleRowHtml).join('')}</div>`;
+    const bodyHtml = () => {
+        const view = llmOptMenuView(getLlmRules());
+        // 置顶状态可能在两次重绘之间变化，重绘前刷新一次图钉状态
+        pinnedNow.clear();
+        getLlmPinnedRuleNames().forEach(n => pinnedNow.add(n));
+        const chipHtml = view.chips.map(c => `<button type="button" class="llm-opt-menu-chip ${llmOptMenuCat === c.key ? 'on' : ''}" data-cat-chip="${escapeAttr(c.key)}">${escapeHtml(c.label)} <em>${c.count}</em></button>`).join('');
+        const parts = [];
+        if(view.pinnedItems.length) parts.push(secHtml('常用置顶', view.pinnedItems, true));
+        view.sections.forEach(sec => parts.push(secHtml(sec.key, sec.items, false)));
+        const listHtml = parts.length ? parts.join('') : '<div class="llm-opt-menu-empty">这个分类下还没有智能体</div>';
+        return `<div class="llm-opt-menu-chips">${chipHtml}</div><div class="llm-opt-menu-list">${listHtml}</div>`;
+    };
+    // 当前生效规则若是润色型（默认的「指令清晰化」就是），本菜单里选不到它 —— 头部明确标出来，不让人误以为丢了
+    const curIsPolish = Boolean(cur) && llmRuleMode(cur) !== 'agent';
+    const curHtml = cur
+        ? `<span class="llm-opt-menu-cur${curIsPolish ? ' polish' : ''}" title="${curIsPolish ? '当前生效的是润色型规则（不在智能体列表里，节点仍按它执行）；选任一智能体即切换' : '当前生效的智能体'}">当前：${escapeHtml(cur.name)}${curIsPolish ? ' · 润色' : ''}</span>`
+        : '<span class="llm-opt-menu-cur">未选择</span>';
+    el.innerHTML = `<div class="llm-opt-menu-head"><span class="llm-opt-menu-title">规则智能体<em>系统提示词</em></span>${curHtml}<span data-close>收起</span></div>`
+        + `<div data-menu-body>${bodyHtml()}</div>`
+        + `<div class="llm-opt-menu-foot"><button type="button" class="llm-opt-menu-add" data-edit>编辑当前规则</button><button type="button" class="llm-opt-menu-add new" data-new>+ 新建智能体</button></div>`;
     document.body.appendChild(el);
     llmOptMenuEl = el;
-    const rect = promptLlmOptRule.getBoundingClientRect();
-    el.style.left = Math.max(12, Math.min(window.innerWidth - 316, rect.left - 12)) + 'px';
-    el.style.top = Math.max(12, rect.top - el.offsetHeight - 8) + 'px';
+    const placeMenu = () => {
+        const rect = promptLlmOptRule.getBoundingClientRect();
+        const width = el.offsetWidth || 680;
+        el.style.left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left - 12)) + 'px';
+        const top = rect.top - el.offsetHeight - 8;
+        el.style.top = Math.max(12, top) + 'px';
+    };
+    placeMenu();
+    const rerenderBody = keepScroll => {
+        const body = el.querySelector('[data-menu-body]');
+        const prevList = el.querySelector('.llm-opt-menu-list');
+        const scrollTop = prevList ? prevList.scrollTop : 0;
+        if(body) body.innerHTML = bodyHtml();
+        if(keepScroll){
+            const nextList = el.querySelector('.llm-opt-menu-list');
+            if(nextList) nextList.scrollTop = scrollTop;
+        }
+        // 重绘后高度可能变化（筛选后条目变少），重新贴回按钮上方
+        placeMenu();
+    };
     el.addEventListener('mousedown', e => e.stopPropagation());
     el.addEventListener('click', e => {
+        // 2026-10-22 修复：chips 点击会重绘 body，把点击目标从 DOM 摘掉；
+        // 冒泡到 document 时 closest('.llm-opt-menu') 会失效导致菜单被误关。
+        e.stopPropagation();
+        const pinBtn = e.target.closest('[data-pin]');
+        if(pinBtn){
+            const name = pinBtn.dataset.pin;
+            const pinned = toggleLlmRulePin(name);
+            toast(pinned ? `已置顶：${name}` : `已取消置顶：${name}`);
+            rerenderBody(true);   // 置顶后保持滚动位置，避免列表跳回顶部
+            return;
+        }
+        const chip = e.target.closest('[data-cat-chip]');
+        if(chip){
+            const next = chip.dataset.catChip || '';
+            llmOptMenuCat = llmOptMenuCat === next ? '' : next;
+            rerenderBody();
+            return;
+        }
         const row = e.target.closest('[data-rule]');
         if(row){
             const name = row.dataset.rule;
-            if(row.classList.contains('is-off')){ toast('该规则已停用：先在编辑里打开「启用」'); return; }
+            if(row.classList.contains('is-off')){ toast('该智能体已停用：先在编辑里打开「启用」'); return; }
             setCurrentLlmRule(name);
             closeLlmOptMenu();
             return;
@@ -35030,16 +35899,21 @@ function openLlmRuleEditor(name){
     let showOnAssistant = existing ? existing.showOnAssistant !== false : true;
     let type = LLM_RULE_TYPES.includes(existing?.type) ? existing.type : '自定义';
     let cat = LLM_RULE_CATS.includes(existing?.cat) ? existing.cat : (LLM_RULE_TYPE_CATS[type] || '未分类');
+    // 2026-10-22（用户要求）智能体分类：业务维度，菜单里按它筛选/分组
+    let acat = LLM_RULE_AGENT_CATS.includes(existing?.acat) ? existing.acat : '';
     const mask = document.createElement('div');
     mask.className = 'llm-rule-mask';
     mask.innerHTML = `<div class="llm-rule-modal">
-        <h3>${existing ? '编辑规则' : '新建规则'}${existing ? ' · ' + escapeHtml(existing.name) : ''}</h3>
+        <h3>${existing ? '编辑智能体' : '新建智能体'}${existing ? ' · ' + escapeHtml(existing.name) : ''}</h3>
         <p class="llm-rule-hint">规则内容会作为系统提示词（这个智能体“是谁”）；输入框里的原文是喂给它的材料。</p>
         <label class="llm-rule-label">规则名称<input class="llm-rule-input" data-name value="${escapeAttr(existing?.name || '')}" placeholder="例如：视频复刻与重构"></label>
         <div class="llm-rule-row2">
             <label class="llm-rule-label">规则类型<select class="llm-rule-input" data-type>${LLM_RULE_TYPES.map(t => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-            <label class="llm-rule-label">分类<select class="llm-rule-input" data-cat>${LLM_RULE_CATS.map(c => `<option ${c === cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+            <label class="llm-rule-label">分组<select class="llm-rule-input" data-cat>${LLM_RULE_CATS.map(c => `<option ${c === cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         </div>
+        <label class="llm-rule-label">智能体分类<select class="llm-rule-input" data-acat>${['', ...LLM_RULE_AGENT_CATS].map(c => `<option value="${escapeAttr(c)}" ${c === acat ? 'selected' : ''}>${c || '不分类'}</option>`).join('')}</select>
+            <span class="llm-rule-scope-hint">仅智能体生效：菜单里按「分组 · 智能体分类」归组，也可用分类快速筛选</span>
+        </label>
         <div class="llm-rule-label">显示范围
             <div class="llm-rule-scope">
                 <button type="button" class="llm-rule-scope-btn ${showOnAssistant ? 'on' : ''}" data-scope="assistant">小助手上显示</button>
@@ -35078,6 +35952,7 @@ function openLlmRuleEditor(name){
         type = nextType;
     };
     q('[data-cat]').onchange = e => { cat = e.currentTarget.value; };
+    q('[data-acat]').onchange = e => { acat = e.currentTarget.value; };
     mask.querySelectorAll('[data-scope]').forEach(btn => {
         btn.onclick = () => {
             if(btn.dataset.scope === 'node') showOnNode = !showOnNode;
@@ -35099,7 +35974,7 @@ function openLlmRuleEditor(name){
         if(isBuiltin){
             // 内置规则不物理删除，存一条 enabled:false 的覆盖 → 列表里灰显「已停用」
             const user = getLlmUserRules().filter(r => r.name !== existing.name);
-            user.push({name:existing.name, content:existing.content || '', mode:existing.mode, type:existing.type || '通用润色', cat:existing.cat || '润色', enabled:false, showOnNode:existing.showOnNode !== false, showOnAssistant:existing.showOnAssistant !== false});
+            user.push({name:existing.name, content:existing.content || '', mode:existing.mode, type:existing.type || '通用润色', cat:existing.cat || '润色', acat:existing.acat || '', enabled:false, showOnNode:existing.showOnNode !== false, showOnAssistant:existing.showOnAssistant !== false});
             saveLlmRules(user);
         } else {
             saveLlmRules(getLlmUserRules().filter(r => r.name !== existing.name));
@@ -35117,9 +35992,10 @@ function openLlmRuleEditor(name){
         if(!content){ toast('请填写规则内容'); return; }
         cat = q('[data-cat]').value;
         type = q('[data-type]').value;
+        acat = q('[data-acat]').value || '';
         // 只维护“用户层”：同名即覆盖内置规则，绝不把内置规则整批写进 localStorage
         const user = getLlmUserRules().filter(r => r.name !== (existing?.name || '') && r.name !== nextName);
-        user.push({name:nextName, content, mode, type, cat, enabled, showOnNode, showOnAssistant, provider:'', model:''});
+        user.push({name:nextName, content, mode, type, cat, acat: mode === 'agent' ? acat : '', enabled, showOnNode, showOnAssistant, provider:'', model:''});
         saveLlmRules(user);
         if(enabled) { localStorage.setItem(LLM_RULE_CURRENT_KEY, nextName); llmCurrentRuleCache = undefined; }
         mask.remove();
@@ -37836,6 +38712,46 @@ shell.addEventListener('wheel', e => {
     scheduleViewportApply();
     scheduleSave();
 }, {passive:false});
+// 2026-10-21 拖文件进画布时给整屏「可放置」提示：原来拖动全程没有任何视觉反馈，
+// 用户体感像是「画布没响应」。只在拖的是文件（types 含 Files）时显示，内部拖拽不受影响。
+let smartDropHintDepth = 0;
+function smartDropHintEl(){
+    let el = document.getElementById('smartDropHint');
+    if(!el){
+        el = document.createElement('div');
+        el.id = 'smartDropHint';
+        el.className = 'smart-drop-hint';
+        el.innerHTML = '<div class="smart-drop-hint-box"><i data-lucide="upload"></i><b>松开鼠标，添加到画布</b><span>支持图片 / 视频 / 音频 / 文件</span></div>';
+        document.body.appendChild(el);
+        refreshIcons();
+    }
+    return el;
+}
+function showSmartDropHint(){ smartDropHintEl().classList.add('show'); }
+function hideSmartDropHint(){
+    smartDropHintDepth = 0;
+    document.getElementById('smartDropHint')?.classList.remove('show');
+}
+function isFileDragPayload(dataTransfer){
+    if(!dataTransfer) return false;
+    if((dataTransfer.files?.length || 0) > 0) return true;
+    return smartDropDataTypes(dataTransfer).includes('Files');
+}
+window.addEventListener('dragenter', e => {
+    if(!isFileDragPayload(e.dataTransfer)) return;
+    smartDropHintDepth += 1;
+    showSmartDropHint();
+}, true);
+window.addEventListener('dragover', e => {
+    if(!isFileDragPayload(e.dataTransfer)) return;
+    showSmartDropHint();
+}, true);
+window.addEventListener('dragleave', e => {
+    if(!isFileDragPayload(e.dataTransfer)) return;
+    smartDropHintDepth = Math.max(0, smartDropHintDepth - 1);
+    if(smartDropHintDepth === 0 || !e.relatedTarget) hideSmartDropHint();
+}, true);
+window.addEventListener('drop', () => hideSmartDropHint(), true);
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
 // 2026-10-09（用户反馈：拖入视频节点空白）：拖入瞬间文件还在上传/海报抽帧/可播放转码
 // 尚未完成，video 的 playable-video 请求与 poster 的 media-preview 请求会 404/415，
@@ -37902,7 +38818,7 @@ shell.ondrop = async e => {
     }
     const payload = await resolveSmartImageDropPayload(e.dataTransfer);
     if(payload.type === 'none') return;
-    await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
+    await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true, optimistic:true});
 };
 window.addEventListener('paste', e => {
     // 系统剪贴板里当前有图片文件 → 一定优先贴图（用户最近一次复制的是什么就贴什么）。
@@ -39521,7 +40437,10 @@ promptLlmOptRule?.addEventListener('click', event => {
 
 document.addEventListener('click', event => {
     if(!event.target.closest('.workflow-group-color-picker')) closeGroupColorPicker();
-    if(!event.target.closest('.llm-opt-menu') && !event.target.closest('#promptLlmOptimizeRule')) closeLlmOptMenu();
+    // 点击目标已被重绘摘除时（isConnected=false）不要当成“点了外面”而关菜单
+    const clickTarget = event.target;
+    const targetInMenu = Boolean(clickTarget?.closest?.('.llm-opt-menu')) || clickTarget?.isConnected === false;
+    if(!targetInMenu && !clickTarget?.closest?.('#promptLlmOptimizeRule')) closeLlmOptMenu();
     if(!event.target.closest('.smart-control') && !event.target.closest('.storyboard-script-modal')) closeAllSmartPopovers();
     if(!event.target.closest('.mention-picker') && !event.target.closest('#promptInput') && !event.target.closest('[data-input-add-reference]')) closeMentionPicker();
     if(!event.target.closest('.prompt-preset-panel') && !event.target.closest('.prompt-preset-edit') && !event.target.closest('.prompt-preset-save')) closePromptPresetPanel();
