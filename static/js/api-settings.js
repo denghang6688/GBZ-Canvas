@@ -95,9 +95,9 @@ const MS_BUILTIN_IMAGE_MODELS = [
 const MS_DEFAULT_BASE_URL = 'https://api-inference.modelscope.cn/v1';
 const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
 const LINGJING_DEFAULT_BASE_URL = 'https://apistudio.vip';
-const LINGJING_REGISTER_URL = 'https://apistudio.vip/register?aff=g1CT';
+const LINGJING_REGISTER_URL = 'https://apistudio.vip/register?aff=IQiM';
 const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
-const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=YGMS7BDKNY5Y';
+const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=WYHULTBN3EEQ';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
 const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
 const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.0fast_vip', 'seedance2.0_vip'];
@@ -183,7 +183,7 @@ const RECOMMENDED_APIS = [
         // 异步协议 + 异步生图模式：提交 /v1/videos、轮询 /v1/videos/{id}，参考图自动走图床短链
         protocol:'apimart',
         image_request_mode:'openai-video-proxy',
-        register_url:'https://new.exellome.online/register?aff=r2dZ',
+        register_url:'https://new.exellome.online/register?aff=Vdce',
         tagKeys:['GPT-Image2','Nano-Banana'],
         icons:['IMG'],
         summaryKey:'api.recommendExellomeSummary',
@@ -202,7 +202,7 @@ const RECOMMENDED_APIS = [
         protocol:'openai',
         // FHL 生图只支持 OpenAI RS 协议（/v1/images/* 不可用），默认预填 RS 模式
         image_request_mode:'openai-responses',
-        register_url:'https://www.fhl.mom/register?aff=86L574B4T2N9',
+        register_url:'https://www.fhl.mom/register?aff=CFLPYK67PXZZ',
         tagKeys:['Codex','Claude','api.tagGptImage2'],
         icons:['CODEX','GPT','IMG'],
         summaryKey:'api.recommendFhlSummary',
@@ -232,26 +232,15 @@ const RECOMMENDED_APIS = [
         // 图片/视频均为官方异步任务协议，后端按域名（compshare）自动接管，无需特殊 protocol
         protocol:'openai',
         register_url:'https://passport.compshare.cn/register?referral_code=9QxAedVJZD3FKVQRwf53F8',
-        tagKeys:['api.tagImageModels','api.tagVideoModels'],
+        tagKeys:['api.tagImageModels','api.tagVideoModels','语音 TTS'],
         icons:['IMG','VID'],
         summaryKey:'api.recommendCompshareSummary',
         keyHint:'使用「视频工作台 → API」创建的 sk-ml- 专属 Key',
-        advantages:['MiniMax H3 官方视频 API：文生/图生视频自动轮询取片', 'Qwen-Image 官方生图，按积分计费免自建', '官方算力平台，注册即送积分'],
+        advantages:['MiniMax H3 官方视频 API：文生/图生视频自动轮询取片', 'Qwen-Image 官方生图，按积分计费免自建', 'IndexTTS 2.5 官方语音合成', '官方算力平台，注册即送积分'],
         image_models:['qwen-image'],
         chat_models:[],
-        video_models:['MiniMax-H3']
-    },
-    {
-        name:'APIMART',
-        category:'stable',
-        base_url:'https://api.apimart.ai',
-        protocol:'apimart',
-        register_url:'https://apimart.ai/zh/register?aff=1uyAbb',
-        register_url_cn:'https://apib.ai/register?aff=1uyAbb',
-        tagKeys:['api.tagImageModels','api.tagVideoModels','api.tagLlmModels'],
-        icons:['IMG','VID','LLM'],
-        summaryKey:'api.recommendApimartSummary',
-        advantages:['模型类型覆盖广', '适合多节点混合工作流', '异步协议适合长任务']
+        video_models:['MiniMax-H3'],
+        audio_models:['IndexTTS-2.5']
     },
     {
         id:'lingjing',
@@ -269,23 +258,6 @@ const RECOMMENDED_APIS = [
         chat_models:['gpt-5.5'],
         video_models:['veo3.1-fast'],
         model_protocols:{'gemini-3.1-flash-image-preview':'gemini', 'gemini-3-pro-image-preview':'gemini'}
-    },
-    {
-        name:'Agnes AI',
-        category:'cheap',
-        base_url:'https://apihub.agnes-ai.com',
-        protocol:'openai',
-        image_request_mode:'openai-json',
-        register_url:'https://platform.agnes-ai.com/settings/apiKeys',
-        tagKeys:['api.tagImageModels','api.tagVideoModels','api.tagLlmModels'],
-        icons:['IMG','VID','LLM'],
-        summaryKey:'api.recommendAgnesSummary',
-        perkKey:'api.recommendAgnesFree',
-        perkClass:'recommend-free-tag',
-        advantages:['免费额度可用', '支持 Agnes 图像与视频接口', 'OpenAI 兼容地址配置简单'],
-        image_models:['agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
-        chat_models:[],
-        video_models:['agnes-video-v2.0']
     }
 ];
 const RECOMMEND_GROUPS = [
@@ -2197,17 +2169,18 @@ function recommendConnectedProvider(api){
     return providers.find(item => String(item.name || '').trim().toLowerCase() === target) || null;
 }
 function recommendModelTotal(item){
-    return (item.image_models?.length || 0) + (item.chat_models?.length || 0) + (item.video_models?.length || 0);
+    return (item.image_models?.length || 0) + (item.chat_models?.length || 0) + (item.video_models?.length || 0) + (item.audio_models?.length || 0);
 }
 function recommendBoardCardHtml(api, index){
+    // 2026-10-25（用户要求）：所有推荐卡统一书写样式——获取 Key ↗ + 粘贴输入框 + 保存，
+    // 不再区分已接入/未接入两套形态（去掉状态按钮行、模型页签和官网按钮）。
     const item = recommendConnectedProvider(api);
-    const connected = Boolean(item && (item.has_key || item.has_wallet_key));
-    const state = recommendModelState[api.name] || (recommendModelState[api.name] = {tab:'image', query:'', showAll:false});
+    const fetchState = recommendFetchState[api.name] || '';
+    const errMsg = fetchState.startsWith('error:') ? fetchState.slice(6) : '';
     const head = `
         <div class="rc-head">
             <div class="rc-name-row">
                 <span class="rc-name">${escapeHtml(api.name)}</span>
-                ${connected ? `<span class="rc-badge">✓ 已接入 · ${recommendModelTotal(item)} 个模型</span>` : ''}
             </div>
             <span class="rc-badge rc-badge-plain">${escapeHtml(api.protocol === 'apimart' ? 'APIMart' : 'OpenAI')}</span>
         </div>
@@ -2216,66 +2189,17 @@ function recommendBoardCardHtml(api, index){
             ${(api.perks || (api.perkKey ? [{key:api.perkKey, className:api.perkClass || ''}] : [])).map(perk => `<span class="rc-tag">${escapeHtml(tr(perk.key))}</span>`).join('')}
             ${(api.tagKeys || []).map(tag => `<span class="rc-tag">${escapeHtml(tag.startsWith('api.') ? tr(tag) : tag)}</span>`).join('')}
             ${api.keyHint ? `<span class="rc-tag">${escapeHtml(api.keyHint)}</span>` : ''}
-        </div>`;
-    if(!connected){
-        const keyBtns = api.register_url_cn
-            ? `<a class="rc-key-btn" href="${escapeAttr(api.register_url)}" target="_blank" rel="noopener noreferrer">获取 Key ↗</a>
-               <a class="rc-key-btn rc-key-btn-ghost" href="${escapeAttr(api.register_url_cn)}" target="_blank" rel="noopener noreferrer">国内获取 ↗</a>`
-            : `<a class="rc-key-btn" href="${escapeAttr(api.register_url)}" target="_blank" rel="noopener noreferrer">获取 Key ↗</a>`;
-        return `
-        <section class="rc-card" data-rc-name="${escapeAttr(api.name)}" onclick="focusRecommendKey(event, ${index})">
-            ${head}
-            <div class="rc-setup">
-                ${keyBtns}
-                <span class="rc-arrow" aria-hidden="true">→</span>
-                <input class="rc-input" type="password" data-recommend-key="${index}" placeholder="粘贴 API Key，回车保存" autocomplete="off" onkeydown="handleRecommendKeyEnter(event, ${index})">
-                <button class="rc-save" type="button" onclick="saveRecommendedApi(${index})">保存</button>
-            </div>
-        </section>`;
-    }
-    const fetchState = recommendFetchState[api.name] || '';
-    const fetching = fetchState === 'loading';
-    const errMsg = fetchState.startsWith('error:') ? fetchState.slice(6) : '';
-    const buckets = [
-        {key:'image', label:'生图', models:item.image_models || []},
-        {key:'chat', label:'对话', models:item.chat_models || []},
-        {key:'video', label:'视频', models:item.video_models || []}
-    ].filter(b => b.models.length);
-    const activeBucket = buckets.find(b => b.key === state.tab) || buckets[0];
-    let modelsHtml = '';
-    if(errMsg){
-        modelsHtml = `<div class="rc-err"><span>拉取失败：${escapeHtml(errMsg)}（Key 已保存，可直接重试）</span><button class="rc-btn" type="button" onclick="fetchRecommendedModels('${escapeAttr(api.name)}','${escapeAttr(item.id)}')">重试</button></div>`;
-    } else if(fetching){
-        modelsHtml = `<div class="rc-empty">正在拉取模型…</div>`;
-    } else if(!buckets.length){
-        modelsHtml = `<div class="rc-empty">还没有模型清单，点上方「重新拉取」从平台获取。</div>`;
-    } else {
-        const list = activeBucket.models;
-        const query = (state.query || '').toLowerCase();
-        const filtered = query ? list.filter(m => String(m).toLowerCase().includes(query)) : list;
-        const cap = state.showAll ? filtered.length : 8;
-        const shown = filtered.slice(0, cap);
-        const hidden = filtered.length - shown.length;
-        modelsHtml = `
-        <div class="rc-tabs">
-            ${buckets.map(b => `<button class="rc-tab ${b.key === activeBucket.key ? 'rc-tab-active' : ''}" type="button" onclick="setRecommendModelTab('${escapeAttr(api.name)}','${b.key}')">${b.label} ${b.models.length}</button>`).join('')}
-            <span class="rc-tabs-space"></span>
-            <input class="rc-search" type="text" placeholder="搜索模型…" value="${escapeAttr(state.query || '')}" oninput="filterRecommendModels('${escapeAttr(api.name)}', this.value)">
         </div>
-        <div class="rc-tiles">
-            ${shown.map(m => `<div class="rc-tile" data-model="${escapeAttr(String(m))}"><span class="rc-dot"></span><span>${escapeHtml(String(m))}</span></div>`).join('')}
-            ${hidden > 0 ? `<div class="rc-tile rc-more" onclick="showAllRecommendModels('${escapeAttr(api.name)}')">+${hidden} 更多</div>` : ''}
-            ${!filtered.length ? `<div class="rc-empty">没有匹配「${escapeHtml(state.query || '')}」的模型</div>` : ''}
-        </div>`;
-    }
+        ${errMsg ? `<div class="rc-err"><span>拉取模型失败：${escapeHtml(errMsg)}</span></div>` : ''}`;
     return `
-    <section class="rc-card rc-card-connected" data-rc-name="${escapeAttr(api.name)}">
+    <section class="rc-card" data-rc-name="${escapeAttr(api.name)}" onclick="focusRecommendKey(event, ${index})">
         ${head}
-        <div class="rc-status-row">
-            <button class="rc-btn" type="button" ${fetching ? 'disabled' : ''} onclick="fetchRecommendedModels('${escapeAttr(api.name)}','${escapeAttr(item.id)}')">⟳ 重新拉取</button>
-            <button class="rc-btn rc-btn-primary" type="button" onclick="selectProvider('${escapeAttr(item.id)}')">去配置 →</button>
+        <div class="rc-setup">
+            <a class="rc-key-btn" href="${escapeAttr(api.register_url)}" target="_blank" rel="noopener noreferrer">获取 Key ↗</a>
+            <span class="rc-arrow" aria-hidden="true">→</span>
+            <input class="rc-input" type="password" data-recommend-key="${index}" placeholder="粘贴 API Key，回车保存" autocomplete="off" onkeydown="handleRecommendKeyEnter(event, ${index})">
+            <button class="rc-save" type="button" onclick="saveRecommendedApi(${index})">保存</button>
         </div>
-        ${modelsHtml ? `<div class="rc-models">${modelsHtml}</div>` : ''}
     </section>`;
 }
 function renderRecommendApi(){
@@ -2290,7 +2214,8 @@ function renderRecommendApi(){
     const connectedCount = RECOMMENDED_APIS.filter(isConnected).length;
     const countEl = document.getElementById('recommendConnectedCount');
     if(countEl) countEl.textContent = String(connectedCount);
-    // 按分组分节渲染（稳定 / 便宜）；已接入的平台排前面；index 始终取原数组下标，保证 saveRecommendedApi(index) 正确
+    // 2026-10-25：恢复上一版分组排列（稳定 / 便宜 分节 + 分组标题），卡片用统一书写样式；
+    // 单卡分组（灵境）不再占满整行，按 2 列半宽排下去（见 layoutRecommendColumns 的 K=2 修正）
     const html = RECOMMEND_GROUPS.map(group => {
         const items = RECOMMENDED_APIS
             .map((api, index) => ({api, index}))
@@ -2321,7 +2246,7 @@ function layoutRecommendColumns(){
             const empty = k * Math.ceil(cards.length / k) - cards.length;
             if(empty <= bestEmpty){ bestEmpty = empty; bestK = k; }
         }
-        const K = Math.min(bestK, cards.length);
+        const K = Math.min(bestK === 1 && maxCols >= 2 ? 2 : bestK, cards.length); // 单卡也按 2 列半宽排（不占满整行）
         if(grid.querySelectorAll(':scope > .rc-col').length === K) return; // 列数没变不重排，保住输入焦点
         grid.innerHTML = '';
         const cols = [];

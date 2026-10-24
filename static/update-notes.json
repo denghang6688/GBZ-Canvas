@@ -1,13 +1,23 @@
 {
-  "version": "V26.10.24.2",
-  "updated_at": "2026-10-25T00:03:24+08:00",
+  "version": "V26.10.24.3",
+  "updated_at": "2026-10-25T03:25:32+08:00",
   "items": [
     {
       "type": "feature",
-      "text": "推荐平台新增「优云智算」：MiniMax H3 官方视频生成 + Qwen-Image 官方生图，一键接入预填全部模型与专属 Key 指引"
+      "text": "推荐API全面升级：5家平台统一卡片样式（优云智算/FHL/VIP-GPT/灵境/EXELLOME），接入优云智算全模型（Qwen-Image 生图 / MiniMax-H3 视频 / IndexTTS-2.5 语音），API设置图标常显描边，修复侧栏样式异常与推荐卡保存覆盖Key问题，模型拉取401时给出明确的Key无效提示"
     }
   ],
   "history": [
+    {
+      "version": "V26.10.24.2",
+      "updated_at": "2026-10-25T00:03:24+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "推荐平台新增「优云智算」：MiniMax H3 官方视频生成 + Qwen-Image 官方生图，一键接入预填全部模型与专属 Key 指引"
+        }
+      ]
+    },
     {
       "version": "V26.10.24.1",
       "updated_at": "2026-10-24T22:31:07+08:00",
@@ -543,16 +553,6 @@
         {
           "type": "feature",
           "text": "局域网发布新版本，其他客户端可通过主机地址检测并更新。"
-        }
-      ]
-    },
-    {
-      "version": "V8-17",
-      "updated_at": "2026-10-15T08:31:09+08:00",
-      "items": [
-        {
-          "type": "feature",
-          "text": "去掉 GitHub 和 ModelScope 下载源，仅保留局域网发布源。"
         }
       ]
     }

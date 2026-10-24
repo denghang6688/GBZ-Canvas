@@ -14523,6 +14523,9 @@ async def test_provider_connection(payload: TestConnectionPayload):
                         message = f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。"
                         return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
                 elif protocol == "openai":
+                    if resp.status_code in (401, 403):
+                        # 401/403 是明确的鉴权失败：不做方舟探测（空体 chat 探测可能被网关误判为"兼容入口可达"），直接给出可操作提示。
+                        return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 鉴权失败（HTTP {resp.status_code}）：API Key 无效、已被删除或未启用。请到平台控制台重新复制 Key 并保存后重试。上游响应：{resp.text[:200]}"}
                     detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
                     if detected:
                         message = f"{probe.get('message') or '检测到方舟/Ark 兼容入口'}；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。"
@@ -14828,6 +14831,14 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                             "raw": payload["raw"],
                         }
                 elif protocol == "openai":
+                    if resp.status_code in (401, 403):
+                        # 401/403 是明确的鉴权失败：Key 无效/被删/未启用。
+                        # 不再做方舟协议探测（空体 chat 探测可能被网关误判为"兼容入口可达"），
+                        # 直接给用户可操作的提示，避免掩盖真实原因。
+                        raise HTTPException(
+                            status_code=resp.status_code,
+                            detail=f"上游 {endpoint_label} 鉴权失败（HTTP {resp.status_code}）：API Key 无效、已被删除或未启用。请到平台控制台重新复制 Key，保存后重试。上游响应：{resp.text[:200]}",
+                        )
                     detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
                     if detected:
                         payload = volcengine_default_model_payload(
@@ -16170,8 +16181,125 @@ async def generate_compshare_video(payload, provider):
                 raise HTTPException(status_code=502, detail=f"优云智算视频任务失败：{reason or json.dumps(node, ensure_ascii=False)[:300]}")
         raise HTTPException(status_code=504, detail=f"优云智算视频任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
 
+
+COMPSHARE_DEFAULT_AUDIO_MODELS = ["IndexTTS-2.5"]
+_COMPSHARE_VOICE_CACHE = {"voice_id": "", "checked_at": 0.0}
+
+async def compshare_default_voice_id(client, api_key, root):
+    """取平台第一个预设音色做默认（IndexTTS 的 voice 字段必填）；结果缓存 10 分钟。"""
+    import math as _math
+    now = time.monotonic()
+    if _COMPSHARE_VOICE_CACHE["voice_id"] and now - _COMPSHARE_VOICE_CACHE["checked_at"] < 600:
+        return _COMPSHARE_VOICE_CACHE["voice_id"]
+    resp = await client.get(f"{root}/audio/v1/voices?kind=preset", headers=compshare_headers(api_key))
+    resp.raise_for_status()
+    data = resp.json() if resp.text else {}
+    items = data.get("items") if isinstance(data, dict) else None
+    voice_id = ""
+    if isinstance(items, list):
+        for it in items:
+            vid = str((it or {}).get("voice_id") or "").strip()
+            if vid:
+                voice_id = vid
+                break
+    if not voice_id:
+        raise HTTPException(status_code=502, detail="优云智算语音没有返回可用预设音色（/audio/v1/voices 为空）。请到优云智算工作台确认音色库后重试。")
+    _COMPSHARE_VOICE_CACHE.update(voice_id=voice_id, checked_at=now)
+    return voice_id
+
+async def generate_compshare_speech(payload, provider):
+    """优云智算 IndexTTS 2.5 语音：POST /audio/v1/speech/jobs（幂等键）→
+    轮询 GET /audio/v1/speech/jobs/{id}，成功下载 WAV（按需 ffmpeg 转目标格式）。"""
+    api_key = provider_env_key_value((provider or {}).get("id") or "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider.get('id')} 的 API Key，请在 API 平台管理中填写。")
+    if not str(api_key).startswith("sk-ml-"):
+        raise HTTPException(status_code=400, detail="优云智算语音必须使用「视频工作台 → API」创建的 sk-ml- 开头专属 Key，控制台其他 Key 会返回 401。")
+    text = str(payload.input or "").strip()[:2000]
+    voice = str(payload.voice or "").strip()
+    try:
+        speed = float(payload.speed)
+    except (TypeError, ValueError):
+        speed = 1.0
+    speed = max(0.5, min(2.0, speed))
+    # 语言探测：纯 ASCII 文本按英文合成，其余默认中文（官方支持 ZH/EN/JA/ES/AR）
+    language = "EN" if text and all(ord(ch) < 128 for ch in text) else "ZH"
+    fmt = str(payload.response_format or "mp3").strip().lower() or "mp3"
+    root = compshare_api_root(provider)
+    headers = dict(compshare_headers(api_key))
+    headers["Idempotency-Key"] = uuid.uuid4().hex
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=600.0, write=120.0, pool=20.0)) as client:
+        if not voice:
+            voice = await compshare_default_voice_id(client, api_key, root)
+        body = {
+            "text": text,
+            "language": language,
+            "voice": {"source": "preset", "voice_id": voice},
+            "speed": speed,
+            "auto_emotion": True,
+        }
+        submit = await client.post(f"{root}/audio/v1/speech/jobs", headers=headers, json=body)
+        if submit.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail=f"优云智算 Key 无效（HTTP {submit.status_code}）：{submit.text[:200]}。请确认使用视频工作台创建的 sk-ml- 开头 Key。")
+        submit.raise_for_status()
+        raw = submit.json() if submit.text else {}
+        task_id = str(raw.get("task_id") or "").strip()
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"优云智算语音任务没有返回 task_id：{json.dumps(raw, ensure_ascii=False)[:300]}")
+        deadline = time.monotonic() + AI_REQUEST_TIMEOUT
+        last_payload = raw
+        while time.monotonic() < deadline:
+            await asyncio.sleep(3.0)
+            result = await client.get(f"{root}/audio/v1/speech/jobs/{task_id}", headers=compshare_headers(api_key))
+            result.raise_for_status()
+            data = result.json() if result.text else {}
+            last_payload = data
+            node = data.get("task") if isinstance(data.get("task"), dict) else data
+            status = str((node or {}).get("status") or "").lower()
+            if status in COMPSHARE_DONE_STATUSES:
+                url = str((node or {}).get("output_url") or "").strip()
+                if not url:
+                    raise HTTPException(status_code=502, detail=f"优云智算语音任务成功但没有返回音频地址：{json.dumps(node, ensure_ascii=False)[:300]}")
+                audio_bytes = await download_upstream_audio_bytes(client, url, compshare_headers(api_key))
+                break
+            if status in COMPSHARE_FAILED_STATUSES:
+                reason = str((node or {}).get("error_message") or "未知原因")
+                raise HTTPException(status_code=502, detail=f"优云智算语音任务失败：{reason}")
+        else:
+            raise HTTPException(status_code=504, detail=f"优云智算语音任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
+    if not audio_bytes:
+        raise HTTPException(status_code=502, detail="优云智算语音接口返回了空音频")
+    # 官方固定输出 WAV；目标格式不同且本机有 ffmpeg 时转码，失败则原样交付 WAV
+    if fmt != "wav":
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg:
+            try:
+                import tempfile as _tempfile
+                with _tempfile.TemporaryDirectory() as tmpdir:
+                    src = os.path.join(tmpdir, "in.wav")
+                    dst = os.path.join(tmpdir, f"out.{fmt}")
+                    with open(src, "wb") as f:
+                        f.write(audio_bytes)
+                    conv = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", src, dst], capture_output=True, timeout=120)
+                    if conv.returncode == 0 and os.path.isfile(dst) and os.path.getsize(dst) > 0:
+                        with open(dst, "rb") as f:
+                            audio_bytes = f.read()
+                    else:
+                        fmt = "wav"
+            except Exception:
+                fmt = "wav"
+        else:
+            fmt = "wav"
+    filename = f"tts_{uuid.uuid4().hex}.{fmt}"
+    out_path = output_path_for(filename)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(audio_bytes)
+    print(f"[audio-speech] provider={provider['id']} model=IndexTTS-2.5 bytes={len(audio_bytes)} file={filename}", flush=True)
+    return {"url": output_url_for(filename), "model": "IndexTTS-2.5", "provider_id": provider["id"], "format": fmt}
+
 def compshare_default_models_payload(message, ok=True, status=200):
-    all_models = [*COMPSHARE_DEFAULT_IMAGE_MODELS, *COMPSHARE_DEFAULT_VIDEO_MODELS]
+    all_models = [*COMPSHARE_DEFAULT_IMAGE_MODELS, *COMPSHARE_DEFAULT_VIDEO_MODELS, *COMPSHARE_DEFAULT_AUDIO_MODELS]
     return {
         "ok": ok,
         "status": status,
@@ -16180,6 +16308,7 @@ def compshare_default_models_payload(message, ok=True, status=200):
         "image_models": list(COMPSHARE_DEFAULT_IMAGE_MODELS),
         "chat_models": [],
         "video_models": list(COMPSHARE_DEFAULT_VIDEO_MODELS),
+        "audio_models": list(COMPSHARE_DEFAULT_AUDIO_MODELS),
         "all": all_models,
         "protocol": "compshare",
         "image_request_mode": "openai",
@@ -16998,6 +17127,9 @@ async def audio_speech(payload: AudioSpeechRequest):
     if not text:
         raise HTTPException(status_code=400, detail="请输入要合成的文本")
     provider = get_api_provider(payload.provider_id)
+    # 2026-10-25：优云智算 IndexTTS 2.5 走官方异步任务协议（/audio/v1/speech/jobs），认域名接管
+    if is_compshare_provider(provider):
+        return await generate_compshare_speech(payload, provider)
     model = str(payload.model or "").strip()
     if not model:
         raise HTTPException(status_code=400, detail="未选择音频生成模型")
