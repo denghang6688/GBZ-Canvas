@@ -1030,6 +1030,11 @@ function ensureSmartActualImageResolution(node, image, itemEl, imgEl){
         if(size) applySmartActualResolution(node, image, itemEl, size);
     });
 }
+// 2026-10-24（用户反馈：竞品画布拖入视频马上显示原比例）：视频元数据驱动节点布局的
+// 管线本来就在（本函数下方 + syncSingleImageNodeNaturalLayout），真正的缺口是时序——
+// 拖入的 blob 视频元数据加载极快，loadedmetadata 在本函数绑定监听之前就已触发，
+// 监听永远不命中（图片分支有 imgEl.complete 补判，视频分支漏了 readyState 判断）。
+// 补上 readyState>=1 直接 apply，拖入瞬间（乐观 blob 预览）就能按原比例出框。
 function loadSmartVideoDimensions(url){
     const src = smartPlayableVideoUrl(url);
     if(!src || /^data:/i.test(src) || /^blob:/i.test(src)) return Promise.resolve(null);
@@ -1053,13 +1058,32 @@ function smartVideoPreviewHtml(itemOrUrl, size=512, attrs=''){
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
     return `<img src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${attrs ? ` ${attrs}` : ''}>`;
 }
+// 2026-10-24（用户反馈：输入图行里视频缩略图空白，看起来像「视频没有引用上」）：
+// 原先走 smartVideoPreviewHtml 的 /api/media-preview 服务端抽帧海报，首次请求现场跑
+// ffmpeg，几秒到几十秒里就是空白框，用户以为视频没被引用。引用素材集合不变（维持
+// visibleReferenceImagesFor 现状），只修显示：直挂 <video preload="metadata"> 让浏览器
+// 自己解首帧（与 @ 面板 2026-10-23 修法一致）；解码失败由
+// bindSmartPreviewImageFallbacks 的 video[data-poster-fallback] 分支回退海报图。
+function smartVideoLiveThumbHtml(itemOrUrl, attrs=''){
+    const src = smartPlayableVideoUrl(itemOrUrl);
+    const poster = smartMediaPreviewUrl(itemOrUrl, 256);
+    return `<span class="smart-video-live-thumb"><video src="${escapeHtml(src)}" data-poster-fallback="${escapeAttr(poster)}" preload="metadata" muted playsinline disablepictureinpicture controlslist="nodownload"${attrs ? ` ${attrs}` : ''}></video></span>`;
+}
 function smartVideoNodeHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const src = smartPlayableVideoUrl(itemOrUrl);
-    const poster = smartMediaPreviewUrl(itemOrUrl, size);
+    // 2026-10-24（用户反馈：视频加载慢，竞品拖入即显示原比例）：fresh 视频不挂
+    // /api/media-preview 服务端抽帧 poster——首次请求现场跑 ffmpeg，几秒到几十秒空白，
+    // 用户看到「blob 秒显 → 上传完切正式 URL 突然空白 → 再慢慢出来」。改为不设 poster，
+    // 让 <video preload="metadata"> 由浏览器直接解首帧（本地服务器秒回）。
+    // 注意：这里直查 SMART_FRESH_VIDEO_URLS，不能调 smartVideoShouldMount（会重复消耗挂载预算）。
+    const freshUrl = original;
+    const freshAt = freshUrl ? SMART_FRESH_VIDEO_URLS.get(freshUrl) : 0;
+    const isFresh = Boolean(freshAt && Date.now() - freshAt <= SMART_FRESH_VIDEO_TTL_MS);
+    const poster = isFresh ? '' : smartMediaPreviewUrl(itemOrUrl, size);
     const loop = Boolean(typeof itemOrUrl === 'object' && itemOrUrl && itemOrUrl.videoLoop);
     // 2026-10-11：不再使用浏览器原生 controls（画布统一走 .smart-video-canvas-controls）。
-    return `<video src="${escapeHtml(src)}" poster="${escapeAttr(poster)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-smart-video-ui="canvas" preload="metadata" muted playsinline${loop ? ' loop' : ''} disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback nofullscreen"${attrs ? ` ${attrs}` : ''}></video>`;
+    return `<video src="${escapeHtml(src)}"${poster ? ` poster="${escapeAttr(poster)}"` : ''} data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-smart-video-ui="canvas" preload="metadata" muted playsinline${loop ? ' loop' : ''} disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback nofullscreen"${attrs ? ` ${attrs}` : ''}></video>`;
 }
 // 2026-10-10 视频懒挂载：一个 <video preload="metadata"> 就是一条浏览器媒体管道，
 // 几百个同屏创建会卡死主线程几十秒（实测 653 个 video → GC 风暴、加载期间点击无响应）。
@@ -1195,7 +1219,6 @@ function smartVideoCanvasControlsHtml(){
         <span class="smart-video-canvas-duration" data-video-duration>0:00</span>
         <button class="smart-video-canvas-mute" type="button" title="静音/取消静音" aria-label="静音/取消静音"><i data-lucide="volume-2"></i></button>
         <button class="smart-video-canvas-download" type="button" title="下载视频" aria-label="下载视频"><i data-lucide="download"></i></button>
-        <button class="smart-video-canvas-trim" type="button" title="截取片段" aria-label="截取片段"><i data-lucide="scissors"></i></button>
         ${smartVideoFrameExportMenuHtml()}
     </div>`;
 }
@@ -1241,7 +1264,73 @@ function closeSmartVideoTrimPanel(){
         state.video?.removeEventListener('timeupdate', state.onTimeUpdate);
         if(state.video) state.video.muted = state.prevMuted;
         state.overlay?.remove();
+        // 释放两路用于取帧的隐藏 video，避免残留解码器
+        (state.grabbers || []).forEach(g => { try { g.destroy(); } catch(_) {} });
     } catch(_) {}
+}
+
+// 2026-10-23（用户要求：截取首尾要能预览画面）：隐藏 video seek 到指定时间，
+// 把该帧绘制到 canvas（保持完整画面 + 深色留边，竖屏视频不裁切）。
+function smartTrimDrawFrame(videoEl, canvasEl){
+    const vw = videoEl?.videoWidth, vh = videoEl?.videoHeight;
+    if(!vw || !vh || !canvasEl) return false;
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return false;
+    const scale = Math.min(canvasEl.width / vw, canvasEl.height / vh);
+    const w = vw * scale, h = vh * scale;
+    ctx.fillStyle = '#15151a';
+    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    try { ctx.drawImage(videoEl, (canvasEl.width - w) / 2, (canvasEl.height - h) / 2, w, h); }
+    catch(_) { return false; }
+    return true;
+}
+
+// 每次只允许一个 seek 在飞，期间的请求只保留最后一次目标时间（天然节流），
+// 同一个视频源浏览器有缓存，不会产生额外下载。
+function smartTrimFrameGrabber(srcUrl, canvasEl, mirrors = []){
+    const v = document.createElement('video');
+    v.src = srcUrl;
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
+    document.body.appendChild(v);
+    let want = null, busy = false, ready = false, dead = false;
+    const paint = () => {
+        if(dead) return;
+        if(smartTrimDrawFrame(v, canvasEl)) mirrors.forEach(cv => smartTrimDrawFrame(v, cv));
+    };
+    const pump = () => {
+        if(dead || busy || !ready || want == null) return;
+        const t = Math.max(0, Number(want) || 0);
+        want = null;
+        busy = true;
+        let settled = false;
+        const finish = () => {
+            if(settled) return;
+            settled = true;
+            v.removeEventListener('seeked', finish);
+            busy = false;
+            paint();
+            pump();
+        };
+        v.addEventListener('seeked', finish);
+        // 个别浏览器 seek 到当前时间不派发 seeked，兜底避免永久卡住
+        setTimeout(finish, 500);
+        try { v.currentTime = t; } catch(_) { finish(); }
+    };
+    const onMeta = () => { ready = true; pump(); };
+    if(v.readyState >= 1) onMeta();
+    else v.addEventListener('loadedmetadata', onMeta, { once: true });
+    v.addEventListener('loadeddata', () => { if(!busy && want == null) paint(); }, { once: true });
+    return {
+        seek(t){ if(dead) return; want = Number(t) || 0; pump(); },
+        destroy(){
+            dead = true;
+            try { v.pause(); v.removeAttribute('src'); v.load(); } catch(_) {}
+            v.remove();
+        },
+    };
 }
 
 function openSmartVideoTrimPanel(video, url, nodeId){
@@ -1253,24 +1342,34 @@ function openSmartVideoTrimPanel(video, url, nodeId){
     overlay.className = 'vtm-overlay';
     overlay.innerHTML = `
         <div class="vtm-bar" role="dialog" aria-label="截取视频片段">
-            <button type="button" class="vtm-x" title="取消">✕</button>
-            <div class="vtm-strip">
-                <div class="vtm-frames"></div>
-                <div class="vtm-frames-loading">正在生成胶片条…</div>
-                <div class="vtm-sel"></div>
-                <div class="vtm-badge">-- s</div>
-                <div class="vtm-hdl vtm-hdl-l" title="起点"></div>
-                <div class="vtm-hdl vtm-hdl-r" title="终点"></div>
+            <div class="vtm-row">
+                <button type="button" class="vtm-x" title="取消">✕</button>
+                <div class="vtm-strip">
+                    <div class="vtm-frames"></div>
+                    <div class="vtm-frames-loading">正在生成胶片条…</div>
+                    <div class="vtm-sel"></div>
+                    <div class="vtm-badge">-- s</div>
+                    <div class="vtm-hdl vtm-hdl-l" title="起点"></div>
+                    <div class="vtm-hdl vtm-hdl-r" title="终点"></div>
+                    <div class="vtm-bub vtm-bub-l"><canvas width="160" height="90"></canvas><span>0:00.0</span></div>
+                    <div class="vtm-bub vtm-bub-r"><canvas width="160" height="90"></canvas><span>0:00.0</span></div>
+                </div>
+                <div class="vtm-ops">
+                    <button type="button" class="vtm-reset" title="重置为全片">⟲</button>
+                    <button type="button" class="vtm-ok" title="确认截取">✓</button>
+                </div>
             </div>
-            <div class="vtm-ops">
-                <button type="button" class="vtm-reset" title="重置为全片">⟲</button>
-                <button type="button" class="vtm-ok" title="确认截取">✓</button>
+            <div class="vtm-previews">
+                <div class="vtm-prev vtm-prev-l">
+                    <canvas class="vtm-prev-cv" width="160" height="90"></canvas>
+                    <div class="vtm-prev-meta"><span>起点</span><span class="vtm-prev-t">0:00.0</span></div>
+                </div>
+                <div class="vtm-previews-mid"><i class="vtm-prev-dash"></i><span class="vtm-prev-cap">拖动白色手柄选择片段 · 双击时长可键入起止秒数</span><i class="vtm-prev-dash"></i></div>
+                <div class="vtm-prev vtm-prev-r">
+                    <canvas class="vtm-prev-cv" width="160" height="90"></canvas>
+                    <div class="vtm-prev-meta"><span>终点</span><span class="vtm-prev-t">0:00.0</span></div>
+                </div>
             </div>
-        </div>
-        <div class="vtm-times">
-            <span class="vtm-tl">0:00.0</span>
-            <span class="vtm-hint">拖动白色手柄选择片段 · 双击时长可键入起止秒数</span>
-            <span class="vtm-tr">0:00.0</span>
         </div>`;
     document.body.appendChild(overlay);
 
@@ -1279,13 +1378,18 @@ function openSmartVideoTrimPanel(video, url, nodeId){
     const badge = overlay.querySelector('.vtm-badge');
     const hL = overlay.querySelector('.vtm-hdl-l');
     const hR = overlay.querySelector('.vtm-hdl-r');
-    const tL = overlay.querySelector('.vtm-tl');
-    const tR = overlay.querySelector('.vtm-tr');
-    const hint = overlay.querySelector('.vtm-hint');
+    const tL = overlay.querySelector('.vtm-prev-l .vtm-prev-t');
+    const tR = overlay.querySelector('.vtm-prev-r .vtm-prev-t');
+    const hint = overlay.querySelector('.vtm-prev-cap');
+    const bubL = overlay.querySelector('.vtm-bub-l');
+    const bubR = overlay.querySelector('.vtm-bub-r');
+    const bubLTime = bubL.querySelector('span');
+    const bubRTime = bubR.querySelector('span');
     const okBtn = overlay.querySelector('.vtm-ok');
     const state = {
         video, url, nodeId, duration, overlay,
         start: 0, end: duration, busy: false,
+        dragSide: null, // 'l' | 'r'：拖动手柄期间主视频实时预览该侧帧
         prevMuted: video.muted,
         onKey: null, onTimeUpdate: null,
     };
@@ -1295,7 +1399,7 @@ function openSmartVideoTrimPanel(video, url, nodeId){
 
     // 选区循环预览：播到出点自动回入点
     state.onTimeUpdate = () => {
-        if(state.busy) return;
+        if(state.busy || state.dragSide) return;
         if(!Number.isFinite(video.currentTime)) return;
         if(video.currentTime >= state.end - 0.05 || video.currentTime < state.start - 0.3){
             try { video.currentTime = state.start; } catch(_) {}
@@ -1303,6 +1407,11 @@ function openSmartVideoTrimPanel(video, url, nodeId){
     };
     video.addEventListener('timeupdate', state.onTimeUpdate);
 
+    // 气泡跟随手柄，贴边时向内侧收，避免超出面板
+    const bubLeft = s => {
+        const w = strip.clientWidth || 400;
+        return Math.max(60, Math.min(w - 60, (s / duration) * w));
+    };
     const render = () => {
         const pct = s => `${(s / duration * 100).toFixed(3)}%`;
         sel.style.left = pct(state.start);
@@ -1312,11 +1421,34 @@ function openSmartVideoTrimPanel(video, url, nodeId){
         badge.textContent = `${(state.end - state.start).toFixed(1)} s`;
         tL.textContent = smartTrimFormatTime(state.start);
         tR.textContent = smartTrimFormatTime(state.end);
+        bubLTime.textContent = smartTrimFormatTime(state.start);
+        bubRTime.textContent = smartTrimFormatTime(state.end);
+        bubL.style.left = `${bubLeft(state.start)}px`;
+        bubR.style.left = `${bubLeft(state.end)}px`;
         const isFull = duration - (state.end - state.start) < 0.1;
         okBtn.disabled = isFull || state.busy;
         okBtn.classList.toggle('is-same', isFull && !state.busy);
         hint.textContent = isFull ? '片段与原片相同，请先拖出手柄' : '拖动白色手柄选择片段 · 双击时长可键入起止秒数';
-        try { video.currentTime = state.start; } catch(_) {}
+        // 拖动手柄时主视频实时预览该侧帧；非拖动时回到入点
+        try {
+            video.currentTime = state.dragSide === 'r' ? state.end : state.start;
+        } catch(_) {}
+        if(!state.busy){
+            grabL?.seek(state.start);
+            grabR?.seek(state.end);
+        }
+    };
+
+    const cvL = overlay.querySelector('.vtm-prev-l .vtm-prev-cv');
+    const cvR = overlay.querySelector('.vtm-prev-r .vtm-prev-cv');
+    const grabL = smartTrimFrameGrabber(url, cvL, [bubL.querySelector('canvas')]);
+    const grabR = smartTrimFrameGrabber(url, cvR, [bubR.querySelector('canvas')]);
+    state.grabbers = [grabL, grabR];
+    const flashBubble = side => {
+        const bub = side === 'l' ? bubL : bubR;
+        bub.classList.add('is-on');
+        clearTimeout(bub._offTimer);
+        bub._offTimer = setTimeout(() => bub.classList.remove('is-on'), 1200);
     };
 
     const clampSelection = (isLeft, value) => {
@@ -1326,14 +1458,19 @@ function openSmartVideoTrimPanel(video, url, nodeId){
         render();
     };
     const bindHandle = (handle, isLeft) => {
+        const bub = isLeft ? bubL : bubR;
         handle.addEventListener('pointerdown', e => {
             if(state.busy) return;
             e.preventDefault(); e.stopPropagation();
             handle.setPointerCapture?.(e.pointerId);
+            bub.classList.add('is-on');
+            state.dragSide = isLeft ? 'l' : 'r';
             const move = ev => clampSelection(isLeft, (ev.clientX - strip.getBoundingClientRect().left) / strip.clientWidth * duration);
             const up = () => {
                 window.removeEventListener('pointermove', move);
                 window.removeEventListener('pointerup', up);
+                state.dragSide = null;
+                bub.classList.remove('is-on');
             };
             window.addEventListener('pointermove', move);
             window.addEventListener('pointerup', up);
@@ -1344,8 +1481,11 @@ function openSmartVideoTrimPanel(video, url, nodeId){
     strip.addEventListener('click', e => {
         if(state.busy || e.target.closest('.vtm-hdl')) return;
         const v = (e.clientX - strip.getBoundingClientRect().left) / strip.clientWidth * duration;
-        if(Math.abs(v - state.start) <= Math.abs(v - state.end)) clampSelection(true, v);
-        else clampSelection(false, v);
+        const nearLeft = Math.abs(v - state.start) <= Math.abs(v - state.end);
+        state.dragSide = nearLeft ? 'l' : 'r';
+        clampSelection(nearLeft, v);
+        state.dragSide = null;
+        flashBubble(nearLeft ? 'l' : 'r');
     });
     badge.addEventListener('dblclick', e => {
         e.stopPropagation();
@@ -1360,6 +1500,8 @@ function openSmartVideoTrimPanel(video, url, nodeId){
         state.start = Math.max(0, Math.min(duration, s));
         state.end = Math.max(0, Math.min(duration, t));
         render();
+        flashBubble('l');
+        flashBubble('r');
     });
 
     // 胶片条：后端均匀抽帧
@@ -1422,15 +1564,16 @@ function openSmartVideoTrimPanel(video, url, nodeId){
     // 定位在视频卡正下方居中，超出视口时兜底
     requestAnimationFrame(() => {
         const bar = overlay.querySelector('.vtm-bar');
-        const times = overlay.querySelector('.vtm-times');
         if(!bar?.isConnected) return;
         const card = video.closest('.media-video-card,.video-thumb,.upload-preview-card,.upload-preview-media,.image-wrap,.image-node') || video;
         const rect = card.getBoundingClientRect();
-        const center = Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2));
-        const top = Math.min(window.innerHeight - 150, rect.bottom + 10);
+        // 多了首尾帧预览行，面板变高：先量实际高度再决定是否上翻，避免出视口
+        const barW = bar.offsetWidth || 470;
+        const barH = bar.offsetHeight || 170;
+        const center = Math.max(barW / 2 + 12, Math.min(window.innerWidth - barW / 2 - 12, rect.left + rect.width / 2));
+        const top = Math.max(8, Math.min(window.innerHeight - barH - 12, rect.bottom + 10));
         bar.style.left = `${center}px`;
-        bar.style.top = `${Math.max(8, top)}px`;
-        if(times){ times.style.left = `${center}px`; times.style.top = `${Math.max(8, top) + 62}px`; }
+        bar.style.top = `${top}px`;
     });
     render();
 }
@@ -1440,7 +1583,9 @@ function smartTrimCreateResultNode(sourceUrl, nodeId, data){
     const srcNode = nodes.find(n => n.id === nodeId) || null;
     const name = decodeURIComponent(String(data.url).split('/').pop().split('?')[0]) || '剪辑.mp4';
     const title = smartTrimNextTitle();
-    const item = { url: data.url, kind: 'video', name, generatedResult: true };
+    // clipResult:true —— 2026-10-24 @ 输入图候选排除截取片段用（generatedResult 是所有
+    // AI 产物的通用标记，不能用来区分剪辑片段，见 inputMentionCandidateImages）
+    const item = { url: data.url, kind: 'video', name, generatedResult: true, clipResult: true };
     let x, y;
     const rect = srcNode ? nodeRect(srcNode) : null;
     if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
@@ -1921,6 +2066,21 @@ function bindSmartPreviewImageFallbacks(root=document){
                 return;
             }
             if(original && img.getAttribute('src') !== original) img.src = original;
+        });
+    });
+    // 2026-10-23 @ 引用面板的视频直挂 <video> 后，浏览器解不出首帧（封装/编码不支持）时
+    // 回退到服务端抽帧海报图，避免出现既无画面又无兜底的死空白。
+    root.querySelectorAll?.('video[data-poster-fallback]:not([data-poster-fb-bound])').forEach(v => {
+        v.dataset.posterFbBound = '1';
+        v.addEventListener('error', () => {
+            if(v.dataset.posterFbDone) return;
+            v.dataset.posterFbDone = '1';
+            const fallback = document.createElement('img');
+            fallback.src = v.dataset.posterFallback || '';
+            fallback.alt = '';
+            const slot = v.parentElement;
+            if(slot && slot.classList.contains('mention-video-slot')) slot.replaceWith(fallback);
+            else v.replaceWith(fallback);
         });
     });
 }
@@ -5982,7 +6142,7 @@ function smartNodeInputThumbRows(count){
 }
 function smartNodeInputThumbsHeight(images){
     const rows = smartNodeInputThumbRows((images || []).length);
-    return rows ? rows * 44 + (rows - 1) * 6 : 0;
+    return rows ? rows * 66 + (rows - 1) * 6 : 0;
 }
 function promptNodeInputImages(node){
     return promptNodeInputMediaForLLM(node).filter(img => img?.url);
@@ -6789,6 +6949,8 @@ function translateSmartNodeWithMembers(node, dx, dy, seen=new Set()){
     seen.add(node.id);
     node.x = Math.round((Number(node.x) || 0) + dx);
     node.y = Math.round((Number(node.y) || 0) + dy);
+    // 2026-10-24 记录位置编辑时间：多页面合并时「谁最近拖过位置就听谁的」，防止拖动后被合并弹回
+    node.posEditedAt = Date.now();
     if(isSmartGroupNode(node)){
         smartGroupMembers(node).forEach(member => translateSmartNodeWithMembers(member, dx, dy, seen));
     } else if(isWorkflowGroupNode(node)){
@@ -13361,8 +13523,16 @@ function smartRunButtonReadiness(node=selectedNode()){
     }
     const runSettings = smartSettingsForNode(node);
     const request = smartRunRequestForButton(node, runSettings);
-    const hasPrompt = Boolean(String(request?.displayPrompt || '').trim());
+    let hasPrompt = Boolean(String(request?.displayPrompt || '').trim());
     const hasRefs = Boolean((request?.refs || []).some(ref => ref?.url));
+    // 兜底（2026-10-24 用户反馈「关闭快捷指令就不能生图」）：请求构建在中间环节失败会被
+    // try/catch 吞成 null，输入框里明明有字按钮却灰掉死锁。此时以输入框实时文本为准。
+    if(!hasPrompt && !String(request?.prompt || '').trim()){
+        try {
+            const liveText = String(promptPlainText() || '').trim();
+            if(liveText && activeComposerNode()?.id === node.id) hasPrompt = true;
+        } catch(_){}
+    }
     const promptRequired = smartRunNeedsPrompt(runSettings);
     // 普通 API/视频/音频生成必须有可执行提示词；只有明确声明无需提示词的
     // ComfyUI 编辑/增强或无提示词工作流，才允许单靠已连接参考素材运行。
@@ -13571,7 +13741,15 @@ function mergeSmartNode(local, remote){
         return {...local, images};
     }
     // 否则以对方（最新保存方）的布局/标题/设置为基底，但图片取并集——双方生成结果都不丢
-    const merged = {...remote, images};
+    let merged = {...remote, images};
+    // 2026-10-24 位置仲裁：谁最近拖动过位置就听谁的——防止本窗口刚拖好的节点被另一个页面的合并弹回
+    const localPosAt = Number(local.posEditedAt || 0);
+    const remotePosAt = Number(remote.posEditedAt || 0);
+    if(localPosAt > remotePosAt){
+        merged.x = local.x;
+        merged.y = local.y;
+        merged.posEditedAt = localPosAt;
+    }
     return smartNodeHasDisplayResult(merged) && (merged.pending || merged.queued || smartPendingTasks(merged).length)
         ? completeSmartNodeWithImages(merged, images)
         : merged;
@@ -13668,6 +13846,10 @@ function handleCanvasUpdatedMessage(data={}){
     if(canvasSyncInFlight) return; // 我正在保存，保存完成/409 合并会处理
     const remoteUpdatedAt = Number(data.updated_at || 0);
     if(remoteUpdatedAt && remoteUpdatedAt <= Number(canvas?.updated_at || 0)) return;
+    // 2026-10-24 诊断：标明是哪个页面在保存（client 尾号），便于确认是否有重复标签页
+    const remoteTail = String(data.client_id || '').slice(-4) || '????';
+    console.info(`[canvas-sync] 另一页面保存了画布 client尾号=${remoteTail} 本页=${smartClientId.slice(-4)}`);
+    toast(`检测到另一页面（…${remoteTail}）保存了画布，正在同步`);
     scheduleCanvasMergeReload(200);
 }
 function startCanvasMetaPoll(){
@@ -14677,7 +14859,7 @@ async function saveCanvasOnce(){
             const serverCanvas = data.detail?.canvas;
             if(serverCanvas){
                 applyMergedServerCanvas(serverCanvas);
-                toast('检测到其他页面更新，已合并最新画布');
+                toast(`检测到其他页面更新，已合并最新画布（本页标识 …${smartClientId.slice(-4)}）`);
                 nodes.forEach(node => {
                     node.images = (node.images || []).map(img => mediaItemForStorage(stripImageGenerationMeta(img)));
                     if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
@@ -20144,8 +20326,12 @@ function smartNodeToolbarHtml(node){
         // 参考视频 / 结果视频 / 上传视频统一两键工具条。
         // 2026-09-28 追加（用户要求）：上传视频的「放大」取消 —— 全屏入口已移到
         // 视频控制条上（.upload-video-fullscreen），避免重复；结果/参考视频保留。
+        // 2026-10-23（用户要求）：截取片段入口从底部控制条上移到顶部胶囊工具条，
+        // 与放大/下载并列，排在三键中间；控制条不再保留剪刀（见 smartVideoCanvasControlsHtml）。
         actions = [
             ...(node.uploadEntry === true ? [] : [{key:'preview', icon:'maximize-2', label:'放大', enabled:true}]),
+            {key:'trim', icon:'scissors', label:'截取片段', enabled:true},
+            {key:'depth', icon:'layers', label:'深度捕捉', enabled:true},
             {key:'download', icon:'download', label:'下载', enabled:true}
         ];
     } else if(isMultiImageGroup){
@@ -20414,6 +20600,38 @@ function runSmartNodeToolbarAction(nodeId, action){
         render();
         scheduleSave();
         toast(changed ? '已整理排列' : '已经是整理排列');
+        return;
+    }
+    if(action === 'trim'){
+        // 2026-10-23（用户要求）：截取片段入口从底部控制条移到顶部工具条后，
+        // 按钮本身不带 video 引用，需要按 nodeId 回到节点里取。
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const video = nodeEl?.querySelector('video[data-url]') || null;
+        const presetUrl = video?.dataset?.url || video?.getAttribute?.('data-url') || item?.url || '';
+        if(!presetUrl){ toast('视频地址缺失，无法截取'); return; }
+        if(!video){ toast('未找到可截取的视频'); return; }
+        const launch = () => openSmartVideoTrimPanel(video, presetUrl, nodeId);
+        if(Number.isFinite(video.duration) && video.duration > 0){ launch(); return; }
+        // 悬停即点时元数据可能还没加载完，短暂等待再开面板，避免误报「时长未就绪」。
+        if(video.preload === 'none'){ video.preload = 'metadata'; video.load?.(); }
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries += 1;
+            if(Number.isFinite(video.duration) && video.duration > 0){
+                clearInterval(timer);
+                launch();
+            } else if(tries >= 15){
+                clearInterval(timer);
+                toast('视频时长未就绪，请稍后再试');
+            }
+        }, 100);
+        return;
+    }
+    if(action === 'depth'){
+        // 2026-10-24 深度动作捕捉：从当前视频提取深度图序列合成深度视频节点（内置模型，按需下载）
+        const depthUrl = item?.url || '';
+        if(!depthUrl){ toast('视频地址缺失，无法深度捕捉'); return; }
+        openSmartDepthCapturePanel(depthUrl, nodeId);
         return;
     }
     if(action === 'download'){
@@ -21605,6 +21823,7 @@ function measureSmartNodeImages(){
             scheduleSave();
         };
         if(!isVideo && imgEl.complete) apply();
+        else if(isVideo && imgEl.readyState >= 1) apply();
         else imgEl.addEventListener('load', apply, {once:true});
         imgEl.addEventListener('loadedmetadata', apply, {once:true});
     });
@@ -23485,28 +23704,8 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 btn.setAttribute('aria-expanded', open ? 'true' : 'false');
             }, true);
         });
-        // 2026-10-22（用户要求：视频截取片段）：剪刀按钮打开底部胶片条截取编辑器。
-        el.querySelectorAll('.smart-video-canvas-trim').forEach(btn => {
-            if(btn.dataset.trimBound === '1') return;
-            btn.dataset.trimBound = '1';
-            ['pointerdown', 'mousedown'].forEach(type => btn.addEventListener(type, e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }, true));
-            btn.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                const video = btn.closest('.media-video-card,.video-thumb,.upload-preview-card,.thumb-item,.image-wrap')?.querySelector('video[data-url]')
-                    || btn.closest('.image-node')?.querySelector('video[data-url]');
-                if(!video){ toast('未找到可截取的视频'); return; }
-                const url = video.dataset.url || video.getAttribute('data-url');
-                if(!url){ toast('视频地址缺失，无法截取'); return; }
-                const nodeId = btn.closest('.image-node')?.dataset?.id || '';
-                openSmartVideoTrimPanel(video, url, nodeId);
-            }, true);
-        });
+        // 2026-10-23（用户要求）：截取片段入口已上移到节点顶部工具条，
+        // 统一由 runSmartNodeToolbarAction 的 trim 分支处理，控制条不再有剪刀按钮。
         // 2026-10-12（用户要求）：生成的视频悬停显示下载按钮——点击下载原视频文件。
         // 同日追加：下载按钮不挤在底部控制条，搬移到右上角与垃圾桶（删除）按钮并排；
         // 没有垃圾桶的容器（如单视频节点）落在视频区右上角（.smart-video-download-solo）。
@@ -28483,8 +28682,6 @@ function renderInputThumbsRow(node){
         return;
     }
     const mediaCounters = {image:0, video:0, audio:0, text:0, file:0};
-    // 缩略图角标与提示词编号同源：显示 P1 / V1 / A1，和 chip、<Picture N> 完全对齐
-    const promptRefLabels = computeMentionRefLabels(node);
     const thumbsHtml = dedup.map((img, i) => {
         const isVid = isVideoMediaItem(img);
         const kind = mediaKindForItem(img);
@@ -28496,7 +28693,7 @@ function renderInputThumbsRow(node){
         const inner = kind === 'audio'
             ? `<div class="input-thumb-audio"><i data-lucide="file-audio"></i></div>`
             : isVid
-            ? smartVideoPreviewHtml(img, 256, 'draggable="false" alt=""')
+            ? smartVideoLiveThumbHtml(img, 'draggable="false"') + `<span class="input-thumb-play" aria-hidden="true"></span><span class="input-thumb-dur" aria-hidden="true">--</span>`
             : smartPreviewImgHtml(img, 256, 'draggable="false"');
         const count = (mediaCounters[kind] = (mediaCounters[kind] || 0) + 1);
         // 只有 image / video / audio 参与 H3 限额；其它 kind 不设限。
@@ -28515,8 +28712,8 @@ function renderInputThumbsRow(node){
             }
         }
         const overLimitFinal = overLimit || frameExcluded;
-        const shortRef = shortRefLabel(promptRefLabels.get(img.url || ''));
-        const label = isLocalPreview ? '局部' : (shortRef || `${refLabelPrefix(kind)}${count}`);
+        // 2026-10-24（用户要求）角标严格按竞品截图：纯数字 1/2/3 全局顺序，不再用 P1/V1/A1
+        const label = isLocalPreview ? '局部' : String(i + 1);
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
         // 2026-10-22（用户要求）所有引用缩略图右上角都有极简 ×：手动引用=直接删除；
@@ -28535,6 +28732,7 @@ function renderInputThumbsRow(node){
     }).join('');
     inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
+    bindInputThumbVideoMeta(inputThumbsRow);
     bindInputThumbsDrag(node, dedup, manualRefKeys);
     bindInputThumbReferenceActions();
     // 首尾帧模式：单图角标点击切换 首帧 ⇄ 尾帧（写回 videoFrameRole 并重绘）
@@ -28555,6 +28753,25 @@ function renderInputThumbsRow(node){
     // 缩略图重建 = 引用集合变了，chip 上的编号要跟着重算（切节点、加删参考图都会走到这里）
     refreshMentionRefLabels();
     refreshIcons();
+}
+// 2026-10-24 引用预览样式（参考竞品）：视频缩略图带播放角标 + 左下角时长。
+// 时长从直挂的 <video> 元素 loadedmetadata 现场读取（素材数据层没有时长字段），
+// 读不到就保持占位符，不影响其它功能。
+function bindInputThumbVideoMeta(root){
+    root?.querySelectorAll?.('.input-thumb[data-kind="video"] video').forEach(v => {
+        const thumb = v.closest('.input-thumb');
+        const durEl = thumb?.querySelector('.input-thumb-dur');
+        if(!thumb || !durEl || thumb.dataset.durBound === '1') return;
+        thumb.dataset.durBound = '1';
+        const fill = () => {
+            const d = Number(v.duration);
+            if(Number.isFinite(d) && d > 0) durEl.textContent = d >= 60
+                ? `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}`
+                : `${d.toFixed(1)}s`;
+        };
+        if(v.readyState >= 1) fill();
+        else v.addEventListener('loadedmetadata', fill, { once:true });
+    });
 }
 function bindInputThumbReferenceActions(){
     inputThumbsRow?.querySelectorAll('[data-input-add-reference]').forEach(btn => {
@@ -29964,7 +30181,17 @@ function mentionOptionMediaHtml(img){
     if(kind === 'audio'){
         return `<div class="media-thumb audio-thumb mention-option-audio"><i data-lucide="file-audio"></i><span>${escapeHtml(img.alias || img.name || 'Audio')}</span></div>`;
     }
-    return kind === 'video' ? smartVideoPreviewHtml(img, 256, 'alt=""') : smartPreviewImgHtml(img, 256, 'alt=""');
+    if(kind === 'video'){
+        // 2026-10-23（用户反馈：@ 引用看不到参考视频）：原先走 smartVideoPreviewHtml 的
+        // /api/media-preview 服务端抽帧海报，首次请求要现场跑 ffmpeg，几秒到几十秒里就是
+        // 一个空白框；抽帧失败则永远空白且 error 兜底不触发。改为直接挂 <video preload="metadata">
+        // 让浏览器自己解首帧（与画布刚上传视频同策略），加载中显示深色底+播放角标；
+        // 浏览器也解不动（不支持的封装/编码）时由 bindSmartPreviewImageFallbacks 回退海报图。
+        const src = smartPlayableVideoUrl(img);
+        const poster = smartMediaPreviewUrl(img, 256);
+        return `<span class="mention-video-slot"><video src="${escapeHtml(src)}" data-poster-fallback="${escapeAttr(poster)}" preload="metadata" muted playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><span class="mention-video-badge" aria-hidden="true"><i data-lucide="play"></i></span></span>`;
+    }
+    return smartPreviewImgHtml(img, 256, 'alt=""');
 }
 function promptHtmlWithMentionTokens(text, refs=[]){
     const value = String(text || '');
@@ -30754,7 +30981,11 @@ function lineImagesFor(node){
     const ids = upstreamLineNodeIds(node);
     return ids.flatMap(id => {
         const source = nodes.find(n => n.id === id);
-        return imagesForNode(source);
+        // 2026-10-24：剪辑节点（标题「剪辑 / 剪辑 N」）的产物是截取中间片段，
+        // 给媒体条目补打 clipResult 标记，@ 输入图候选据此排除（存量节点靠这里兜底）。
+        const isClipNode = /^剪辑(?: \d+)?$/.test(String(source?.title || '').trim());
+        const imgs = imagesForNode(source);
+        return isClipNode ? imgs.map(img => ({...img, clipResult:true})) : imgs;
     }).filter(img => img?.url);
 }
 function collectMentionedImagesFromPrompt(){
@@ -30797,10 +31028,17 @@ function visibleReferenceImagesFor(node){
 }
 function inputMentionCandidateImages(node){
     if(!smartRunAcceptsImageReferences(settings)) return [];
-    const current = node ? [...lineImagesFor(node), ...manualReferenceImagesFor(node)] : [];
+    // 2026-10-24（用户要求）@ 素材只显示「引用到的素材」：候选从「上游全链路全部媒体」
+    // 收窄为「输入图行的引用素材」（visibleReferenceImagesFor − blocked 清除项），
+    // 与输入图行缩略图 1:1 对应；需要画布其它素材时走「资产库」tab 手动选择。
+    const blocked = blockedInputRefKeys(node);
+    const current = node
+        ? visibleReferenceImagesFor(node).filter(img => !blocked.has(inputRefKey(img)))
+        : [];
     const seen = new Set();
     return current.filter(img => {
         if(!img?.url || seen.has(img.url)) return false;
+        if(img.clipResult) return false;
         seen.add(img.url);
         return true;
     }).map((img, index) => ({
@@ -30892,12 +31130,38 @@ function renderMentionPicker(source){
     const currentAssetCat = assetCategoryForMention();
     const assetItems = assetMentionCandidateImages(currentAssetCat?.id || '');
     const candidates = (mentionSource === 'asset' ? assetItems : inputItems).slice(0, 36);
-    const body = candidates.length ? `<div class="mention-option-grid">${candidates.map((img, i) => `
+    let body;
+    if(!candidates.length){
+        body = `<div class="mention-empty">${escapeHtml(tr('smart.mentionEmpty'))}</div>`;
+    } else if(mentionSource === 'input'){
+        // 2026-10-24（用户要求）：列表行只显示「图1 / 视频1 / 音频1」编号 + 缩略图，
+        // 不再显示文件名；编号与写入提示词的 <Picture 1>/<Video 1> 对应，简洁优先。
+        const refLabels = computeMentionRefLabels(node);
+        const zhWord = { Picture:'图', Video:'视频', Audio:'音频' };
+        const kindZh = { image:'图', video:'视频', audio:'音频' };
+        const fallbackCounters = { image:0, video:0, audio:0 };
+        body = `<div class="mention-option-list">${candidates.map((img, i) => {
+            let label = '';
+            const mm = /<([A-Za-z]+)\s+(\d+)>/.exec(refLabels.get(img.url || '') || '');
+            if(mm) label = `${zhWord[mm[1]] || mm[1]}${mm[2]}`;
+            if(!label){
+                const k = img.kind === 'video' ? 'video' : img.kind === 'audio' ? 'audio' : 'image';
+                fallbackCounters[k] += 1;
+                label = `${kindZh[k]}${fallbackCounters[k]}`;
+            }
+            return `<button class="mention-option mention-option-row" type="button" data-mention-index="${i}" title="${escapeAttr(img.name || label)}">
+                    ${mentionOptionMediaHtml(img)}
+                    <span class="mention-row-main"><b>${escapeHtml(label)}</b></span>
+                </button>`;
+        }).join('')}</div>`;
+    } else {
+        body = `<div class="mention-option-grid">${candidates.map((img, i) => `
             <button class="mention-option" type="button" data-mention-index="${i}">
                 ${mentionOptionMediaHtml(img)}
                 <span>${escapeHtml(img.alias)}</span>
             </button>
-        `).join('')}</div>` : `<div class="mention-empty">${escapeHtml(tr('smart.mentionEmpty'))}</div>`;
+        `).join('')}</div>`;
+    }
     const librarySelect = (mentionSource === 'asset' && assetLibs.length)
         ? `<label class="mention-library-row"><span>${escapeHtml(tr('smart.assetLibrary'))}</span><select class="mention-library-select" data-mention-library>${assetLibs.map(lib => `<option value="${escapeHtml(lib.id)}" ${lib.id === activeAssetLibraryId ? 'selected' : ''}>${escapeHtml(lib.name || '资产库')}</option>`).join('')}</select></label>`
         : '';
@@ -31789,7 +32053,14 @@ function resolvePromptBaseRefs(node, options={}){
 function computePromptRefEntries(node){
     const entries = [];
     if(!node) return entries;
-    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = resolvePromptBaseRefs(node, {consume:false, ctx:smartLoopContext});
+    let baseRefs;
+    try {
+        baseRefs = resolvePromptBaseRefs(node, {consume:false, ctx:smartLoopContext});
+    } catch(err) {
+        console.error('[smart-refs] 引用解析失败，清单降级为空:', err);
+        baseRefs = {acceptsImageRefs:false, blockedRefs:new Set(), hasUpstreamImages:false, defaultRefs:[]};
+    }
+    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = baseRefs;
     const counters = {image:0, video:0, audio:0};
     const takeLabel = kind => {
         const key = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
@@ -31893,11 +32164,28 @@ function buildPromptRequest(node, overrideDefaultImages=null, consumeDefault=fal
     const ignoreOwnPrompt = Boolean(node?.outputClearedForRerun && isGeneratedOutputRerunNode(node) && !(node.images || []).some(img => img?.url));
     const ignoreMentionImages = Boolean(options?.ignoreMentionImages);
     // 基础参考与 chip 角标共用 resolvePromptBaseRefs，保证画布上显示的编号就是提示词里的编号
-    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = resolvePromptBaseRefs(node, {consume:consumeDefault, ctx, overrideDefaultImages});
+    // （2026-10-24 加固：引用解析失败只降级为「无引用」，不再让整条提示词请求报废）
+    let baseRefs;
+    try {
+        baseRefs = resolvePromptBaseRefs(node, {consume:consumeDefault, ctx, overrideDefaultImages});
+    } catch(err) {
+        console.error('[smart-run] 引用解析失败，降级为无引用:', err);
+        baseRefs = {acceptsImageRefs:false, blockedRefs:new Set(), hasUpstreamImages:false, defaultRefs:[]};
+    }
+    const {acceptsImageRefs, blockedRefs, hasUpstreamImages, defaultRefs} = baseRefs;
     // 「输出被清空待重跑」时忽略自己输入框里的文本（沿用上次上游提示词），
     // 但模板胶囊是用户显式放置的指令，不能连坐忽略——否则胶囊-only 的节点会因 displayPrompt 为空而永远无法运行。
+    // 2026-10-24（用户反馈「清除结果后运行按钮就灰了」）：上游是纯图片节点、没有任何文字时，
+    // 沿用上游会得到空提示词 → 按钮死灰。此时必须回退用节点自己输入框的文字。
     const collectedParts = collectPromptParts();
-    const parts = ignoreOwnPrompt ? collectedParts.filter(part => part.type === 'template') : collectedParts;
+    let parts = collectedParts;
+    if(ignoreOwnPrompt){
+        const upstreamOnlyParts = collectedParts.filter(part => part.type === 'template');
+        let upstreamText = '';
+        try { upstreamText = String(inputPromptTextFor(node, ctx) || '').trim(); } catch(_) { upstreamText = ''; }
+        const hasUpstreamText = Boolean(upstreamText) || upstreamOnlyParts.some(part => String(part.text || '').trim());
+        if(hasUpstreamText) parts = upstreamOnlyParts;
+    }
     const originalPrompt = originalPromptTextFromParts(parts);
     // 模板胶囊：正文只在发请求时拼到最前面（输入框里只有胶囊，不展开正文）
     const templateParts = parts.filter(part => part.type === 'template' && String(part.text || '').trim());
@@ -34605,7 +34893,17 @@ async function runGeneration(){
             }
         }
     }
-    const request = buildPromptRequestForRun(node, null, smartLoopContext);
+    let request = null;
+    try {
+        request = buildPromptRequestForRun(node, null, smartLoopContext);
+    } catch(err) {
+        // 构建失败不再无声卡死：降级用输入框实时文本（引用可能丢失，但至少能跑）
+        console.error('[smart-run] 构建请求失败，降级为输入框文本:', err);
+    }
+    if(!request){
+        const liveText = String(promptPlainText() || '').trim();
+        request = {prompt:liveText, displayPrompt:liveText, refs:[]};
+    }
     const prompt = request.prompt.trim();
     const refs = request.refs;
     const rerunOutputNode = isGeneratedOutputRerunNode(node);
@@ -38347,6 +38645,9 @@ function applyDragMoveFrame(){
         if(!n) return;
         n.x = item.ox + moveDx;
         n.y = item.oy + moveDy;
+        // 2026-10-24 拖动主路径也要盖位置时间戳（此前只盖了 translateSmartNodeWithMembers，
+        // 导致画布拖动后仍会被另一页面的合并弹回）
+        n.posEditedAt = Date.now();
     });
     // 2026-09-29 拖动对齐：与其他节点边/中心吸附，显示蓝色虚线参考线
     applyDragSnapAlign();
@@ -41091,3 +41392,330 @@ function renderBillingModelTable(logs){
 // 每30秒刷新导航栏余额
 setInterval(loadBillingData, 30000);
 loadBillingData();
+
+// ===================== 深度动作捕捉（2026-10-24 路线C） =====================
+// 从视频提取深度图序列合成「深度视频」节点。后端内置 Depth Anything V2 Small（ONNX），
+// 首次使用自动装依赖（numpy/onnxruntime）+ 按需下载模型（hf-mirror 优先，约 27.5MB）；
+// onnxruntime 检测到 CUDA 自动 GPU 加速，否则 CPU。姿态骨架（DWPose）二期。
+let smartDepthPanelState = null;
+
+function closeSmartDepthPanel(){
+    const st = smartDepthPanelState;
+    smartDepthPanelState = null;
+    if(st){
+        clearInterval(st.pollTimer);
+        window.removeEventListener('keydown', st.onKey, true);
+    }
+    document.getElementById('dcapOverlay')?.remove();
+}
+
+const SMART_DEPTH_MODE_NAMES = { depth: '深度视频', pose: '姿态骨架', both: '深度姿态视频' };
+
+function smartDepthNextTitle(mode){
+    const base = SMART_DEPTH_MODE_NAMES[mode] || SMART_DEPTH_MODE_NAMES.depth;
+    let n = 1;
+    const used = new Set(nodes.map(node => String(node?.title || '').trim()));
+    while(used.has(`${base}${n > 1 ? ` ${n}` : ''}`)) n += 1;
+    return `${base}${n > 1 ? ` ${n}` : ''}`;
+}
+
+function smartDepthCreateResultNode(outputUrl, nodeId, mode){
+    if(!outputUrl){ toast('深度视频地址缺失'); return; }
+    const srcNode = nodes.find(n => n.id === nodeId) || null;
+    const name = decodeURIComponent(String(outputUrl).split('/').pop().split('?')[0]) || 'depth.mp4';
+    const title = smartDepthNextTitle(mode);
+    // depthResult:true —— 深度/姿态视频是控制信号，与普通生成结果/剪辑片段区分（后续 @ 候选过滤用）
+    const item = { url: outputUrl, kind: 'video', name, generatedResult: true, depthResult: true, depthMode: mode || 'depth' };
+    let x, y;
+    const rect = srcNode ? nodeRect(srcNode) : null;
+    if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
+    else { const c = viewportCenter(); x = c.x; y = c.y; }
+    pushUndo();
+    const node = createNode(x, y, [item], { skipUndo: true });
+    if(node){
+        node.title = title;
+        if(srcNode) connectInputNode(srcNode.id, node.id);
+        scheduleSave();
+        render();
+        toast(`已生成「${title}」节点，可连线给生成节点做控制参考`);
+    } else {
+        scheduleSave();
+        toast('深度视频已生成，但节点创建失败');
+    }
+}
+
+function openSmartDepthCapturePanel(url, nodeId){
+    closeSmartDepthPanel();
+    const overlay = document.createElement('div');
+    overlay.id = 'dcapOverlay';
+    overlay.className = 'vtm-overlay dcap-overlay';
+    overlay.innerHTML = `
+        <div class="vtm-bar dcap-bar" role="dialog" aria-label="深度动作捕捉">
+            <div class="dcap-head">
+                <div>
+                    <div class="dcap-title">深度动作捕捉</div>
+                    <div class="dcap-sub">从参考视频提取空间深度信息，作为视频生成的控制参考</div>
+                </div>
+                <button type="button" class="vtm-x dcap-x" title="关闭">✕</button>
+            </div>
+            <div class="dcap-previews">
+                <div class="dcap-pv"><span class="dcap-lab">原视频</span>
+                    <video src="${escapeAttr(smartPlayableVideoUrl(url))}" muted loop autoplay playsinline preload="metadata"></video>
+                </div>
+                <div class="dcap-pv"><span class="dcap-lab" id="dcapPvLab">深度图 · 示意</span>
+                    <div class="dcap-depth-mock" id="dcapDepthMock"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div>
+                    <div class="dcap-pose-mock" id="dcapPoseMock" hidden>
+                        <svg viewBox="0 0 120 160" fill="none" stroke-linecap="round">
+                            <circle cx="60" cy="24" r="11" fill="#e8e84a" stroke="none"/>
+                            <line x1="60" y1="38" x2="60" y2="86" stroke="#34e07a" stroke-width="6"/>
+                            <line x1="60" y1="50" x2="33" y2="72" stroke="#ff4fa0" stroke-width="5"/>
+                            <line x1="33" y1="72" x2="40" y2="98" stroke="#ff4fa0" stroke-width="4" opacity=".75"/>
+                            <line x1="60" y1="50" x2="87" y2="72" stroke="#4ac9ff" stroke-width="5"/>
+                            <line x1="87" y1="72" x2="80" y2="98" stroke="#4ac9ff" stroke-width="4" opacity=".75"/>
+                            <line x1="60" y1="86" x2="42" y2="128" stroke="#ff8a3c" stroke-width="5"/>
+                            <line x1="42" y1="128" x2="46" y2="150" stroke="#ff8a3c" stroke-width="4" opacity=".75"/>
+                            <line x1="60" y1="86" x2="78" y2="128" stroke="#ffd23c" stroke-width="5"/>
+                            <line x1="78" y1="128" x2="74" y2="150" stroke="#ffd23c" stroke-width="4" opacity=".75"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div class="dcap-prepare" id="dcapPrepare">
+                <span id="dcapPrepareText">检查模型状态…</span>
+                <div class="dcap-prog"><i id="dcapPrepareBar"></i></div>
+            </div>
+            <div class="dcap-opts">
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">提取模式</span>
+                    <div class="dcap-seg" id="dcapSegMode">
+                        <button type="button" class="active" data-v="depth">深度图</button>
+                        <button type="button" data-v="pose">姿态骨架</button>
+                        <button type="button" data-v="both">深度 + 姿态</button>
+                    </div>
+                </div>
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">采样帧率</span>
+                    <div class="dcap-seg" id="dcapSegFps">
+                        <button type="button" class="active" data-v="auto">跟随原片</button>
+                        <button type="button" data-v="12">12 fps</button>
+                        <button type="button" data-v="8">8 fps</button>
+                    </div>
+                </div>
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">推理精度</span>
+                    <div class="dcap-seg" id="dcapSegRes">
+                        <button type="button" class="active" data-v="auto">标准 518</button>
+                        <button type="button" data-v="768">精细 768</button>
+                        <button type="button" data-v="512">快速 512</button>
+                    </div>
+                </div>
+            </div>
+            <div class="dcap-foot">
+                <span class="dcap-eta" id="dcapEta"></span>
+                <div class="dcap-prog" id="dcapTaskProg"><i id="dcapTaskBar"></i></div>
+                <button type="button" class="dcap-run" id="dcapRun" disabled>开始提取</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    const state = {
+        url, nodeId, overlay,
+        ready: false, starting: false, taskId: '',
+        prepareStarted: false, pollTimer: null, onKey: null,
+    };
+    smartDepthPanelState = state;
+
+    const runBtn = overlay.querySelector('#dcapRun');
+    const prepBox = overlay.querySelector('#dcapPrepare');
+    const prepText = overlay.querySelector('#dcapPrepareText');
+    const prepBar = overlay.querySelector('#dcapPrepareBar');
+    const taskProg = overlay.querySelector('#dcapTaskProg');
+    const taskBar = overlay.querySelector('#dcapTaskBar');
+    const eta = overlay.querySelector('#dcapEta');
+
+    const bindSeg = id => {
+        overlay.querySelector(id)?.addEventListener('click', e => {
+            const btn = e.target.closest('button[data-v]');
+            if(!btn || btn.disabled) return;
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        });
+    };
+    bindSeg('#dcapSegMode');
+    bindSeg('#dcapSegFps');
+    bindSeg('#dcapSegRes');
+    const segVal = id => overlay.querySelector(`${id} button.active`)?.dataset.v || 'auto';
+    // 模式切换联动预览示意标签 + 示意图
+    const MODE_LABS = { depth: '深度图 · 示意', pose: '姿态骨架 · 示意', both: '深度 + 姿态 · 示意' };
+    const applyModePreview = mode => {
+        const lab = overlay.querySelector('#dcapPvLab');
+        if(lab) lab.textContent = MODE_LABS[mode] || MODE_LABS.depth;
+        const dMock = overlay.querySelector('#dcapDepthMock');
+        const pMock = overlay.querySelector('#dcapPoseMock');
+        if(dMock) dMock.hidden = mode === 'pose';
+        if(pMock) pMock.hidden = mode !== 'pose';
+    };
+    overlay.querySelector('#dcapSegMode')?.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-v]');
+        if(!btn) return;
+        applyModePreview(btn.dataset.v);
+    });
+
+    const refreshEta = st => {
+        if(st.gpu) eta.textContent = 'GPU 加速已启用';
+    };
+
+    const applyStatus = data => {
+        state.ready = Boolean(data.deps_ready && data.model_ready);
+        refreshEta(data);
+        const prep = data.prepare || {};
+        if(!state.ready){
+            prepBox.classList.add('on');
+            prepBar.style.width = `${Math.max(3, Math.min(100, Number(prep.progress) || 3))}%`;
+            if(prep.error){
+                prepText.textContent = `准备失败：${prep.error}`;
+                runBtn.textContent = '重试准备';
+                runBtn.disabled = false;
+                runBtn.dataset.act = 'prepare';
+            } else if(prep.running || (state.prepareStarted && !prep.stage?.startsWith?.('done'))){
+                prepText.textContent = prep.message || '准备中…';
+                runBtn.disabled = true;
+                runBtn.dataset.act = '';
+            } else {
+                prepText.textContent = `首次使用需准备：安装推理依赖 + 下载深度模型（约 ${data.model_size_mb}MB，一次性）`;
+                runBtn.textContent = '准备模型';
+                runBtn.disabled = false;
+                runBtn.dataset.act = 'prepare';
+            }
+        } else {
+            prepBox.classList.remove('on');
+            runBtn.dataset.act = 'run';
+            if(!state.starting){
+                runBtn.disabled = false;
+                runBtn.textContent = '开始提取';
+            }
+        }
+    };
+
+    const pollPrepare = () => {
+        clearInterval(state.pollTimer);
+        state.pollTimer = setInterval(async () => {
+            if(!smartDepthPanelState){ clearInterval(state.pollTimer); return; }
+            try {
+                const res = await fetch('/api/depth-capture/status');
+                if(res.ok) applyStatus(await res.json());
+            } catch(e) {}
+            if(state.ready) clearInterval(state.pollTimer);
+        }, 1000);
+    };
+
+    const startPrepare = async () => {
+        try {
+            runBtn.disabled = true;
+            await fetch('/api/depth-capture/prepare', { method:'POST' });
+            state.prepareStarted = true;
+            pollPrepare();
+        } catch(e) {
+            prepText.textContent = '准备请求失败，请重试';
+            runBtn.disabled = false;
+        }
+    };
+
+    const pollTask = taskId => {
+        clearInterval(state.pollTimer);
+        state.pollTimer = setInterval(async () => {
+            if(!smartDepthPanelState){ clearInterval(state.pollTimer); return; }
+            try {
+                const res = await fetch(`/api/depth-capture/task/${encodeURIComponent(taskId)}`);
+                if(!res.ok) return;
+                const data = await res.json();
+                taskProg.classList.add('on');
+                taskBar.style.width = `${Math.max(2, Math.min(100, Number(data.progress) || 2))}%`;
+                eta.textContent = data.message || '';
+                if(data.status === 'done'){
+                    clearInterval(state.pollTimer);
+                    taskBar.style.width = '100%';
+                    setTimeout(() => {
+                        closeSmartDepthPanel();
+                        smartDepthCreateResultNode(data.output_url, nodeId, state.startMode);
+                    }, 500);
+                } else if(data.status === 'error'){
+                    clearInterval(state.pollTimer);
+                    state.starting = false;
+                    eta.textContent = `提取失败：${data.error || '未知错误'}`;
+                    runBtn.disabled = false;
+                    runBtn.textContent = '重新提取';
+                }
+            } catch(e) {}
+        }, 900);
+    };
+
+    runBtn.addEventListener('click', async () => {
+        if(runBtn.dataset.act === 'prepare'){ startPrepare(); return; }
+        if(runBtn.dataset.act !== 'run' || state.starting || !state.ready) return;
+        state.starting = true;
+        state.startMode = segVal('#dcapSegMode');
+        runBtn.disabled = true;
+        runBtn.textContent = '提取中…';
+        try {
+            const res = await fetch('/api/depth-capture/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, mode: state.startMode, fps: segVal('#dcapSegFps'), resolution: segVal('#dcapSegRes') }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok){
+                // 姿态模型未就绪等 409：自动触发准备下载（prepare 会按需补姿态模型）
+                if(res.status === 409){ startPrepare(); }
+                throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+            }
+            pollTask(data.task_id);
+        } catch(err) {
+            state.starting = false;
+            runBtn.disabled = false;
+            runBtn.textContent = '开始提取';
+            eta.textContent = `启动失败：${err.message || '未知错误'}`;
+        }
+    });
+
+    overlay.querySelector('.dcap-x').addEventListener('click', () => closeSmartDepthPanel());
+    overlay.addEventListener('mousedown', e => { if(e.target === overlay) closeSmartDepthPanel(); });
+    state.onKey = e => { if(e.key === 'Escape'){ e.stopPropagation(); closeSmartDepthPanel(); } };
+    window.addEventListener('keydown', state.onKey, true);
+
+    // 面板定位在节点卡下方居中
+    requestAnimationFrame(() => {
+        const bar = overlay.querySelector('.dcap-bar');
+        if(!bar?.isConnected) return;
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const rect = nodeEl?.getBoundingClientRect();
+        const barW = bar.offsetWidth || 560;
+        const barH = bar.offsetHeight || 430;
+        const center = rect
+            ? Math.max(barW / 2 + 12, Math.min(window.innerWidth - barW / 2 - 12, rect.left + rect.width / 2))
+            : window.innerWidth / 2;
+        const top = rect
+            ? Math.max(8, Math.min(window.innerHeight - barH - 12, rect.bottom + 10))
+            : Math.max(8, (window.innerHeight - barH) / 2);
+        bar.style.left = `${center}px`;
+        bar.style.top = `${top}px`;
+        bar.style.transform = 'translateX(-50%)';
+    });
+
+    // 打开面板即检查状态；模型未就绪且没有进行中的准备时自动开始（用户要求：按需下载，无需手动找入口）
+    (async () => {
+        try {
+            const res = await fetch('/api/depth-capture/status');
+            if(!res.ok) throw new Error('status failed');
+            const data = await res.json();
+            applyStatus(data);
+            if(!state.ready && !data.prepare?.running){
+                startPrepare();
+            } else if(!state.ready){
+                pollPrepare();
+            }
+        } catch(e) {
+            prepText.textContent = '无法连接后端，请确认服务已启动';
+            runBtn.disabled = true;
+        }
+    })();
+}

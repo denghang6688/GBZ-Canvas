@@ -1938,6 +1938,9 @@ async function importWorkflowAssetToNewCanvas(assetId=''){
                 viewport:{x:0, y:0, scale:.82},
                 logs:[],
                 settings:{},
+                // 2026-10-23（用户反馈：首页工作流点进去没反应）：后端保存接口带乐观锁，
+                // 必须回传创建时返回的 updated_at 作为 base_updated_at，否则 409 被静默拒绝。
+                base_updated_at:Number(canvas.updated_at || 0),
                 source_type:'workflow',
                 source_workflow_id:item.id || '',
                 source_workflow_name:item.name || '',

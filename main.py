@@ -19,6 +19,7 @@ import glob
 import asyncio
 import logging
 import struct
+import threading
 import requests
 import zipfile
 import mimetypes
@@ -603,6 +604,12 @@ async def startup_event():
         await asyncio.to_thread(maybe_auto_start_comfyui_background, "startup")
     except Exception as exc:
         print(f"自动启动 ComfyUI 失败: {exc}")
+
+@app.get("/api/ws-clients")
+async def ws_clients():
+    """临时诊断接口：列出当前 WebSocket 连接的客户端标识，用于排查「另一页面保存画布」问题。"""
+    ids = [str(cid) for cid in manager.connection_clients.values() if cid]
+    return {"count": len(ids), "clients": ids}
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
@@ -7259,6 +7266,53 @@ def playable_video_cache_path(path: str) -> Tuple[str, str]:
 def is_faststart_video_source(path: str) -> bool:
     return os.path.splitext(str(path or "").split("?", 1)[0])[1].lower() in {".mp4", ".m4v", ".mov"}
 
+def is_already_faststart(path: str) -> bool:
+    """2026-10-24（用户反馈：拖入视频时长一直 0:00、加载慢）：检查 mp4 顶层 atom 顺序，
+    moov 在 mdat 之前即已是 faststart，可直接播放，无需 ffmpeg 转封装。
+    现代导出/生成的视频大多本身就是 faststart——这类文件走本判定后
+    /api/playable-video 可以立刻 307 到原始文件，元数据（时长）秒到。
+    只读文件头部几十个 atom，开销可忽略。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            total = f.tell()
+            f.seek(0)
+            pos = 0
+            for _ in range(64):
+                if pos + 8 > total:
+                    return False
+                f.seek(pos)
+                header = f.read(8)
+                if len(header) < 8:
+                    return False
+                box_size = int.from_bytes(header[:4], "big")
+                box_type = header[4:8].decode("latin-1", "ignore")
+                if box_size == 1:
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        return False
+                    box_size = int.from_bytes(ext, "big")
+                elif box_size == 0:
+                    return False
+                if box_size < 8:
+                    return False
+                if box_type == "moov":
+                    return True
+                if box_type == "mdat":
+                    return False
+                pos += box_size
+        return False
+    except OSError:
+        return False
+
+def original_public_url_for(path: str) -> str:
+    """把 output_file_from_url 解析出的绝对路径映射回站内公开 URL（/assets/... 或 /output/...）。"""
+    ap = os.path.abspath(path)
+    for root, prefix in ((os.path.abspath(ASSETS_DIR), "/assets/"), (os.path.abspath(OUTPUT_DIR), "/output/")):
+        if ap.startswith(root + os.sep):
+            return prefix + os.path.relpath(ap, root).replace(os.sep, "/")
+    return ""
+
 def build_playable_video_sync(path: str) -> str:
     """同步生成 faststart 视频缓存，返回缓存路径。
 
@@ -7295,10 +7349,13 @@ def build_playable_video_sync(path: str) -> str:
 
 
 def prewarm_playable_video(path: str) -> bool:
-    """上传后预热可播放视频缓存（失败静默）。"""
+    """上传后预热可播放视频缓存（失败静默）。
+    2026-10-24：已是 faststart 的视频无需预热（endpoint 会直接 307 原始文件）。"""
     if not path or not os.path.isfile(path) or not is_faststart_video_source(path):
         return False
     try:
+        if is_already_faststart(path):
+            return True
         build_playable_video_sync(path)
         return True
     except Exception:
@@ -7317,6 +7374,14 @@ async def playable_video(url: str):
     cache_path, public_url = playable_video_cache_path(path)
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
         return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
+
+    # 2026-10-24：已是 faststart 的 mp4 直接 307 到原始文件，跳过 ffmpeg 转封装。
+    # 此前首次访问要现场转封装（大文件几秒到几十秒），期间视频元数据拿不到——
+    # 前端播放条时长一直 0:00、画面出不来（预热是响应返回后才跑，赶不上前端立刻切 URL）。
+    if is_already_faststart(path):
+        original_url = original_public_url_for(path)
+        if original_url:
+            return Response(status_code=307, headers={"Location": original_url, "Cache-Control": "no-store"})
 
     try:
         await asyncio.to_thread(build_playable_video_sync, path)
@@ -12034,6 +12099,10 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
+    # 2026-10-24：优云智算 compshare（Qwen-Image）走官方异步任务协议，认域名即可；
+    # 必须放在 volcengine 判定之前——用户协议下拉选了方舟也会被域名识别接管。
+    if is_compshare_provider(provider):
+        return await generate_compshare_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
         return await generate_volcengine_provider_image(prompt, size, model, reference_images, provider)
     # 2026-10-22：Grsai 站点的 nano-banana 系列必须走原生 /v1/draw/nano-banana
@@ -14193,6 +14262,41 @@ def openai_compat_root_for_probe(base_url: str):
         return base
     return f"{base}/v1" if base else ""
 
+def friendly_connect_error_detail(exc: Exception, url: str) -> str:
+    """把 httpx 连接类异常翻译成人话。域名解析失败（NXDOMAIN/getaddrinfo failed）是最常见的
+    填错地址场景——直接告诉用户「域名不存在」，并附上所填域名方便对照。"""
+    text = str(exc) or ""
+    host = ""
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(url).netloc.split("@")[-1].split(":")[0]
+    except Exception:
+        host = ""
+    # 本机若走代理，DNS 失败常表现为代理 502 而非解析错误——直接向系统解析器确认一次
+    if host:
+        try:
+            import socket
+            socket.getaddrinfo(host, 443)
+        except socket.gaierror:
+            return (
+                f"域名「{host}」无法解析（不存在或已停用）。请核对请求地址是否有拼写错误，"
+                f"或到该平台的官网/用户群确认最新的 API 地址；注意不要填写网页控制台地址。"
+            )
+        except Exception:
+            pass
+    markers = (
+        "getaddrinfo failed", "Name or service not known", "No address associated",
+        "nodename nor servname", "Temporary failure in name resolution",
+        "Neither nor", "Name does not resolve", "域名解析",
+    )
+    if any(m.lower() in text.lower() for m in markers):
+        suffix = f"「{host}」" if host else ""
+        return (
+            f"域名 {suffix}无法解析（不存在或已停用）。请核对请求地址是否有拼写错误，"
+            f"或到该平台的官网/用户群确认最新的 API 地址；注意不要填写网页控制台地址。"
+        )
+    return f"无法连接到上游：{text[:260]}。请检查请求地址与网络（含代理/防火墙）后重试。"
+
 async def probe_openai_compat_bearer_endpoint(client, base_url: str, api_key: str):
     root = openai_compat_root_for_probe(base_url)
     if not root:
@@ -14376,6 +14480,19 @@ async def test_provider_connection(payload: TestConnectionPayload):
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    # 优云智算 compshare：无 /v1/models，探活走 GET /image/v1/tasks（列表接口，零成本）
+    if is_compshare_provider({"base_url": base_url}):
+        root = compshare_api_root({"base_url": base_url})
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                probe = await client.get(f"{root}/image/v1/tasks", headers=compshare_headers(api_key))
+            if probe.status_code in (401, 403):
+                return {"ok": False, "status": probe.status_code, "message": f"优云智算 Key 无效（HTTP {probe.status_code}）。生图必须用「视频工作台 → API」创建的 sk-ml- 开头专属 Key，控制台其他 Key 不可用。"}
+            if probe.status_code >= 400:
+                return {"ok": False, "status": probe.status_code, "message": f"优云智算接口异常（HTTP {probe.status_code}）：{probe.text[:200]}"}
+            return compshare_default_models_payload("优云智算接口验证通过（Qwen-Image 生图走官方异步任务协议，无模型列表接口，已返回内置模型）。")
+        except httpx.HTTPError as e:
+            return {"ok": False, "status": 0, "message": friendly_connect_error_detail(e, f"{root}/image/v1/tasks")}
     if protocol == "grsai":
         # Grsai 没有 /v1/models，验证走原生 /v1/api/generate 探测（零成本，不会创建生成任务）
         async with httpx.AsyncClient(timeout=15) as client:
@@ -14448,7 +14565,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
                         return volcengine_default_model_payload(status=probe.get("status") or 0, message=message, raw={"models_error": str(e)[:300], **(probe.get("raw") or {})})
             except Exception:
                 pass
-        return {"ok": False, "status": 0, "message": str(e)[:300]}
+        return {"ok": False, "status": 0, "message": friendly_connect_error_detail(e, url)}
 
 @app.post("/api/providers/probe-async")
 async def probe_async_endpoint(payload: TestConnectionPayload):
@@ -14652,6 +14769,30 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         raise HTTPException(status_code=400, detail="请先填写请求地址")
     if not re.match(r"^https?://", base_url):
         raise HTTPException(status_code=400, detail="请求地址必须以 http:// 或 https:// 开头")
+    # 优云智算 compshare：无模型列表接口，探活 /image/v1/tasks 后返回内置模型
+    if is_compshare_provider({"base_url": base_url}):
+        root = compshare_api_root({"base_url": base_url})
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请先填写或保存 API Key（须为视频工作台创建的 sk-ml- 开头 Key）")
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                probe = await client.get(f"{root}/image/v1/tasks", headers=compshare_headers(api_key))
+            if probe.status_code in (401, 403):
+                raise HTTPException(status_code=401, detail=f"优云智算 Key 无效（HTTP {probe.status_code}）。生图必须用「视频工作台 → API」创建的 sk-ml- 开头专属 Key。")
+            if probe.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"优云智算接口异常（HTTP {probe.status_code}）：{probe.text[:200]}")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=friendly_connect_error_detail(e, f"{root}/image/v1/tasks"))
+        payload = compshare_default_models_payload("优云智算接口验证通过（Qwen-Image 走官方异步任务协议，无模型列表接口，已返回内置模型）。")
+        return {
+            "total": payload["model_count"],
+            "protocol": payload["protocol"],
+            "message": payload["message"],
+            "image_models": payload["image_models"],
+            "chat_models": payload["chat_models"],
+            "video_models": payload["video_models"],
+            "all": payload["all"],
+        }
     api_key = volcengine_provider_api_key(api_key) if protocol == "volcengine" else (api_key or "").strip()
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
@@ -14729,7 +14870,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                         }
             except Exception:
                 pass
-        raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
+        raise HTTPException(status_code=502, detail=friendly_connect_error_detail(e, url))
     grouped, ids = parse_upstream_models(raw, protocol)
     grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
     if protocol == "volcengine" and not ids:
@@ -15803,6 +15944,247 @@ async def generate_grsai_draw_image(prompt, size, model, reference_images=None, 
                 raise HTTPException(status_code=502, detail=f"Grsai 生图任务失败：{reason}")
         raise HTTPException(status_code=504, detail=f"Grsai 生图任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
 
+# ============ 优云智算 compshare（MiniMax H3 / Qwen-Image 官方 API）============
+# 文档：https://www.compshare.cn/docs/minimax-h3/api/qwen-image-api
+# 接口根：https://cp.compshare.cn；Bearer Key 须为视频工作台创建的 sk-ml- 开头专属 Key。
+# 图片生成走异步任务协议（POST /image/v1/tasks → GET /image/v1/tasks/{id}），无 /v1/models 列表。
+
+COMPSHARE_DEFAULT_IMAGE_MODELS = ["qwen-image"]
+
+def is_compshare_provider(provider):
+    base_url = str((provider or {}).get("base_url") or "").strip().lower()
+    return "compshare" in base_url
+
+def compshare_api_root(provider):
+    base_url = str((provider or {}).get("base_url") or "").strip().rstrip("/")
+    for suffix in ("/image/v1", "/image", "/v1"):
+        if base_url.endswith(suffix):
+            base_url = base_url[: -len(suffix)]
+    return base_url
+
+def compshare_headers(api_key):
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": bearer_auth_value(api_key),
+    }
+
+COMPSHARE_DONE_STATUSES = {"succeeded", "success", "completed", "complete", "done", "finished"}
+COMPSHARE_FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled"}
+
+def compshare_extract_image_urls(raw):
+    """从任务结果里尽量宽地找图片地址：优先已知键名，再兜底扫 image 扩展名的直链。"""
+    urls = []
+
+    def push(value):
+        text = str(value or "").strip()
+        if text.startswith(("http://", "https://")) and text not in urls:
+            path = text.split("?")[0].lower()
+            if any(path.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                urls.append(text)
+
+    def walk(node, key_hint=""):
+        if isinstance(node, str):
+            if key_hint and any(marker in key_hint.lower() for marker in ("image", "img", "url", "result", "output", "asset")):
+                push(node)
+            else:
+                push(node)
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if k.lower() in {"prompt", "id", "task_id", "error", "message", "status", "state"}:
+                    continue
+                walk(v, k)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, key_hint)
+    walk(raw)
+    return urls
+
+async def generate_compshare_image(prompt, size, model, reference_images=None, provider=None):
+    """优云智算生图：POST /image/v1/tasks（带 Idempotency-Key）→ 轮询 GET /image/v1/tasks/{id}。"""
+    api_key = provider_env_key_value((provider or {}).get("id") or "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider.get('id')} 的 API Key，请在 API 平台管理中填写。")
+    if not str(api_key).startswith("sk-ml-"):
+        raise HTTPException(status_code=400, detail="优云智算生图必须使用「视频工作台 → API」创建的 sk-ml- 开头专属 Key，控制台其他 Key 会返回 401。")
+    aspect_ratio, resolution = apimart_size_resolution(size, model)
+    refs = []
+    for ref in (reference_images or [])[:8]:
+        item = grsai_media_input(str(ref.get("url") or "").strip())
+        if item:
+            refs.append(item)
+    root = compshare_api_root(provider)
+    headers = dict(compshare_headers(api_key))
+    headers["Idempotency-Key"] = uuid.uuid4().hex
+    body = {
+        "prompt": str(prompt or "").strip(),
+        "aspect_ratio": aspect_ratio,
+        "resolution": str(resolution or "1k").upper(),
+    }
+    if refs:
+        body["reference_images"] = refs
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
+        submit = await client.post(f"{root}/image/v1/tasks", headers=headers, json=body)
+        if submit.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail=f"优云智算 Key 无效（HTTP {submit.status_code}）：{submit.text[:200]}。请确认使用视频工作台创建的 sk-ml- 开头 Key。")
+        submit.raise_for_status()
+        raw = submit.json() if submit.text else {}
+        # 部分实现会同步直接返回结果
+        urls = compshare_extract_image_urls(raw)
+        if urls:
+            return {"type": "url", "value": urls[0]}, raw
+        task_id = ""
+        if isinstance(raw, dict):
+            data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+            task_id = str(data.get("task_id") or data.get("id") or "")
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"优云智算生图没有返回任务 id：{json.dumps(raw, ensure_ascii=False)[:300]}")
+        deadline = time.monotonic() + AI_REQUEST_TIMEOUT
+        last_payload = raw
+        while time.monotonic() < deadline:
+            await asyncio.sleep(max(IMAGE_POLL_INTERVAL, 3.0))
+            result = await client.get(f"{root}/image/v1/tasks/{task_id}", headers=compshare_headers(api_key))
+            result.raise_for_status()
+            data = result.json() if result.text else {}
+            last_payload = data
+            node = data.get("data") if isinstance(data.get("data"), (dict, list)) else data
+            status = ""
+            if isinstance(node, dict):
+                status = str(node.get("status") or node.get("task_status") or node.get("state") or "").lower()
+            if status in COMPSHARE_DONE_STATUSES:
+                urls = compshare_extract_image_urls(node)
+                if not urls:
+                    raise HTTPException(status_code=502, detail=f"优云智算生图成功但没有返回图片：{json.dumps(node, ensure_ascii=False)[:300]}")
+                return {"type": "url", "value": urls[0]}, data
+            if status in COMPSHARE_FAILED_STATUSES:
+                reason = ""
+                if isinstance(node, dict):
+                    reason = str(node.get("failure_reason") or node.get("error") or node.get("message") or "未知原因")
+                raise HTTPException(status_code=502, detail=f"优云智算生图任务失败：{reason}")
+        raise HTTPException(status_code=504, detail=f"优云智算生图任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
+
+
+COMPSHARE_DEFAULT_VIDEO_MODELS = ["MiniMax-H3"]
+COMPSHARE_VIDEO_RESOLUTIONS = {"480P", "768P", "1080P", "2K", "4K"}
+COMPSHARE_VIDEO_RATIOS = {"adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
+
+def compshare_video_resolution(value):
+    """画布分辨率档位 → MiniMax H3 合法档位（区分大小写；非法值按原生 768P 处理）。"""
+    text = str(value or "").strip().upper().replace("Ｋ", "K")
+    if text in COMPSHARE_VIDEO_RESOLUTIONS:
+        return text
+    if text in {"720P", "1K", ""}:
+        return "768P"
+    if text in {"1440P", "QHD"}:
+        return "2K"
+    if text in {"2160P", "UHD"}:
+        return "4K"
+    return "768P"
+
+def compshare_video_content(payload):
+    """画布视频请求 → MiniMax H3 content 数组。素材只认公网 URL 或 Data URL，
+    本地/相对地址统一转 Data URL（与生图共用的 grsai_media_input 同一套路）。"""
+    content = [{"type": "text", "text": str(payload.prompt or "").strip() or "生成一段视频"}]
+    images = [ref for ref in (payload.images or []) if str(getattr(ref, "url", "") or "").strip()]
+    # 首尾帧不能与参考素材混用：第 1 张 → 首帧，第 2 张 → 尾帧，其余忽略
+    role_plan = ["first_frame", "last_frame"]
+    for ref in images[:2]:
+        url = grsai_media_input(str(getattr(ref, "url", "") or "").strip())
+        if not url:
+            continue
+        content.append({"type": "image_url", "image_url": {"url": url}, "role": role_plan.pop(0) if role_plan else "reference_image"})
+    for url in [str(v or "").strip() for v in (payload.videos or [])][:3]:
+        if not url:
+            continue
+        normalized = grsai_media_input(url)
+        if normalized:
+            content.append({"type": "video_url", "video_url": {"url": normalized}, "role": "reference_video"})
+    for url in [str(a or "").strip() for a in (payload.audios or [])][:3]:
+        if not url:
+            continue
+        normalized = grsai_media_input(url)
+        if normalized:
+            content.append({"type": "audio_url", "audio_url": {"url": normalized}, "role": "reference_audio"})
+    return content
+
+async def generate_compshare_video(payload, provider):
+    """优云智算 MiniMax H3 视频：POST /minimax/v2/video_generation（幂等键）→
+    轮询 GET /minimax/v2/query/video_generation/{id}，成功取 task.content.url 落盘。"""
+    api_key = provider_env_key_value((provider or {}).get("id") or "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider.get('id')} 的 API Key，请在 API 平台管理中填写。")
+    if not str(api_key).startswith("sk-ml-"):
+        raise HTTPException(status_code=400, detail="优云智算视频必须使用「视频工作台 → API」创建的 sk-ml- 开头专属 Key，控制台其他 Key 会返回 401。")
+    try:
+        seconds = int(payload.duration or 5)
+    except Exception:
+        seconds = 5
+    seconds = max(4, min(30, seconds))
+    has_frames = bool([ref for ref in (payload.images or []) if str(getattr(ref, "url", "") or "").strip()])
+    ratio = str(payload.aspect_ratio or "").strip().lower()
+    if has_frames:
+        ratio = "adaptive"  # 首尾帧模式下宽高比由图片决定
+    elif ratio not in COMPSHARE_VIDEO_RATIOS:
+        ratio = "16:9"
+    headers = dict(compshare_headers(api_key))
+    headers["Idempotency-Key"] = uuid.uuid4().hex
+    body = {
+        "model": "MiniMax-H3",
+        "content": compshare_video_content(payload),
+        "resolution": compshare_video_resolution(payload.resolution),
+        "duration": seconds,
+        "ratio": ratio,
+    }
+    if payload.watermark:
+        body["aigc_watermark"] = True
+    root = compshare_api_root(provider)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=1800.0, pool=20.0)) as client:
+        submit = await client.post(f"{root}/minimax/v2/video_generation", headers=headers, json=body)
+        if submit.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail=f"优云智算 Key 无效（HTTP {submit.status_code}）：{submit.text[:200]}。请确认使用视频工作台创建的 sk-ml- 开头 Key。")
+        submit.raise_for_status()
+        raw = submit.json() if submit.text else {}
+        data_node = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        task_id = str(raw.get("task_id") or data_node.get("task_id") or "").strip()
+        if not task_id:
+            raise HTTPException(status_code=502, detail=f"优云智算视频任务没有返回 task_id：{json.dumps(raw, ensure_ascii=False)[:300]}")
+        deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
+        last_payload = raw
+        while time.monotonic() < deadline:
+            await asyncio.sleep(6.0)
+            result = await client.get(f"{root}/minimax/v2/query/video_generation/{task_id}", headers=compshare_headers(api_key))
+            result.raise_for_status()
+            data = result.json() if result.text else {}
+            last_payload = data
+            node = data.get("task") if isinstance(data.get("task"), dict) else data
+            status = str((node or {}).get("status") or "").lower()
+            if status in COMPSHARE_DONE_STATUSES:
+                url = str(((node or {}).get("content") or {}).get("url") or "").strip()
+                if not url:
+                    raise HTTPException(status_code=502, detail=f"优云智算视频任务成功但没有返回视频地址：{json.dumps(node, ensure_ascii=False)[:300]}")
+                local = await save_remote_video_to_output(url)
+                return {"videos": [local], "task_id": task_id, "raw": data}
+            if status in COMPSHARE_FAILED_STATUSES:
+                err = (node or {}).get("error") or {}
+                reason = err.get("message") if isinstance(err, dict) else str(err or "")
+                raise HTTPException(status_code=502, detail=f"优云智算视频任务失败：{reason or json.dumps(node, ensure_ascii=False)[:300]}")
+        raise HTTPException(status_code=504, detail=f"优云智算视频任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
+
+def compshare_default_models_payload(message, ok=True, status=200):
+    all_models = [*COMPSHARE_DEFAULT_IMAGE_MODELS, *COMPSHARE_DEFAULT_VIDEO_MODELS]
+    return {
+        "ok": ok,
+        "status": status,
+        "message": message,
+        "model_count": len(all_models),
+        "image_models": list(COMPSHARE_DEFAULT_IMAGE_MODELS),
+        "chat_models": [],
+        "video_models": list(COMPSHARE_DEFAULT_VIDEO_MODELS),
+        "all": all_models,
+        "protocol": "compshare",
+        "image_request_mode": "openai",
+    }
+
 def looks_like_unsupported_endpoint(status_code, text):
     """判断上游是在说「我这没这个入口/模型」，还是「你参数写错了」。
 
@@ -16099,6 +16481,9 @@ async def canvas_video(payload: CanvasVideoRequest):
         except httpx.HTTPError as exc:
             log_net_error(f"视频(RunningHub) 网络/TLS错误 model={payload.model}", exc)
             raise HTTPException(status_code=502, detail=f"请求 RunningHub 视频接口失败：{exc}") from exc
+    # 2026-10-24：优云智算 MiniMax H3 视频走官方异步任务协议（/minimax/v2），认域名即可
+    if is_compshare_provider(provider):
+        return await generate_compshare_video(payload, provider)
     base_url = video_api_root(provider)
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
@@ -22095,6 +22480,495 @@ app.include_router(
         chat_model=ChatRequest,
     )
 )
+
+# ===== 2026-10-24 深度动作捕捉（路线C：内置模型默认 + 按需下载，不依赖 ComfyUI）=====
+# 深度提取：Depth Anything V2 Small（ONNX 量化版 ~27.5MB，hf-mirror 优先 + HF 兜底）。
+# 依赖 numpy / onnxruntime 首次使用时 pip 自动安装（安装包零模型零重依赖）；
+# onnxruntime 检测到 CUDA 时自动走 GPU，否则 CPU。姿态骨架（DWPose）为二期。
+DEPTH_MODELS_DIR = os.path.join(BASE_DIR, "models")
+DEPTH_MODEL_FILENAME = "depth-anything-v2-small.onnx"
+DEPTH_MODEL_PATH = os.path.join(DEPTH_MODELS_DIR, DEPTH_MODEL_FILENAME)
+DEPTH_MODEL_URLS = [
+    "https://hf-mirror.com/Xenova/depth-anything-small-hf/resolve/main/onnx/model_quantized.onnx",
+    "https://huggingface.co/Xenova/depth-anything-small-hf/resolve/main/onnx/model_quantized.onnx",
+]
+DEPTH_MODEL_TOTAL_SIZE = 27524771
+# 姿态骨架（DWPose）：行人检测 yolox_l + 全身姿态 dw-ll_ucoco_384，均 ONNX，按需下载
+DEPTH_POSE_DET_PATH = os.path.join(DEPTH_MODELS_DIR, "yolox_l.onnx")
+DEPTH_POSE_EST_PATH = os.path.join(DEPTH_MODELS_DIR, "dw-ll_ucoco_384.onnx")
+DEPTH_POSE_DET_URLS = [
+    "https://hf-mirror.com/yzd-v/DWPose/resolve/main/yolox_l.onnx",
+    "https://huggingface.co/yzd-v/DWPose/resolve/main/yolox_l.onnx",
+]
+DEPTH_POSE_EST_URLS = [
+    "https://hf-mirror.com/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx",
+    "https://huggingface.co/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx",
+]
+
+
+def _depth_pose_models_ready() -> bool:
+    try:
+        return (os.path.isfile(DEPTH_POSE_DET_PATH) and os.path.getsize(DEPTH_POSE_DET_PATH) > 1_000_000
+                and os.path.isfile(DEPTH_POSE_EST_PATH) and os.path.getsize(DEPTH_POSE_EST_PATH) > 1_000_000)
+    except Exception:
+        return False
+
+
+def _pose_limbs():
+    """COCO17 身体骨架连线 + OpenPose 经典配色（RGB）。"""
+    limbs = [[0, 1], [0, 2], [1, 3], [2, 4], [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+             [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]]
+    colors = [(255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0), (85, 255, 0),
+              (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 170, 255), (0, 85, 255), (0, 0, 255),
+              (85, 0, 255), (170, 0, 255), (255, 0, 255), (255, 0, 170)]
+    return limbs, colors
+
+DEPTH_TASKS: Dict[str, Dict] = {}
+DEPTH_PREPARE: Dict = {"running": False, "stage": "", "progress": 0.0, "message": "", "error": ""}
+_DEPTH_PREPARE_LOCK = threading.Lock()
+
+
+def _depth_deps_ready() -> bool:
+    try:
+        import numpy  # noqa: F401
+        import onnxruntime  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _depth_model_ready() -> bool:
+    try:
+        return os.path.isfile(DEPTH_MODEL_PATH) and os.path.getsize(DEPTH_MODEL_PATH) > 1_000_000
+    except Exception:
+        return False
+
+
+def _download_with_progress(urls, dest, reporter):
+    """多源下载 + 断点续传 + 进度上报（reporter 为 dict）。"""
+    last_err = None
+    for url in urls:
+        try:
+            have = os.path.getsize(dest) if os.path.exists(dest) else 0
+            req = urllib.request.Request(url, headers={"Range": f"bytes={have}-", "User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "ab" if have else "wb") as f:
+                header_len = resp.headers.get("Content-Length")
+                total = int(header_len) + have if header_len else DEPTH_MODEL_TOTAL_SIZE
+                downloaded = have
+                while True:
+                    chunk = resp.read(262144)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    reporter["progress"] = min(99.0, 15.0 + 85.0 * downloaded / max(total, 1))
+                    reporter["message"] = f"下载模型 {downloaded / 1048576:.0f}MB / {total / 1048576:.0f}MB"
+            if os.path.getsize(dest) > 1_000_000:
+                return
+            raise RuntimeError("下载的模型文件不完整")
+        except Exception as exc:  # noqa: BLE001 换源重试
+            last_err = exc
+            continue
+    raise RuntimeError(f"模型下载失败：{last_err}")
+
+
+def _depth_prepare_worker():
+    try:
+        if not _depth_deps_ready():
+            DEPTH_PREPARE.update(stage="deps", progress=3.0, message="正在安装推理依赖（numpy / onnxruntime，一次性）…")
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet", "numpy", "onnxruntime"],
+                capture_output=True, text=True, timeout=1800,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError("依赖安装失败：" + (proc.stderr or proc.stdout or "")[-300:])
+        DEPTH_PREPARE.update(progress=15.0, stage="model", message="开始下载深度模型…")
+        os.makedirs(DEPTH_MODELS_DIR, exist_ok=True)
+        tmp_path = DEPTH_MODEL_PATH + ".part"
+        _download_with_progress(DEPTH_MODEL_URLS, tmp_path, DEPTH_PREPARE)
+        os.replace(tmp_path, DEPTH_MODEL_PATH)
+        if not _depth_pose_models_ready():
+            DEPTH_PREPARE.update(progress=100.0, stage="pose-model", message="开始下载姿态模型（约 350MB，一次性）…")
+            for dest, urls in ((DEPTH_POSE_DET_PATH, DEPTH_POSE_DET_URLS), (DEPTH_POSE_EST_PATH, DEPTH_POSE_EST_URLS)):
+                if os.path.isfile(dest) and os.path.getsize(dest) > 1_000_000:
+                    continue
+                tmp = dest + ".part"
+                _download_with_progress(urls, tmp, DEPTH_PREPARE)
+                os.replace(tmp, dest)
+        DEPTH_PREPARE.update(progress=100.0, stage="done", message="就绪", error="")
+    except Exception as exc:  # noqa: BLE001
+        DEPTH_PREPARE.update(error=str(exc)[:400], message="准备失败")
+    finally:
+        DEPTH_PREPARE["running"] = False
+
+
+class DepthCaptureStart(BaseModel):
+    url: str
+    mode: str = "depth"          # depth | pose（pose 二期）
+    fps: str = "auto"            # auto | 12 | 8
+    resolution: str = "auto"     # auto | 768 | 512
+
+
+@app.get("/api/depth-capture/status")
+async def depth_capture_status():
+    gpu = False
+    if _depth_deps_ready():
+        try:
+            import onnxruntime as ort
+            gpu = "CUDAExecutionProvider" in ort.get_available_providers()
+        except Exception:
+            gpu = False
+    return {
+        "deps_ready": _depth_deps_ready(),
+        "model_ready": _depth_model_ready(),
+        "model_size_mb": round(DEPTH_MODEL_TOTAL_SIZE / 1048576, 1),
+        "gpu": gpu,
+        "pose_ready": _depth_pose_models_ready(),
+        "pose_size_mb": 351,
+        "prepare": dict(DEPTH_PREPARE),
+    }
+
+
+@app.post("/api/depth-capture/prepare")
+async def depth_capture_prepare():
+    with _DEPTH_PREPARE_LOCK:
+        if DEPTH_PREPARE.get("running"):
+            return {"ok": True, "already_running": True}
+        DEPTH_PREPARE.update(running=True, stage="", progress=1.0, message="准备中…", error="")
+    threading.Thread(target=_depth_prepare_worker, daemon=True).start()
+    return {"ok": True}
+
+
+def _probe_video_fps(path: str) -> float:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return 0.0
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=r_frame_rate", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        raw = str(proc.stdout or "").strip().splitlines()[0] if proc.stdout else ""
+        if "/" in raw:
+            a, b = raw.split("/", 1)
+            val = float(a) / float(b) if float(b) else 0.0
+        else:
+            val = float(raw or 0)
+        return val if math.isfinite(val) and 0 < val <= 240 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _probe_video_size(path: str):
+    """返回 (width, height)；失败返回 (0, 0)。"""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return 0, 0
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        nums = [int(float(x)) for x in str(proc.stdout or "").split()[:2]]
+        return (nums[0], nums[1]) if len(nums) == 2 and nums[0] > 0 and nums[1] > 0 else (0, 0)
+    except Exception:
+        return 0, 0
+
+
+
+def _yolox_preprocess(frame: Image.Image, size: int = 640):
+    """YOLOX 预处理：等比缩放 + 114 灰填充到 640x640。返回 (tensor[1,3,640,640], ratio)。"""
+    import numpy as np
+    w0, h0 = frame.size
+    ratio = min(size / h0, size / w0)
+    resized = frame.resize((max(1, int(w0 * ratio)), max(1, int(h0 * ratio))), Image.BICUBIC)
+    padded = np.full((size, size, 3), 114, dtype=np.uint8)
+    padded[:resized.size[1], :resized.size[0]] = np.asarray(resized, dtype=np.uint8)
+    tensor = np.ascontiguousarray(padded.transpose(2, 0, 1), dtype=np.float32)[None]
+    return tensor, ratio
+
+
+def _yolox_nms(boxes, scores, thr=0.45):
+    import numpy as np
+    order = scores.argsort()[::-1]
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        if order.size == 1:
+            break
+        xx1 = np.maximum(boxes[i, 0], boxes[order[1:], 0])
+        yy1 = np.maximum(boxes[i, 1], boxes[order[1:], 1])
+        xx2 = np.minimum(boxes[i, 2], boxes[order[1:], 2])
+        yy2 = np.minimum(boxes[i, 3], boxes[order[1:], 3])
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        iou = inter / np.maximum(1e-8, (boxes[i, 2] - boxes[i, 0]) * (boxes[i, 3] - boxes[i, 1])
+                                 + (boxes[order[1:], 2] - boxes[order[1:], 0]) * (boxes[order[1:], 3] - boxes[order[1:], 1]) - inter)
+        order = order[1:][iou <= thr]
+    return keep
+
+
+_YOLOX_GRID_CACHE = {}
+
+
+def _yolox_detect_person(det_sess, frame, conf_thr=0.35, max_persons=6):
+    """YOLOX 行人检测：返回 [[x1,y1,x2,y2,score], ...] 原图坐标。"""
+    import numpy as np
+    input_name = det_sess.get_inputs()[0].name
+    tensor, ratio = _yolox_preprocess(frame)
+    output = det_sess.run(None, {input_name: tensor})[0]
+    pred = output[0]
+    # 解码（stride 8/16/32 网格）；部分导出已是最终坐标，此处按 ControlNet 参考实现解码
+    # 网格矩阵只依赖输入尺寸，缓存复用（每帧重建 8400x2 矩阵很浪费）
+    global _YOLOX_GRID_CACHE
+    cache_key = 640
+    if cache_key not in _YOLOX_GRID_CACHE:
+        strides = [8, 16, 32]
+        grids, expanded = [], []
+        for stride in strides:
+            hs = ws = cache_key // stride
+            yi, xi = np.meshgrid(np.arange(hs), np.arange(ws), indexing="ij")
+            grids.append(np.stack((xi, yi), 2).reshape(1, -1, 2).astype(np.float32))
+            expanded.append(np.full((1, hs * ws, 1), stride, dtype=np.float32))
+        _YOLOX_GRID_CACHE[cache_key] = (np.concatenate(grids, 1), np.concatenate(expanded, 1))
+    grid, expanded = _YOLOX_GRID_CACHE[cache_key]
+    out = pred.astype(np.float32).copy()
+    out[..., :2] = (out[..., :2] + grid) * expanded
+    out[..., 2:4] = np.exp(out[..., 2:4]) * expanded
+    boxes = out[:, :4].copy()
+    boxes[:, 0] -= boxes[:, 2] / 2
+    boxes[:, 1] -= boxes[:, 3] / 2
+    boxes[:, 2] += boxes[:, 0]
+    boxes[:, 3] += boxes[:, 1]
+    scores = out[:, 4] * out[:, 5]  # person 类
+    keep_mask = scores > conf_thr
+    boxes, scores = boxes[keep_mask] / ratio, scores[keep_mask]
+    if not len(boxes):
+        return []
+    keep = _yolox_nms(boxes, scores)
+    result = [[float(b[0]), float(b[1]), float(b[2]), float(b[3]), float(s)] for b, s in zip(boxes[keep], scores[keep])]
+    result.sort(key=lambda r: -r[4])
+    return result[:max_persons]
+
+
+def _dwpose_estimate_frame(est_sess, frame: Image.Image, bbox):
+    """对单个 bbox 跑 DWPose SimCC 解码，返回 (keypoints[133,3] 原图坐标)。"""
+    import numpy as np
+    input_shape = est_sess.get_inputs()[0].shape
+    model_h, model_w = int(input_shape[2]), int(input_shape[3])
+    w0, h0 = frame.size
+    x1, y1, x2, y2 = bbox[:4]
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    bw, bh = max(8.0, (x2 - x1) * 1.25), max(8.0, (y2 - y1) * 1.25)
+    aspect = model_w / model_h
+    if bw / bh > aspect:
+        bh = bw / aspect
+    else:
+        bw = bh * aspect
+    x0, y0 = cx - bw / 2, cy - bh / 2
+    ix0, iy0 = int(max(0, np.floor(x0))), int(max(0, np.floor(y0)))
+    ix1, iy1 = int(min(w0, np.ceil(x0 + bw))), int(min(h0, np.ceil(y0 + bh)))
+    crop = frame.crop((ix0, iy0, ix1, iy1)) if ix1 > ix0 and iy1 > iy0 else Image.new("RGB", (2, 2))
+    canvas = Image.new("RGB", (max(2, int(np.ceil(bw))), max(2, int(np.ceil(bh)))), (0, 0, 0))
+    canvas.paste(crop, (ix0 - int(np.floor(x0)), iy0 - int(np.floor(y0))))
+    im = canvas.resize((model_w, model_h), Image.BICUBIC)
+    arr = (np.asarray(im).astype(np.float32) - np.array([123.675, 116.28, 103.53], dtype=np.float32)) \
+        / np.array([58.395, 57.12, 57.375], dtype=np.float32)
+    tensor = np.ascontiguousarray(arr.transpose(2, 0, 1)[None])
+    input_name = est_sess.get_inputs()[0].name
+    outs = est_sess.run(None, {input_name: tensor})
+    simcc_x, simcc_y = outs[0], outs[1]
+    xs = np.argmax(simcc_x[0], axis=1) / 2.0
+    ys = np.argmax(simcc_y[0], axis=1) / 2.0
+    vals = np.maximum(simcc_x[0].max(axis=1), simcc_y[0].max(axis=1))
+    kps = np.zeros((len(xs), 3), dtype=np.float32)
+    kps[:, 0] = x0 + xs * (bw / model_w)
+    kps[:, 1] = y0 + ys * (bh / model_h)
+    kps[:, 2] = vals
+    return kps
+
+
+def _draw_pose_canvas(frame_w: int, frame_h: int, persons) -> Image.Image:
+    """黑底 OpenPose 风格骨架：身体彩色连线 + 其它关键点小灰点。"""
+    from PIL import ImageDraw
+    img = Image.new("RGB", (frame_w, frame_h), (16, 16, 18))
+    draw = ImageDraw.Draw(img)
+    limbs, colors = _pose_limbs()
+    lw = max(2, int(round(min(frame_w, frame_h) / 180)))
+    jr = max(2, int(round(min(frame_w, frame_h) / 130)))
+    for kps in persons:
+        for idx, (a, b) in enumerate(limbs):
+            if a >= len(kps) or b >= len(kps):
+                continue
+            if kps[a][2] < 0.25 or kps[b][2] < 0.25:
+                continue
+            color = colors[idx % len(colors)]
+            draw.line([(kps[a][0], kps[a][1]), (kps[b][0], kps[b][1])], fill=color, width=lw)
+        for kp in kps:
+            if kp[2] < 0.35:
+                continue
+            draw.ellipse([kp[0] - jr, kp[1] - jr, kp[0] + jr, kp[1] + jr], fill=(235, 235, 235))
+    return img
+
+
+def _depth_task_worker(task_id: str):
+    task = DEPTH_TASKS.get(task_id)
+    tmpdir = ""
+    try:
+        import numpy as np
+        import onnxruntime as ort
+        from PIL import Image, ImageOps
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] \
+            if "CUDAExecutionProvider" in ort.get_available_providers() else ["CPUExecutionProvider"]
+        sess = ort.InferenceSession(DEPTH_MODEL_PATH, providers=providers)
+        input_name = sess.get_inputs()[0].name
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("未找到 ffmpeg，无法处理视频")
+        tmpdir = tempfile.mkdtemp(prefix="depth_cap_")
+        frames_dir = os.path.join(tmpdir, "frames")
+        out_dir = os.path.join(tmpdir, "out")
+        os.makedirs(frames_dir)
+        os.makedirs(out_dir)
+
+        task.update(stage="extract", progress=4.0, message="ffmpeg 抽帧中…")
+        # 性能关键：抽帧时直接缩到推理所需宽度（深度 518 / 检测 640，768 留给精细档）。
+        # 大视频全分辨率逐帧 PNG 编解码是最大瓶颈（2752x1536 每帧编码就要上百毫秒），
+        # 缩到 768 宽后 IO/解码开销降一个量级，推理输入尺寸不受影响；最终合成时再放大回原分辨率。
+        src_w, src_h = _probe_video_size(task["src_path"])
+        vf_parts = ["scale='min(768,iw)':-2:flags=bicubic"]
+        if str(task.get("fps") or "auto") not in ("auto", ""):
+            vf_parts.insert(0, f"fps={task['fps']}")
+        extract_cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", task["src_path"],
+                       "-vf", ",".join(vf_parts), os.path.join(frames_dir, "f_%06d.bmp")]
+        proc = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=1800)
+        if proc.returncode != 0:
+            raise RuntimeError("ffmpeg 抽帧失败：" + (proc.stderr or "")[-200:])
+        frames = sorted(f for f in os.listdir(frames_dir) if f.endswith(".bmp"))
+        if not frames:
+            raise RuntimeError("未能从视频中抽取帧")
+
+        mode = str(task.get("mode") or "depth")
+        pose_sess = None
+        if mode in ("pose", "both"):
+            if not _depth_pose_models_ready():
+                raise RuntimeError("姿态模型未就绪，请先在面板完成准备下载")
+            det_sess = ort.InferenceSession(DEPTH_POSE_DET_PATH, providers=providers)
+            pose_sess = ort.InferenceSession(DEPTH_POSE_EST_PATH, providers=providers)
+
+        mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+        std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
+        infer_w = 518
+        if str(task.get("resolution")) in ("768", "512"):
+            infer_w = int(task["resolution"])
+        total = len(frames)
+
+        def process_one(idx: int, fname: str):
+            """单帧完整处理（解码→推理→写盘）；onnxruntime 会话 run 线程安全，可多帧并行。"""
+            with Image.open(os.path.join(frames_dir, fname)) as fr:
+                frame = ImageOps.exif_transpose(fr).convert("RGB")
+            w0, h0 = frame.size
+            out_img = None
+            if mode in ("depth", "both"):
+                h = max(14, int(round(h0 * infer_w / max(w0, 1) / 14.0)) * 14)
+                im = frame.resize((infer_w, h), Image.BICUBIC)
+                arr = (np.asarray(im).astype(np.float32) - mean) / std
+                tensor = arr.transpose(2, 0, 1)[None]
+                depth = sess.run(None, {input_name: tensor})[0][0]
+                dmin, dmax = float(depth.min()), float(depth.max())
+                depth = (depth - dmin) / (dmax - dmin + 1e-8)
+                out_img = Image.fromarray((depth * 255).astype(np.uint8)).resize((w0, h0), Image.BICUBIC)
+            if mode in ("pose", "both"):
+                boxes = _yolox_detect_person(det_sess, frame)
+                persons = [_dwpose_estimate_frame(pose_sess, frame, b) for b in boxes]
+                skeleton = _draw_pose_canvas(w0, h0, persons)
+                out_img = skeleton if mode == "pose" else Image.blend(out_img.convert("RGB"), skeleton, 0.75)
+            out_img.save(os.path.join(out_dir, f"d_{idx:06d}.png"))
+
+        # 并行流水线：解码/缩放/编码与推理重叠执行（纯 CPU 推理时也能吃满多核）
+        from concurrent.futures import ThreadPoolExecutor
+        pool_workers = max(1, min(4, (os.cpu_count() or 4) // 2))
+        with ThreadPoolExecutor(max_workers=pool_workers) as pool:
+            done_i = 0
+            for _ in pool.map(lambda pair: process_one(*pair), list(enumerate(frames, 1))):
+                done_i += 1
+                task["progress"] = 8.0 + 80.0 * done_i / total
+                task["message"] = f"逐帧提取{'深度' if mode != 'pose' else '姿态'} {done_i}/{total}"
+
+        task.update(stage="assemble", progress=90.0, message="合成深度视频…")
+        fps_arg = str(task.get("fps") or "auto")
+        if fps_arg in ("auto", ""):
+            src_fps = _probe_video_fps(task["src_path"])
+            fps_arg = f"{min(max(src_fps, 1.0), 60):.3f}" if src_fps else "30"
+        out_name = f"depth_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
+        out_path = os.path.join(OUTPUT_OUTPUT_DIR, out_name)
+        # 抽帧时缩小过 → 合成时放大回原视频分辨率，保证产物与源尺寸一致
+        scale_args = []
+        if src_w > 0 and src_h > 0:
+            with Image.open(os.path.join(out_dir, "d_000001.png")) as pf:
+                ow, oh = pf.size
+            if (ow, oh) != (src_w, src_h):
+                scale_args = ["-vf", f"scale={src_w}:{src_h}:flags=bicubic"]
+        assemble_cmd = [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-framerate", fps_arg, "-i", os.path.join(out_dir, "d_%06d.png"),
+            *scale_args,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path,
+        ]
+        proc = subprocess.run(assemble_cmd, capture_output=True, text=True, timeout=1800)
+        if proc.returncode != 0 or not os.path.isfile(out_path) or os.path.getsize(out_path) <= 0:
+            raise RuntimeError("合成深度视频失败：" + (proc.stderr or "")[-200:])
+        task.update(stage="done", progress=100.0, message="完成",
+                    output_url=output_url_for(out_name, "output"), running=False)
+    except Exception as exc:  # noqa: BLE001
+        task["error"] = str(exc)[:400]
+        task["message"] = "提取失败"
+        task["running"] = False
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.post("/api/depth-capture/start")
+async def depth_capture_start(payload: DepthCaptureStart):
+    if not _depth_deps_ready():
+        raise HTTPException(status_code=409, detail="推理依赖未就绪，请先在面板完成准备")
+    if payload.mode in ("depth", "both") and not _depth_model_ready():
+        raise HTTPException(status_code=409, detail="深度模型未就绪，请先完成准备下载")
+    if payload.mode in ("pose", "both") and not _depth_pose_models_ready():
+        raise HTTPException(status_code=409, detail="姿态模型未就绪，请先完成准备下载")
+    if payload.mode not in ("depth", "pose", "both"):
+        raise HTTPException(status_code=400, detail="不支持的提取模式")
+    path = output_file_from_url(payload.url)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    if not is_video_preview_file(path):
+        raise HTTPException(status_code=415, detail="不支持的文件格式")
+    task_id = uuid.uuid4().hex[:12]
+    DEPTH_TASKS[task_id] = {
+        "stage": "extract", "progress": 2.0, "message": "准备中…", "error": "",
+        "output_url": "", "running": True,
+        "src_path": path, "fps": payload.fps, "resolution": payload.resolution,
+        "mode": payload.mode,
+    }
+    threading.Thread(target=_depth_task_worker, args=(task_id,), daemon=True).start()
+    return {"ok": True, "task_id": task_id}
+
+
+@app.get("/api/depth-capture/task/{task_id}")
+async def depth_capture_task(task_id: str):
+    task = DEPTH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    status = "done" if task["stage"] == "done" else ("error" if task["error"] else "running")
+    return {k: v for k, v in task.items() if k != "src_path"} | {"status": status}
+
 
 if __name__ == "__main__":
     import uvicorn

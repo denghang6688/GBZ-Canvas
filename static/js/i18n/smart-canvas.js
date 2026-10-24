@@ -237,7 +237,7 @@
         "smart.loopRunRoundsPartial": { zh: "循环结束：{ok}/{total} 轮成功", en: "Loop finished: {ok}/{total} rounds ok" },
         "smart.loopRerunRoundsDone": { zh: "重跑完成：{n} 轮", en: "Re-ran {n} rounds" },
         "smart.loopRoundFailedHint": { zh: "第 {n} 轮失败：", en: "Round {n} failed: " },
-        "smart.mentionInput": { zh: "输入图", en: "Inputs" },
+        "smart.mentionInput": { zh: "引用素材", en: "References" },
         "smart.mentionAssets": { zh: "资产库", en: "Assets" },
         "smart.mentionEmpty": { zh: "没有可引用的图片", en: "No images available" },
         "smart.toastNoUndo": { zh: "没有可撤销的操作", en: "Nothing to undo" },

@@ -52,6 +52,7 @@ data/asset_library.json.bak-*
 data/projects.json
 data/prompt_libraries.json
 data/update_source.json
+data/usage_stats.csv
 assets/input/
 assets/output/
 assets/uploads/
@@ -114,3 +115,39 @@ temp/
 
 # Project-version metadata auto-written by the app
 VERSION.bak
+# === 2026-10-24：发布卫生——QA 截图、调试产物、一次性脚本、本地模型不入库 ===
+models/
+data/
+.workbuddy/
+_edge_qa*
+_qa_*
+_qa_chrome_*
+_qa_profile_*
+qa-*
+qa_*
+qa-chrome-*
+qa-profile-*
+/*.png
+/*.txt
+/*.json.tmp
+/qa-reload-command.json
+/logo.ico
+VERSION.*-pub*
+main.py.*-pub*
+static/update-notes.json.*
+static/update-manifest.json.*
+/_oldmain_diag.py
+/bento_models.py
+/bump_canvas_ver.py
+/chip_observer.py
+/dot_alpha.py
+/fix_*.py
+/force_*.py
+/guard_*.py
+/hide_sysprompt.py
+/redesign_layout.py
+/remove_billing_block.py
+/revert_wrap.py
+/rewrite_inline_theme.py
+/strengthen_theme.py
+/assets/
