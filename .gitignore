@@ -74,7 +74,6 @@ publish-release.bat
 static/tmp-*
 static/_debug-*.html
 # 发布时生成的更新清单（魔搭创空间用，不进仓库）
-static/update-manifest.json
 
 # Environment / secrets
 .env
