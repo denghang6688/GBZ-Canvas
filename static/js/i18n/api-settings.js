@@ -158,6 +158,7 @@
         "api.recommendAccountDesc": { zh: "独立订阅、成品账号等选择，适合想直充自己账户的人。", en: "Independent subscriptions and ready-to-use accounts for users who want direct account access." },
         "api.viewPlans": { zh: "查看方案", en: "View Plans" },
         "api.recommendExellomeSummary": { zh: "稳定输出 GPT-Image2 和 Nano Banana 的 2K/4K。", en: "Stable 2K/4K output for GPT-Image2 and Nano Banana." },
+        "api.recommendCompshareSummary": { zh: "MiniMax H3 官方视频 + Qwen-Image 官方生图，注册送积分。", en: "Official MiniMax H3 video and Qwen-Image APIs with free starter credits." },
         "api.recommendExellome2k4k": { zh: "2K/4K", en: "2K/4K" },
         "api.recommendGroupStable": { zh: "稳定", en: "Stable" },
         "api.recommendGroupCheap": { zh: "便宜", en: "Budget" },

@@ -225,6 +225,23 @@ const RECOMMENDED_APIS = [
         empty_models_on_save:true
     },
     {
+        id:'compshare',
+        name:'优云智算',
+        category:'stable',
+        base_url:'https://cp.compshare.cn',
+        // 图片/视频均为官方异步任务协议，后端按域名（compshare）自动接管，无需特殊 protocol
+        protocol:'openai',
+        register_url:'https://passport.compshare.cn/register?referral_code=9QxAedVJZD3FKVQRwf53F8',
+        tagKeys:['api.tagImageModels','api.tagVideoModels'],
+        icons:['IMG','VID'],
+        summaryKey:'api.recommendCompshareSummary',
+        keyHint:'使用「视频工作台 → API」创建的 sk-ml- 专属 Key',
+        advantages:['MiniMax H3 官方视频 API：文生/图生视频自动轮询取片', 'Qwen-Image 官方生图，按积分计费免自建', '官方算力平台，注册即送积分'],
+        image_models:['qwen-image'],
+        chat_models:[],
+        video_models:['MiniMax-H3']
+    },
+    {
         name:'APIMART',
         category:'stable',
         base_url:'https://api.apimart.ai',
