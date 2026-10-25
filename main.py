@@ -16094,28 +16094,67 @@ def compshare_video_resolution(value):
 
 def compshare_video_content(payload):
     """画布视频请求 → MiniMax H3 content 数组。素材只认公网 URL 或 Data URL，
-    本地/相对地址统一转 Data URL（与生图共用的 grsai_media_input 同一套路）。"""
+    本地/相对地址统一转 Data URL（与生图共用的 grsai_media_input 同一套路）。
+
+    官方协议（2026-10 复核 platform.minimax.io / 移动云文档）：
+    - 首尾帧与多模态参考互斥：content 里出现 reference_image/video/audio 任一 role，
+      就不能再出现 first_frame / last_frame，混用会报 RetCode 230 "required uid not evaluable"。
+    - 前端首尾帧模式会给图片显式带 role=first_frame/last_frame 且不提交视频/音频；
+      全能参考模式图片不带 role，素材走 payload.videos / payload.audios。
+    - 参考图 ≤9、参考视频 ≤3、参考音频 ≤3，混合输入合计 ≤12。"""
     content = [{"type": "text", "text": str(payload.prompt or "").strip() or "生成一段视频"}]
-    images = [ref for ref in (payload.images or []) if str(getattr(ref, "url", "") or "").strip()]
-    # 首尾帧不能与参考素材混用：第 1 张 → 首帧，第 2 张 → 尾帧，其余忽略
-    role_plan = ["first_frame", "last_frame"]
-    for ref in images[:2]:
-        url = grsai_media_input(str(getattr(ref, "url", "") or "").strip())
-        if not url:
-            continue
-        content.append({"type": "image_url", "image_url": {"url": url}, "role": role_plan.pop(0) if role_plan else "reference_image"})
-    for url in [str(v or "").strip() for v in (payload.videos or [])][:3]:
-        if not url:
-            continue
-        normalized = grsai_media_input(url)
-        if normalized:
-            content.append({"type": "video_url", "video_url": {"url": normalized}, "role": "reference_video"})
-    for url in [str(a or "").strip() for a in (payload.audios or [])][:3]:
-        if not url:
-            continue
-        normalized = grsai_media_input(url)
-        if normalized:
-            content.append({"type": "audio_url", "audio_url": {"url": normalized}, "role": "reference_audio"})
+
+    def _ref_url(ref):
+        return str(getattr(ref, "url", "") or "").strip()
+
+    def _ref_role(ref):
+        role = getattr(ref, "role", "")
+        if isinstance(ref, dict):
+            role = ref.get("role", role)
+        return str(role or "").strip().lower()
+
+    image_refs = [ref for ref in (payload.images or []) if _ref_url(ref)]
+    video_urls = [str(v or "").strip() for v in (payload.videos or []) if str(v or "").strip()]
+    audio_urls = [str(a or "").strip() for a in (payload.audios or []) if str(a or "").strip()]
+    image_roles = [_ref_role(ref) for ref in image_refs]
+
+    has_reference_media = bool(video_urls or audio_urls)
+    has_frame_roles = any(role in {"first_frame", "last_frame"} for role in image_roles)
+    # 分流：有视频/音频参考 → 必为参考模式；图片带首尾帧角色 → 首尾帧模式；
+    # 其余按张数兜底（1 张=首帧，2 张=首+尾帧，与旧版行为一致）。
+    reference_mode = has_reference_media or (not has_frame_roles and len(image_refs) >= 3)
+
+    if reference_mode:
+        for ref, role in zip(image_refs[:9], image_roles[:9]):
+            url = grsai_media_input(_ref_url(ref))
+            if not url:
+                continue
+            content.append({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"})
+        for url in video_urls[:3]:
+            normalized = grsai_media_input(url)
+            if normalized:
+                content.append({"type": "video_url", "video_url": {"url": normalized}, "role": "reference_video"})
+        for url in audio_urls[:3]:
+            normalized = grsai_media_input(url)
+            if normalized:
+                content.append({"type": "audio_url", "audio_url": {"url": normalized}, "role": "reference_audio"})
+        # 混合输入合计 ≤12：文本项不计，超出的素材按 图片→视频→音频 顺序截断
+        extras = len(content) - 1
+        if extras > 12:
+            allowed_images = max(0, min(9, 12 - len(video_urls[:3]) - len(audio_urls[:3])))
+            content = [content[0]] + [c for c in content[1:] if c.get("role") == "reference_image"][:allowed_images] \
+                + [c for c in content[1:] if c.get("role") == "reference_video"] \
+                + [c for c in content[1:] if c.get("role") == "reference_audio"]
+    else:
+        if has_frame_roles:
+            role_plan = [role for role in image_roles if role in {"first_frame", "last_frame"}][:2]
+        else:
+            role_plan = ["first_frame", "last_frame"][:max(1, len(image_refs[:2]))]
+        for ref, role in zip(image_refs[:2], role_plan):
+            url = grsai_media_input(_ref_url(ref))
+            if not url:
+                continue
+            content.append({"type": "image_url", "image_url": {"url": url}, "role": role})
     return content
 
 async def generate_compshare_video(payload, provider):
@@ -16130,11 +16169,19 @@ async def generate_compshare_video(payload, provider):
         seconds = int(payload.duration or 5)
     except Exception:
         seconds = 5
-    seconds = max(4, min(30, seconds))
-    has_frames = bool([ref for ref in (payload.images or []) if str(getattr(ref, "url", "") or "").strip()])
+    # MiniMax H3 官方时长 4-15 秒整（超过会直接被拒）
+    seconds = max(4, min(15, seconds))
+    has_videos = any(str(v or "").strip() for v in (payload.videos or []))
+    has_audios = any(str(a or "").strip() for a in (payload.audios or []))
+    frame_roles = [str(getattr(ref, "role", "") or "").strip().lower() for ref in (payload.images or [])]
+    has_frame_roles = any(role in {"first_frame", "last_frame"} for role in frame_roles)
+    image_count = len([ref for ref in (payload.images or []) if str(getattr(ref, "url", "") or "").strip()])
+    # 首尾帧/图生视频 = 只有图片（≤2 张或带首尾帧角色）、无视频/音频参考；与 compshare_video_content 的分流保持一致
+    frame_mode = bool(image_count) and not has_videos and not has_audios and (has_frame_roles or image_count <= 2)
     ratio = str(payload.aspect_ratio or "").strip().lower()
-    if has_frames:
-        ratio = "adaptive"  # 首尾帧模式下宽高比由图片决定
+    if frame_mode:
+        # 首尾帧/图生视频：宽高比由图片决定，官方固定 adaptive
+        ratio = "adaptive"
     elif ratio not in COMPSHARE_VIDEO_RATIOS:
         ratio = "16:9"
     headers = dict(compshare_headers(api_key))
@@ -16596,8 +16643,193 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     suffix_text = " ".join(suffixes)
     return f"{text} {suffix_text}".strip() if text else suffix_text
 
+# ==================== 2026-10-25 视频模型能力档案（单一事实源） ====================
+# 「每个视频模型支持什么」的结构化档案：时长、清晰度、画幅、参考模式与素材上限、声音。
+# - 生成时：canvas_video 入口按档案二次钳制请求（时长/素材数量/素材互斥/声音），
+#   前端被绕过也不会把非法参数发给上游（此前 H3 首尾帧+参考视频混用被上游拒 RetCode 230）。
+# - 前端：GET /api/video/model-caps 拉同一份数据，切换模型时即时重渲参数面板。
+# - 自定义覆盖：data/model_caps.json（{"profiles": {...}, "keywords": {...}}），改完即生效。
+# 字段说明：
+#   duration  {"min":4,"max":15,"step":1} 连续区间，或 {"ticks":[6,10]} 固定档
+#   resolutions 允许的清晰度（小写 token）；空/缺省 = 不限制
+#   ratios    允许的画幅；空/缺省 = 不限制
+#   modes.frames 是否支持首尾帧；reference_image/video/audio 参考素材上限（0=不支持）
+#   modes.frames_only_first 首尾帧只支持首帧（如 Hailuo）
+#   audio     True=支持声音开关；False=不支持（强制静音）；None=未知（前端隐藏开关）
+VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
+    "minimax-h3": {
+        "label": "MiniMax H3",
+        "duration": {"min": 4, "max": 15, "step": 1},
+        "resolutions": ["768p", "2k"],
+        "ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "2:3", "3:2"],
+        "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
+        "audio": True,
+    },
+    "seedance-2-5": {
+        "label": "Seedance 2.5",
+        "duration": {"min": 4, "max": 30, "step": 1},
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+    "seedance": {
+        "label": "Seedance（2.0 及以下）",
+        "duration": {"min": 4, "max": 15, "step": 1},
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+    "hailuo": {
+        "label": "Hailuo 2.3",
+        "duration": {"ticks": [6, 10]},
+        "resolutions": ["768p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16"],
+        "modes": {"frames": True, "frames_only_first": True, "reference_image": 0, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+    "kling": {
+        "label": "Kling 可灵",
+        "duration": {"ticks": [5, 10]},
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "1:1", "9:16"],
+        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+    "veo": {
+        "label": "Veo 3.1",
+        "duration": {"ticks": [4, 6, 8]},
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16"],
+        "modes": {"frames": True, "reference_image": 3, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+    "sora": {
+        "label": "Sora 2",
+        "duration": {"ticks": [4, 8, 12]},
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16"],
+        "modes": {"frames": False, "reference_image": 1, "reference_video": 0, "reference_audio": 0},
+        "audio": True,
+    },
+}
+# 关键词匹配表：按顺序取第一个命中的关键词（模型名先做小写与 -/_/. 归一）。
+VIDEO_MODEL_CAP_KEYWORDS: List[Tuple[str, str]] = [
+    ("minimax-h3", "minimax-h3"),
+    ("minimax-h-3", "minimax-h3"),
+    ("h3", "minimax-h3"),
+    ("seedance-2-5", "seedance-2-5"),
+    ("seedance2-5", "seedance-2-5"),
+    ("seedance", "seedance"),
+    ("hailuo", "hailuo"),
+    ("kling", "kling"),
+    ("可灵", "kling"),
+    ("veo", "veo"),
+    ("sora", "sora"),
+]
+# 兜底档案：能力未知 → 不做任何收窄（resolutions/ratios 空 = 不限制，不钳素材），
+# 与历史行为完全一致；已知模型才按档案收紧。
+VIDEO_MODEL_CAPS_FALLBACK: Dict[str, Any] = {
+    "label": "未识别模型（不收窄）",
+    "duration": {},
+    "resolutions": [],
+    "ratios": [],
+    "modes": {},
+    "audio": None,
+}
+
+_VIDEO_MODEL_CAPS_OVERRIDES_CACHE: Dict[str, Any] = {"mtime": None, "data": {}}
+
+def _video_model_caps_overrides() -> Dict[str, Any]:
+    """读取 data/model_caps.json 里的自定义档案/关键词（文件不存在或损坏时返回空）。"""
+    path = os.path.join(APP_ROOT, "data", "model_caps.json")
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _VIDEO_MODEL_CAPS_OVERRIDES_CACHE["mtime"] == mtime:
+        return _VIDEO_MODEL_CAPS_OVERRIDES_CACHE["data"]
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    _VIDEO_MODEL_CAPS_OVERRIDES_CACHE["mtime"] = mtime
+    _VIDEO_MODEL_CAPS_OVERRIDES_CACHE["data"] = data
+    return data
+
+def video_model_caps(model_name: str, provider_id: str = "") -> Dict[str, Any]:
+    """模型名 → 能力档案。优先级：精确 ID 命中 > 关键词命中 > data/model_caps.json 自定义关键词 > 兜底。"""
+    profiles = {**VIDEO_MODEL_CAPS_PROFILES, **(_video_model_caps_overrides().get("profiles") or {})}
+    keywords = list(VIDEO_MODEL_CAP_KEYWORDS) + [
+        (str(k).lower(), str(v)) for k, v in (_video_model_caps_overrides().get("keywords") or {}).items()
+    ]
+    name = re.sub(r"[\s_./]+", "-", str(model_name or "").lower()).strip("-")
+    for pid, prof in profiles.items():
+        if name == pid or name.startswith(pid + "-"):
+            return {"profile": pid, **prof}
+    for keyword, pid in keywords:
+        if keyword and keyword in name and pid in profiles:
+            return {"profile": pid, **profiles[pid]}
+    return {"profile": "fallback", **VIDEO_MODEL_CAPS_FALLBACK}
+
+def apply_video_model_caps(payload: CanvasVideoRequest) -> Dict[str, Any]:
+    """生成前按档案钳制请求：时长、素材数量与互斥、声音。返回命中的档案（含 profile id）。"""
+    caps = video_model_caps(payload.model, payload.provider_id)
+    try:
+        dur_cfg = caps.get("duration") or {}
+        if dur_cfg.get("ticks"):
+            ticks = sorted(int(t) for t in dur_cfg["ticks"])
+            payload.duration = min(ticks, key=lambda t: abs(t - int(payload.duration or 0)))
+        elif dur_cfg.get("max"):
+            lo = int(dur_cfg.get("min") or 1)
+            payload.duration = max(lo, min(int(dur_cfg["max"]), int(payload.duration or lo)))
+    except Exception:
+        pass
+    if caps.get("audio") is False:
+        payload.generate_audio = False
+    modes = caps.get("modes") or {}
+    if not modes:
+        return caps  # 兜底档案：素材不收窄
+    images = [r for r in (payload.images or []) if str(getattr(r, "url", "") or "").strip()]
+    explicit_frames = [r for r in images if str(getattr(r, "role", "") or "").strip().lower() in {"first_frame", "last_frame"}]
+    has_videos = any(str(v or "").strip() for v in (payload.videos or []))
+    has_audios = any(str(a or "").strip() for a in (payload.audios or []))
+    frames_supported = bool(modes.get("frames"))
+    # 首尾帧模式判定（与前端/各适配器同一条规则）：显式首尾帧角色，或纯图 1-2 张且模型支持首尾帧
+    if frames_supported and (explicit_frames or (not has_videos and not has_audios and 0 < len(images) <= 2)):
+        frames = explicit_frames[:2] if explicit_frames else images[:2]
+        if modes.get("frames_only_first"):
+            frames = [r for r in frames if str(getattr(r, "role", "") or "").strip().lower() != "last_frame"][:1]
+        payload.images = frames
+        payload.videos = []
+        payload.audios = []
+    else:
+        img_cap = int(modes.get("reference_image") if modes.get("reference_image") is not None else 9)
+        vid_cap = int(modes.get("reference_video") if modes.get("reference_video") is not None else 3)
+        aud_cap = int(modes.get("reference_audio") if modes.get("reference_audio") is not None else 3)
+        payload.images = (explicit_frames if explicit_frames else images)[:max(0, img_cap)]
+        payload.videos = [str(v) for v in (payload.videos or []) if str(v or "").strip()][:max(0, vid_cap)]
+        payload.audios = [str(a) for a in (payload.audios or []) if str(a or "").strip()][:max(0, aud_cap)]
+    return caps
+
+@app.get("/api/video/model-caps")
+async def api_video_model_caps():
+    """下发视频模型能力档案：前端切换模型时按此重渲参数面板（与生成端钳制同源）。"""
+    overrides = _video_model_caps_overrides()
+    return {
+        "profiles": {**VIDEO_MODEL_CAPS_PROFILES, **(overrides.get("profiles") or {})},
+        "keywords": {k: v for k, v in VIDEO_MODEL_CAP_KEYWORDS},
+        "custom_keywords": overrides.get("keywords") or {},
+        "fallback": VIDEO_MODEL_CAPS_FALLBACK,
+    }
+
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
+    caps = apply_video_model_caps(payload)
     provider = get_api_provider(payload.provider_id)
     if is_jimeng_provider(provider):
         return await generate_jimeng_video(payload, provider)

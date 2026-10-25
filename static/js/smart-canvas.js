@@ -734,6 +734,7 @@ let settings = {
     videoMultimodal:true,
     _videoMultimodalUserSet:false,
     videoUseFrameRoles:false,
+    videoGenMode:'ref',
     videoFrameRole:'first',
     videoTrustedAsset:false,
     videoTrustedSource:'library',
@@ -2190,6 +2191,12 @@ function smartStrictBool(value, fallback=false){
 function normalizeSmartVideoModeSettings(target, preferMultimodal=false){
     if(!target || typeof target !== 'object') return target;
     target.videoUseFrameRoles = smartStrictBool(target.videoUseFrameRoles, false);
+    // 2026-10-25 三态模式归一：videoGenMode 非法/缺失时按旧布尔推导，并保持双向同步
+    if(!['t2v','ref','frames'].includes(String(target.videoGenMode || ''))){
+        target.videoGenMode = target.videoUseFrameRoles ? 'frames' : 'ref';
+    } else {
+        target.videoUseFrameRoles = target.videoGenMode === 'frames';
+    }
     if(preferMultimodal && !target.videoUseFrameRoles && target._videoMultimodalUserSet !== true) target.videoMultimodal = true;
     else target.videoMultimodal = smartStrictBool(target.videoMultimodal, false);
     if(target.videoUseFrameRoles) target.videoMultimodal = false;
@@ -3586,7 +3593,8 @@ function smartPanelKindForNode(node){
 }
 function smartPanelEngineOptions(kind){
     if(kind === 'image') return ['api','volcengine','modelscope','runninghub'];
-    if(kind === 'video') return ['api','volcengine','h3'];
+    // 2026-10-25 火山引擎并入 API 生视频平台列表，视频面板不再单列火山引擎引擎项
+    if(kind === 'video') return ['api','h3'];
     if(kind === 'audio') return ['api'];
     if(kind === 'comfy') return ['comfy'];
     return ['api','volcengine','modelscope','h3','comfy','runninghub'];
@@ -3725,7 +3733,7 @@ function applyRecentSmartSettingsForCurrentMode(){
 function clearVolcengineSelectionOutsideVolcengine(target=settings){
     if(!target || typeof target !== 'object' || target.engine === 'volcengine') return target;
     if(target.provider_id === 'volcengine') target.provider_id = '';
-    if(target.videoProvider === 'volcengine') target.videoProvider = '';
+    // 2026-10-25 火山引擎已并入 API 生视频平台列表：videoProvider='volcengine' 合法，不再清除
     return target;
 }
 function isSmartImageNode(node){
@@ -4892,6 +4900,21 @@ function h3OrderedMediaRefs(refs, limits){
 function h3MediaLimitsForSettings(s){
     if(!isMinimaxH3RunSettings(s)) return null;
     return h3MediaLimitsForMode(s?.comfyParams?.['f_h3_mode']);
+}
+// 2026-10-25 API 生视频按能力档案收参考素材上限（与后端 canvas_video → apply_video_model_caps 钳制同源）：
+//   全能参考模式 → 图/视频/音频各自上限；首尾帧模式已有专属角标逻辑（前 2 张图），返回 null 不重复处理。
+// 兜底档案（能力未知的模型）不收窄，与历史行为一致。
+function apiVideoKindLimitsForSettings(s){
+    if(!s || String(s.engine || '').toLowerCase() !== 'api' || s.apiKind !== 'video') return null;
+    const caps = apiVideoModelCaps(s.videoModel);
+    const modes = caps.modes || {};
+    if(!Object.keys(modes).length) return null;
+    if(smartStrictBool(s.videoUseFrameRoles, false)) return null;
+    return {
+        image: Math.max(0, Number(modes.reference_image ?? 9) || 0),
+        video: Math.max(0, Number(modes.reference_video ?? 3) || 0),
+        audio: Math.max(0, Number(modes.reference_audio ?? 3) || 0)
+    };
 }
 // 分组可缩小到的最小尺寸（缩小分组时组内图片随之等比缩小，靠这个区间产生缩放系数）。
 const SMART_GROUP_MIN_WIDTH = 150;
@@ -8985,10 +9008,13 @@ function syncJimengVideoModelPillForRefs(){
 function sanitizeSmartApiSelection(target=settings){
     if(!target || typeof target !== 'object') return target;
     if(target.engine === 'volcengine'){
+        // 2026-10-25 火山引擎并入 API 生视频：旧「火山引擎」视频节点自动迁移为
+        // API 引擎 + 火山引擎平台（参数/模型原样保留）；生图仍走独立火山引擎引擎。
         if(target.apiKind === 'video'){
             target.videoProvider = 'volcengine';
             const models = volcengineVideoModels();
             if(!models.includes(target.videoModel)) target.videoModel = models[0] || '';
+            target.engine = 'api';
         } else {
             target.provider_id = 'volcengine';
             const models = providerImageModels('volcengine');
@@ -9021,7 +9047,8 @@ function modelscopeImageModels(){
 }
 const DEFAULT_VIDEO_MODELS = ['veo3-fast','veo3','sora','runway','kling','pika','minimax-video','wan-v2','seedance-1.0-pro','jimeng-vide-3.0','jimeng-video-3.0-pro'];
 function videoApiProviders(){
-    const fromConfig = (apiProviders || []).filter(p => p.enabled !== false && p.id !== 'volcengine' && (p.video_models || []).length);
+    // 2026-10-25 火山引擎并入 API 生视频平台列表（不再是独立引擎），与其他平台同面板同参数
+    const fromConfig = (apiProviders || []).filter(p => p.enabled !== false && (p.video_models || []).length);
     if(fromConfig.length) return fromConfig;
     return [{id:'comfly', name:'Comfly', video_models:DEFAULT_VIDEO_MODELS, enabled:true}];
 }
@@ -9236,16 +9263,52 @@ function showOptimizeResultPopup(anchorEl){
         if(btn) await runPromptOptimize(btn, request.prompt, request.refs);
     };
 }
-function renderVideoModeControl(){
-    const isFrame = smartStrictBool(settings.videoUseFrameRoles, false);
-    const current = isFrame ? '首尾帧' : '全能参考';
-    return '<div class="smart-control video-mode-control"><button class="smart-pill" type="button"><i data-lucide="images"></i><span>' + current + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button><div class="smart-popover compact-popover"><div class="smart-popover-title">参考模式</div><div class="model-list"><button type="button" class="direct-option' + (isFrame ? '' : ' active') + '" data-smart-param="videoUseFrameRoles" data-smart-value="false"><span>全能参考</span></button><button type="button" class="direct-option' + (isFrame ? ' active' : '') + '" data-smart-param="videoUseFrameRoles" data-smart-value="true"><span>首尾帧</span></button></div></div></div>';
+// 2026-10-25 生成模式三选一：文生视频 / 全能参考 / 首尾帧（文生视频为本版新增）。
+// 状态存 settings.videoGenMode（'t2v'|'ref'|'frames'），并同步 videoUseFrameRoles 布尔兼容旧逻辑。
+function videoGenModeOf(s){
+    const v = String(s?.videoGenMode || '');
+    if(['t2v','ref','frames'].includes(v)) return v;
+    return smartStrictBool(s?.videoUseFrameRoles, false) ? 'frames' : 'ref';
 }
-// 2026-10-19 输出声音 开/关：Seedance generate_audio 官方默认 true（自动人声/音效/BGM）。
-// 「开」提交 true，「关」显式提交 false 才是真静音（后端需显式透传，不能只在不传时靠默认）。
-function renderVideoAudioControl(){
+// 返回面板分区 HTML（嵌入打包面板 popover），不再是独立 pill。模型不支持的模式置灰并注明原因。
+function renderVideoModeControl(){
+    const caps = apiVideoModelCaps(settings.videoModel);
+    const modes = caps.modes || {};
+    const hasModes = Object.keys(modes).length > 0; // 兜底档案无 modes → 不收窄
+    const framesOk = hasModes ? !!modes.frames : true;
+    const refCap = Math.max(Number(modes.reference_image ?? 9) || 0, Number(modes.reference_video ?? 3) || 0, Number(modes.reference_audio ?? 3) || 0);
+    const refOk = hasModes ? refCap > 0 : true;
+    let mode = videoGenModeOf(settings);
+    // 当前选中模式该模型不支持 → 自动切到支持的模式（保持旧的防呆行为）
+    if(mode === 'frames' && !framesOk) mode = refOk ? 'ref' : (hasModes && modes.t2v !== false ? 't2v' : mode);
+    if(mode === 'ref' && !refOk) mode = framesOk ? 'frames' : (hasModes && modes.t2v !== false ? 't2v' : mode);
+    settings.videoGenMode = mode;
+    settings.videoUseFrameRoles = mode === 'frames';
+    const framesHint = modes.frames_only_first ? '仅首帧 · 该模型无尾帧' : (framesOk ? '1-2 张图，图1=首帧、图2=尾帧' : '该模型不支持首尾帧');
+    const refHint = refOk ? ('图 \u2264' + (Number(modes.reference_image ?? 9) || 9) + ' · 视频 \u2264' + (Number(modes.reference_video ?? 3) || 3) + ' · 音频 \u2264' + (Number(modes.reference_audio ?? 3) || 3)) : '该模型不支持多模态参考输入';
+    const opt = function(value, label, hint){
+        const ok = value === 't2v' ? (hasModes ? modes.t2v !== false : true) : (value === 'ref' ? refOk : framesOk);
+        const active = mode === value;
+        if(!ok) return '<div class="packed-res-btn" style="opacity:.4;cursor:not-allowed;" title="' + hint + '">' + label + ' \u00b7 ' + hint + '</div>';
+        return '<button type="button" class="packed-res-btn' + (active ? ' active' : '') + '" data-smart-param="videoGenMode" data-smart-value="' + value + '">' + label + '</button>';
+    };
+    return '<div class="packed-section-label">\u751f\u6210\u6a21\u5f0f</div><div class="packed-res-row">' + opt('t2v', '\u6587\u751f\u89c6\u9891', '\u65e0\u9700\u7d20\u6750\uff0c\u76f4\u63a5\u6309\u63cf\u8ff0\u751f\u6210') + opt('ref', '\u5168\u80fd\u53c2\u8003', refHint) + opt('frames', '\u9996\u5c3e\u5e27', framesHint) + '</div>';
+}
+// 2026-10-25 输出声音并入打包面板（原独立 pill 移除）：「开（默认）/ 关（静音）」两个档位按钮。
+// audio:false 的模型强制静音（分区显示禁用说明）；audio:null（未知）且非兜底档案时隐藏分区。
+function renderVideoSoundSection(){
+    const caps = apiVideoModelCaps(settings.videoModel);
+    const audioCap = Object.prototype.hasOwnProperty.call(caps, 'audio') ? caps.audio : null;
+    if(audioCap === false){
+        settings.videoGenerateAudio = false;
+        return '<div class="packed-section-label" style="opacity:.5">\u8f93\u51fa\u58f0\u97f3</div><div class="packed-sound-note">\u8be5\u6a21\u578b\u4e0d\u652f\u6301\u8f93\u51fa\u58f0\u97f3 \u00b7 \u5df2\u5f3a\u5236\u9759\u97f3</div>';
+    }
+    if(audioCap === null && caps.profile !== 'fallback') return '';
     const on = smartStrictBool(settings.videoGenerateAudio, true);
-    return '<div class="smart-control video-audio-control"><button class="smart-pill" type="button" title="是否生成同步声音（人声/音效/背景音乐）。关=静音视频"><i data-lucide="' + (on ? 'volume-2' : 'volume-x') + '"></i><span>声音 ' + (on ? '开' : '关') + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button><div class="smart-popover compact-popover"><div class="smart-popover-title">输出声音</div><div class="model-list"><button type="button" class="direct-option' + (on ? ' active' : '') + '" data-smart-param="videoGenerateAudio" data-smart-value="true"><span>🔊 开（默认）</span></button><button type="button" class="direct-option' + (on ? '' : ' active') + '" data-smart-param="videoGenerateAudio" data-smart-value="false"><span>🔇 关（静音）</span></button></div></div></div>';
+    return '<div class="packed-section-label">\u8f93\u51fa\u58f0\u97f3</div><div class="packed-res-row">' +
+        '<button type="button" class="packed-res-btn' + (on ? ' active' : '') + '" data-smart-param="videoGenerateAudio" data-smart-value="true">\ud83d\udd0a \u5f00\uff08\u9ed8\u8ba4\uff09</button>' +
+        '<button type="button" class="packed-res-btn' + (on ? '' : ' active') + '" data-smart-param="videoGenerateAudio" data-smart-value="false">\ud83d\udd07 \u5173\uff08\u9759\u97f3\uff09</button>' +
+        '</div><div class="packed-sound-hint">\u751f\u6210\u540c\u6b65\u4eba\u58f0 / \u97f3\u6548 / \u80cc\u666f\u97f3\u4e50\uff1b\u5173\u95ed\u8f93\u51fa\u65e0\u58f0\u89c6\u9891</div>';
 }
 let _cachedOptimizedPrompt = '';
 let _cachedOptimizedPromptOriginal = '';
@@ -9360,24 +9423,130 @@ function syncPackedDurPillSummary(input){
     if(!/\d+s\s*$/.test(text)) return;
     span.textContent = text.replace(/\d+s\s*$/, input.value + 's');
 }
+// 2026-10-25 视频模型能力档案（前端镜像，与后端 main.py VIDEO_MODEL_CAPS_PROFILES 同源；
+// 后端另有 GET /api/video/model-caps 与 data/model_caps.json 覆盖，启动后异步刷新）。
+// 生成端（canvas_video → apply_video_model_caps）会按同一档案二次钳制，前端只负责「不让用户选错」。
+const API_VIDEO_MODEL_CAPS = {
+    'minimax-h3': {
+        duration:{min:4, max:15, step:1},
+        resolutions:['768p', '2k'],
+        ratios:['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9', '2:3', '3:2'],
+        modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
+        audio:true
+    },
+    'seedance-2-5': {
+        duration:{min:4, max:30, step:1},
+        resolutions:['480p', '720p', '1080p'],
+        ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        audio:true
+    },
+    'seedance': {
+        duration:{min:4, max:15, step:1},
+        resolutions:['480p', '720p', '1080p'],
+        ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        audio:true
+    },
+    'hailuo': {
+        duration:{ticks:[6, 10]},
+        resolutions:['768p', '1080p'],
+        ratios:['16:9', '4:3', '1:1', '3:4', '9:16'],
+        modes:{frames:true, frames_only_first:true, reference_image:0, reference_video:0, reference_audio:0},
+        audio:true
+    },
+    'kling': {
+        duration:{ticks:[5, 10]},
+        resolutions:['720p', '1080p'],
+        ratios:['16:9', '1:1', '9:16'],
+        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        audio:true
+    },
+    'veo': {
+        duration:{ticks:[4, 6, 8]},
+        resolutions:['720p', '1080p'],
+        ratios:['16:9', '9:16'],
+        modes:{frames:true, reference_image:3, reference_video:0, reference_audio:0},
+        audio:true
+    },
+    'sora': {
+        duration:{ticks:[4, 8, 12]},
+        resolutions:['720p', '1080p'],
+        ratios:['16:9', '9:16'],
+        modes:{frames:false, reference_image:1, reference_video:0, reference_audio:0},
+        audio:true
+    }
+};
+const API_VIDEO_CAP_KEYWORDS = [
+    ['minimax-h3', 'minimax-h3'], ['minimax-h-3', 'minimax-h3'], ['h3', 'minimax-h3'],
+    ['seedance-2-5', 'seedance-2-5'], ['seedance2-5', 'seedance-2-5'], ['seedance', 'seedance'],
+    ['hailuo', 'hailuo'], ['kling', 'kling'], ['可灵', 'kling'], ['veo', 'veo'], ['sora', 'sora']
+];
+// 兜底：能力未知 → 不收窄（resolutions/ratios 空 = 不限制），与历史行为一致。
+const API_VIDEO_CAP_FALLBACK = {duration:{}, resolutions:[], ratios:[], modes:{}, audio:null};
+let _apiVideoCapsCustom = null; // 后端 data/model_caps.json 自定义覆盖（异步拉取）
+function apiVideoModelCaps(modelName){
+    const name = String(modelName ?? settings.videoModel ?? '').toLowerCase().replace(/[\s_./]+/g, '-').replace(/^-+|-+$/g, '');
+    const profiles = {...API_VIDEO_MODEL_CAPS, ...(_apiVideoCapsCustom?.profiles || {})};
+    for(const [pid, prof] of Object.entries(profiles)){
+        if(name === pid || name.startsWith(pid + '-')) return {profile:pid, ...prof};
+    }
+    const keywords = [...API_VIDEO_CAP_KEYWORDS, ...Object.entries(_apiVideoCapsCustom?.keywords || {})];
+    for(const [kw, pid] of keywords){
+        if(kw && name.includes(String(kw).toLowerCase()) && profiles[pid]) return {profile:pid, ...profiles[pid]};
+    }
+    return {profile:'fallback', ...API_VIDEO_CAP_FALLBACK};
+}
+// 后端下发同源档案 + 自定义覆盖（失败静默：前端镜像表已够用）
+(async function refreshApiVideoCapsFromBackend(){
+    try{
+        const r = await fetch('/api/video/model-caps');
+        if(!r.ok) return;
+        const data = await r.json();
+        if(!data || typeof data !== 'object') return;
+        const customProfiles = {};
+        for(const [pid, prof] of Object.entries(data.profiles || {})){
+            if(API_VIDEO_MODEL_CAPS[pid]) continue; // 内置档案以本地为准（同源）
+            customProfiles[pid] = prof;
+        }
+        _apiVideoCapsCustom = {profiles:customProfiles, keywords:data.custom_keywords || {}};
+    }catch(_){ /* 离线/旧后端：静默用镜像表 */ }
+})();
 // 2026-10-19 视频时长范围按「模型」判定（此前按平台一刀切会误伤 Seedance 2.5）：
 //   Seedance 2.5 → 官方 4-30s；其他 Seedance（2.0 / 2.0-fast / 1.5-pro）→ 4-15s；非 Seedance 平台 → 1-30s。
+// 2026-10-25 改为读能力档案：H3 → 4-15s、Seedance 2.5 → 4-30s、固定档模型（Hailuo/Kling/Veo/Sora）→ ticks。
+// 返回值带 ticks 字段（固定档模型）供面板渲染档位按钮；调用方兼容 {min,max} 旧格式。
 function videoDurationRangeForProvider(providerId, modelName){
-    const model = String(modelName ?? settings.videoModel ?? '').toLowerCase().replace(/_/g, '-').replace(/\./g, '-');
-    if(model.includes('seedance')){
-        if(model.includes('seedance-2-5') || model.includes('seedance2-5')) return {min:4, max:30};
-        return {min:4, max:15};
-    }
+    const caps = apiVideoModelCaps(modelName);
+    const dur = caps.duration || {};
+    if(dur.ticks && dur.ticks.length) return {ticks:dur.ticks.slice(), min:Math.min(...dur.ticks), max:Math.max(...dur.ticks)};
+    if(dur.max) return {min:Number(dur.min) || 1, max:Number(dur.max)};
     return {min:1, max:30};
 }
 function renderVideoPackedControl(){
     const resOptions = [['', 'Auto'], ['480p', '480P'], ['720p', '720P'], ['1080p', '1080P']];
     const aspOptions = [['', 'Auto'], ['16:9','16:9'], ['4:3','4:3'], ['1:1','1:1'], ['3:4','3:4'], ['9:16','9:16'], ['21:9','21:9']];
-    const res = settings.videoResolution || '';
-    const asp = settings.videoAspect || '16:9';
-    // 2026-10-19 时长按模型判定：Seedance 2.5 = 4-30s，其他 Seedance = 4-15s，非 Seedance 平台 1-30s。
+    // 2026-10-25 能力档案联动：只渲染该模型支持的画幅/清晰度，越界的当前值自动归位。
+    const caps = apiVideoModelCaps(settings.videoModel);
+    const allowedRes = (caps.resolutions || []).map(s => String(s).toLowerCase());
+    const allowedAsp = (caps.ratios || []).map(s => String(s).toLowerCase());
+    let res = settings.videoResolution || '';
+    let asp = settings.videoAspect || '16:9';
+    if(allowedRes.length && !allowedRes.includes(res.toLowerCase())){
+        // 当前清晰度该模型不支持 → 回退到档案第一档（多为 '768p'）；模型没声明 Auto 时不留空档
+        res = allowedRes[0] || '';
+        settings.videoResolution = res;
+    }
+    if(allowedAsp.length && !allowedAsp.includes(asp.toLowerCase())){
+        asp = allowedAsp.includes('16:9') ? '16:9' : allowedAsp[0];
+        settings.videoAspect = asp;
+    }
+    const shownResOptions = allowedRes.length ? resOptions.filter(o => !o[0] || allowedRes.includes(o[0])) : resOptions;
+    const shownAspOptions = allowedAsp.length ? aspOptions.filter(o => !o[0] || allowedAsp.includes(o[0])) : aspOptions;
+    // 2026-10-19 时长按模型判定；2026-10-25 读档案（固定档模型走 ticks 按钮而非滑条）。
     const durRange = videoDurationRangeForProvider(settings.videoProvider, settings.videoModel);
-    const dur = Math.max(durRange.min, Math.min(durRange.max, Number(settings.videoDuration) || 5));
+    const dur = Math.max(durRange.min, Math.min(durRange.max, Number(settings.videoDuration) || (durRange.ticks ? durRange.ticks[0] : 5)));
+    settings.videoDuration = dur;
     // 生成数量：方舟没有批量参数，前端并发提交 N 次（官方并发上限 3，第 4 个排队补发）。
     const count = [1, 2, 4].includes(Number(settings.videoCount)) ? Number(settings.videoCount) : 1;
     const aspLabel = (aspOptions.find(o => o[0] === asp) || [asp, asp]).filter(Boolean)[1] || asp;
@@ -9386,10 +9555,12 @@ function renderVideoPackedControl(){
     let h = '<div class="smart-control video-packed-control">';
     h += '<button class="smart-pill" type="button"><i data-lucide="smartphone"></i><span>' + summary + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button>';
     h += '<div class="smart-popover packed-popover">';
-    // 比例
+    // 2026-10-25 生成模式（文生视频/全能参考/首尾帧）并入面板第一位
+    h += renderVideoModeControl();
+    // 比例（档案不支持的档位不渲染；adaptive 只有档案声明才有）
     h += '<div class="packed-section-label">\u6bd4\u4f8b</div>';
     h += '<div class="packed-ratio-grid">';
-    aspOptions.forEach(function(o){
+    shownAspOptions.forEach(function(o){
         var cls = 'ratio-thumb' + (o[0] === asp ? ' active' : '');
         var iconCls = videoAspectIconClass(o[0]) || 'r-auto';
         h += '<button type="button" class="' + cls + '" data-smart-param="videoAspect" data-smart-value="' + o[0] + '"><span class="ratio-icon ' + iconCls + '"></span><span class="ratio-name">' + o[1] + '</span></button>';
@@ -9398,13 +9569,21 @@ function renderVideoPackedControl(){
     // 清晰度
     h += '<div class="packed-section-label">\u6e05\u6670\u5ea6</div>';
     h += '<div class="packed-res-row">';
-    resOptions.forEach(function(o){
+    shownResOptions.forEach(function(o){
         h += '<button type="button" class="packed-res-btn' + (o[0] === res ? ' active' : '') + '" data-smart-param="videoResolution" data-smart-value="' + o[0] + '">' + o[1] + '</button>';
     });
     h += '</div>';
-    // 时长
+    // 时长：固定档模型（Hailuo/Kling/Veo/Sora）渲染档位按钮，其余渲染滑条
     h += '<div class="packed-section-label">\u89c6\u9891\u65f6\u957f</div>';
-    h += '<div class="packed-dur-row"><input type="range" min="' + durRange.min + '" max="' + durRange.max + '" step="1" class="packed-dur-slider" data-param="videoDuration" value="' + dur + '"><span class="packed-dur-val">' + dur + 's</span></div>';
+    if(durRange.ticks){
+        h += '<div class="packed-dur-row">';
+        durRange.ticks.forEach(function(t){
+            h += '<button type="button" class="packed-count-btn' + (t === dur ? ' active' : '') + '" data-smart-param="videoDuration" data-smart-value="' + t + '">' + t + 's</button>';
+        });
+        h += '</div>';
+    } else {
+        h += '<div class="packed-dur-row"><input type="range" min="' + durRange.min + '" max="' + durRange.max + '" step="1" class="packed-dur-slider" data-param="videoDuration" value="' + dur + '"><span class="packed-dur-val">' + dur + 's</span></div>';
+    }
     // 生成数量（多结果并发提交，单价×数量即总费用）
     h += '<div class="packed-section-label">\u751f\u6210\u6570\u91cf</div>';
     h += '<div class="packed-count-row">';
@@ -9412,6 +9591,8 @@ function renderVideoPackedControl(){
         h += '<button type="button" class="packed-count-btn' + (n === count ? ' active' : '') + '" data-smart-param="videoCount" data-smart-value="' + n + '">' + n + ' \u4e2a</button>';
     });
     h += '</div>';
+    // 2026-10-25 输出声音（开默认/关静音）并入面板；不支持声音的模型显示强制静音说明，未知档案隐藏
+    h += renderVideoSoundSection();
     h += '</div></div>';
     return h;
 }
@@ -9681,8 +9862,6 @@ function renderApiVideoParams(){
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
-        ${renderVideoModeControl()}
-        ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
         ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
@@ -9771,8 +9950,6 @@ function renderVolcengineVideoParams(){
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
-        ${renderVideoModeControl()}
-        ${renderVideoAudioControl()}
         ${renderVideoPackedControl()}
         ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
@@ -11706,11 +11883,17 @@ function smartComfyRandomValue(field){
 }
 function setDynamicSetting(key, value){
     const numericKeys = new Set(['count','videoCount','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','audioSpeed','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioVoice','audioSpeed','videoUseFrameRoles','videoGenerateAudio']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioVoice','audioSpeed','videoUseFrameRoles','videoGenerateAudio','videoGenMode']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     // 布尔类参数：data-smart-value 传的是字符串，先转真布尔再落库（否则 "false" 会被当 true）
     if(key === 'videoGenerateAudio') settings.videoGenerateAudio = smartStrictBool(value, true);
     if(key === 'videoUseFrameRoles') settings.videoUseFrameRoles = smartStrictBool(value, false);
+    // 2026-10-25 生成模式三选一：同步旧布尔（frames→true，其余 false），旧逻辑继续可用
+    if(key === 'videoGenMode'){
+        const v = ['t2v','ref','frames'].includes(String(value)) ? String(value) : 'ref';
+        settings.videoGenMode = v;
+        settings.videoUseFrameRoles = v === 'frames';
+    }
     if(key === 'count') settings.count = clampSmartGenerationCount(settings.count, 1);
     // 视频生成数量只开放 1/2/4（方舟并发上限 3，前端自动排队）
     if(key === 'videoCount') settings.videoCount = [1, 2, 4].includes(Number(settings.videoCount)) ? Number(settings.videoCount) : 1;
@@ -28644,11 +28827,18 @@ function renderInputThumbsRow(node){
     // 不是 H3 节点时 h3LimitByKind 为 null —— 普通 ComfyUI / API 生成不受这套限额约束。
     const h3LimitSettings = node ? smartSettingsForNode(node) : null;
     const h3LimitByKind = h3MediaLimitsForSettings(h3LimitSettings);
+    // 2026-10-25 API 生视频同样按能力档案收素材上限（H3 9图/3视频/3音频、Seedance 4图等）；
+    // 与 H3 ComfyUI 的限额共用一套「超限不参与」渲染，互斥：H3 ComfyUI 走自己的表。
+    const vs = h3LimitSettings || {};
+    const apiLimitByKind = h3LimitByKind ? null : apiVideoKindLimitsForSettings(vs);
+    const kindLimitMap = h3LimitByKind || apiLimitByKind;
     const h3ModeLimit = h3LimitByKind ? String(h3LimitSettings?.comfyParams?.['f_h3_mode'] ?? '全能参考') : null;
     // 2026-10-19 API 生视频「首尾帧」模式：图1=首帧、图2=尾帧（单图时角标可点切换首/尾），
     // 第 3 张起图片与参考视频/音频全部置灰「不参与」，提交时同步过滤（见 runApiVideoGeneration）。
-    const vs = h3LimitSettings || {};
-    const videoFrameMode = isApiLikeEngine(vs.engine) && vs.apiKind === 'video' && smartStrictBool(vs.videoUseFrameRoles, false);
+    // 2026-10-25 「文生视频」模式：所有素材一律不参与（提交不带素材）。
+    const vsGenMode = (isApiLikeEngine(vs.engine) && vs.apiKind === 'video') ? videoGenModeOf(vs) : '';
+    const videoT2vMode = vsGenMode === 't2v';
+    const videoFrameMode = vsGenMode === 'frames';
     const videoFrameRole = vs.videoFrameRole === 'last' ? 'last' : 'first';
     const manualRefKeys = new Set(manualReferenceImagesFor(node).map(img => inputRefKey(img)));
     const addActive = acceptsRefs && mentionInsertMode === 'manual-ref';
@@ -28665,6 +28855,8 @@ function renderInputThumbsRow(node){
         audioRefNode,
         mode: node ? smartImageMode(node) : '',
         h3ModeLimit,
+        apiLimits: apiLimitByKind || null,
+        videoT2vMode,
         videoFrameMode,
         videoFrameRole
     });
@@ -28696,13 +28888,16 @@ function renderInputThumbsRow(node){
             ? smartVideoLiveThumbHtml(img, 'draggable="false"') + `<span class="input-thumb-play" aria-hidden="true"></span><span class="input-thumb-dur" aria-hidden="true">--</span>`
             : smartPreviewImgHtml(img, 256, 'draggable="false"');
         const count = (mediaCounters[kind] = (mediaCounters[kind] || 0) + 1);
-        // 只有 image / video / audio 参与 H3 限额；其它 kind 不设限。
-        const kindLimit = h3LimitByKind && Object.prototype.hasOwnProperty.call(h3LimitByKind, kind) ? h3LimitByKind[kind] : null;
+        // 只有 image / video / audio 参与限额（H3 ComfyUI 模式表 / API 能力档案）；其它 kind 不设限。
+        const kindLimit = kindLimitMap && Object.prototype.hasOwnProperty.call(kindLimitMap, kind) ? kindLimitMap[kind] : null;
         const overLimit = kindLimit !== null && count > kindLimit;
         // 首尾帧模式：图片前 2 张生效（1 首帧 2 尾帧），其余图片与视频/音频不参与。
+        // 文生视频模式：所有素材一律不参与。
         let frameExcluded = false;
         let frameRoleBadge = '';
-        if(videoFrameMode && ['image','video','audio'].includes(kind)){
+        if(videoT2vMode && ['image','video','audio'].includes(kind)){
+            frameExcluded = true;
+        } else if(videoFrameMode && ['image','video','audio'].includes(kind)){
             if(kind === 'image' && count <= 2){
                 const imageTotal = dedup.filter(item => mediaKindForItem(item) === 'image').length;
                 const isLast = count === 2 || (count === 1 && imageTotal === 1 && videoFrameRole === 'last');
@@ -35605,13 +35800,21 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             }
             return ref?.url;
         };
-        // 2026-10-19 首尾帧模式：只取前 2 张图（图1=首帧、图2=尾帧；仅 1 张时按 videoFrameRole
-        // 指定首或尾），第 3 张起图片与参考视频/音频一律不提交（官方要求首尾帧与其他参考互斥）。
-        const frameMode = smartStrictBool(runSettings.videoUseFrameRoles, false);
+        // 2026-10-25 能力档案：全能参考模式下按模型上限裁剪素材（H3 图9/视频3/音频3、Seedance 图4 等），
+        // 首尾帧模式维持「前 2 张图、不提交视频/音频」；与后端 canvas_video 钳制同源，双保险。
+        const capModes = apiVideoModelCaps(runSettings.videoModel).modes || {};
+        const capHasModes = Object.keys(capModes).length > 0;
+        const capImg = capHasModes ? Math.max(0, Number(capModes.reference_image ?? 9) || 0) : Infinity;
+        const capVid = capHasModes ? Math.max(0, Number(capModes.reference_video ?? 3) || 0) : Infinity;
+        const capAud = capHasModes ? Math.max(0, Number(capModes.reference_audio ?? 3) || 0) : Infinity;
+        // 2026-10-25 三态生成模式：文生视频（t2v）不携带任何素材直接提交；首尾帧维持前 2 张图。
+        const genMode = videoGenModeOf(runSettings);
+        const t2vMode = genMode === 't2v';
+        const frameMode = genMode === 'frames';
         const frameRole = runSettings.videoFrameRole === 'last' ? 'last' : 'first';
         const allImages = imageRefsOnly(uploadedRefs);
-        const frameImages = frameMode ? allImages.slice(0, 2) : allImages;
-        const refImages = frameImages.map((ref, i) => {
+        const frameImages = frameMode ? allImages.slice(0, 2) : allImages.slice(0, capImg);
+        const refImages = t2vMode ? [] : frameImages.map((ref, i) => {
             const item = {url:effUrl(ref), name:ref.name || `图${i + 1}`};
             if(frameMode){
                 if(frameImages.length === 1) item.role = frameRole === 'last' ? 'last_frame' : 'first_frame';
@@ -35620,8 +35823,8 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             return item;
         });
         const manualVideo = manualSmartVideoLink(runSettings)?.url || '';
-        const refVideos = frameMode ? [] : (manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean));
-        const refAudios = frameMode ? [] : audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
+        const refVideos = (t2vMode || frameMode) ? [] : (manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean)).slice(0, capVid);
+        const refAudios = (t2vMode || frameMode) ? [] : audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, capAud);
         if(mismatchedAsset) toast('部分认证素材属于其它平台，已回退为普通素材。切换到对应平台的视频接口才能用 asset:// 认证地址。');
         const durRange = videoDurationRangeForProvider(runSettings.videoProvider, runSettings.videoModel);
         const payload = {

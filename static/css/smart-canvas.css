@@ -12339,6 +12339,9 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 .packed-count-btn { flex: 1; padding: 8px 0; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: var(--text-primary, #ddd); font-size: 13px; cursor: pointer; text-align: center; }
 .packed-count-btn:hover { background: rgba(255,255,255,.1); }
 .packed-count-btn.active { border-color: var(--accent, #4f8cff); background: rgba(79,140,255,.15); color: #fff; }
+/* 2026-10-25 输出声音分区（并入打包面板）：禁用说明与副提示 */
+.packed-sound-note { font-size: 12px; color: var(--text-tertiary, #888); background: rgba(255,255,255,.04); border: 1px dashed rgba(255,255,255,.14); border-radius: 8px; padding: 8px 10px; text-align: center; }
+.packed-sound-hint { font-size: 11px; color: var(--text-tertiary, #777); margin-top: 6px; line-height: 1.5; }
 
 
 /* optimize prompt button */
