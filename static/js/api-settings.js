@@ -243,6 +243,39 @@ const RECOMMENDED_APIS = [
         audio_models:['IndexTTS-2.5']
     },
     {
+        id:'bailian',
+        name:'阿里百炼',
+        category:'stable',
+        base_url:'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        protocol:'openai',
+        register_url:'https://bailian.console.aliyun.com/?apiKey=1#/api-key',
+        tagKeys:['api.tagImageModels','api.tagVideoModels','LLM'],
+        icons:['IMG','VID','LLM'],
+        summaryKey:'api.recommendBailianSummary',
+        keyHint:'百炼控制台 → API-KEY 管理，创建 sk- 开头的 Key',
+        advantages:['Qwen-Image 官方生图与图像编辑', '通义千问全系大模型', 'Wan 系列文生/图生视频', '新用户赠送免费额度'],
+        image_models:['qwen-image', 'qwen-image-edit'],
+        chat_models:['qwen-plus', 'qwen-max'],
+        video_models:['wan2.5-t2v', 'wan2.5-i2v']
+    },
+    {
+        id:'modelscope',
+        name:'ModelScope',
+        category:'stable',
+        base_url:'https://api-inference.modelscope.cn/v1',
+        protocol:'openai',
+        // 2026-10-26（用户要求）：挂用户魔搭邀请链接（邀请码 GBZ AI，空格转 %20）
+        register_url:'https://www.modelscope.cn/register?inviteCode=GBZ%20AI&invitorName=hans186',
+        tagKeys:['api.tagImageModels','api.tagVideoModels','LLM'],
+        icons:['IMG','VID','LLM'],
+        summaryKey:'api.recommendModelscopeSummary',
+        keyHint:'魔搭 → 访问令牌 TOKEN，新建令牌后复制（ms- 开头）',
+        advantages:['Qwen-Image / FLUX 官方免费推理', '通义千问全系 LLM 免费调用', 'Wan 视频生成与语音合成', '每日免费额度，注册即用'],
+        image_models:['Qwen/Qwen-Image', 'black-forest-labs/FLUX.1-schnell'],
+        chat_models:['Qwen/Qwen3-32B'],
+        video_models:['Wan-AI/Wan2.2-T2V-A14B']
+    },
+    {
         id:'lingjing',
         name:'灵境API',
         category:'cheap',

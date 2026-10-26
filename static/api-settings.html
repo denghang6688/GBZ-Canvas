@@ -45,12 +45,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/vendor/js/lucide.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/js/theme.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/js/i18n.js?v=V26.10.26.1.1792979323"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.26.1.1792979323">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.26.1.1792979323">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.26.2.1790042522"></script>
+    <script src="/static/vendor/js/lucide.js?v=V26.10.26.2.1790042522"></script>
+    <script src="/static/js/theme.js?v=V26.10.26.2.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V26.10.26.2.1790305929"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.26.2.1790492361">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.26.2.1792995554">
 </head>
 <body class="studio-theme-dark">
     <div class="page">
@@ -74,7 +74,7 @@
                     <div class="side-section-title" data-i18n="api.providersTitle">平台列表</div>
                     <div id="providerList" class="provider-list"></div>
                     <button class="add-btn" type="button" onclick="addProvider()"><i data-lucide="plus" class="w-4 h-4"></i><span data-i18n="api.addProvider">新增平台</span></button>
-                    <button class="api-link-btn" type="button" onclick="openRecommendApi()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
+                    <button class="api-link-btn recommend-glow" type="button" onclick="openRecommendApi()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
                     <div class="cli-quick-group">
                         <div class="side-section-title" data-i18n="api.cliSettings">CLI 设置</div>
                         <div class="cli-quick-list">
@@ -685,7 +685,7 @@
             setTimeout(force, 0);
         })();
     </script>
-    <script src="/static/js/api-settings.js?v=V26.10.26.1.1792979323"></script>
+    <script src="/static/js/api-settings.js?v=V26.10.26.2.1792999132"></script>
     <script>
         (function(){
             function applyApiPageTheme(theme) {
@@ -930,6 +930,46 @@ html.theme-dark body.show-recommend-mode .api-link-btn:hover{
 }
 html.studio-theme-dark body .api-link-btn::after,
 html.theme-dark body .api-link-btn::after{ content:none !important; }
+/* 2026-10-26 推荐API按钮：紫色亮点标识（深色主题，须与本表深色规则同特异性才能覆盖） */
+html.studio-theme-dark body .api-link-btn.recommend-glow,
+html.studio-theme-dark body.show-recommend-mode .api-link-btn.recommend-glow,
+html.studio-theme-dark body.show-provider-onboarding .api-link-btn.recommend-glow,
+html.theme-dark body .api-link-btn.recommend-glow,
+html.theme-dark body.show-recommend-mode .api-link-btn.recommend-glow,
+html.theme-dark body.show-provider-onboarding .api-link-btn.recommend-glow{
+  background:linear-gradient(135deg, rgba(139,109,255,.18), rgba(109,124,255,.10)) !important;
+  border:1px solid rgba(139,109,255,.6) !important; color:#e9e4ff !important;
+  box-shadow:0 0 0 1px rgba(139,109,255,.14), 0 4px 16px rgba(109,92,255,.22) !important;
+}
+html.studio-theme-dark body .api-link-btn.recommend-glow:hover,
+html.theme-dark body .api-link-btn.recommend-glow:hover{
+  background:linear-gradient(135deg, rgba(139,109,255,.32), rgba(109,124,255,.20)) !important;
+  border-color:rgba(160,140,255,.85) !important; color:#ffffff !important;
+  box-shadow:0 0 0 1px rgba(139,109,255,.28), 0 6px 20px rgba(109,92,255,.34) !important;
+}
+html.studio-theme-dark body .api-link-btn.recommend-glow i,
+html.studio-theme-dark body .api-link-btn.recommend-glow svg,
+html.theme-dark body .api-link-btn.recommend-glow i,
+html.theme-dark body .api-link-btn.recommend-glow svg{ color:#a78bff !important; }
+/* 终极兜底：压过主题层的通用按钮重置（.sidebar button / button:not(...) 等 !important 规则） */
+html body button.api-link-btn.recommend-glow,
+html body .sidebar button.api-link-btn.recommend-glow{
+  background:linear-gradient(135deg, rgba(139,109,255,.20), rgba(109,124,255,.11)) !important;
+  border:1px solid rgba(139,109,255,.65) !important; color:#e9e4ff !important;
+  box-shadow:0 0 0 1px rgba(139,109,255,.16), 0 4px 16px rgba(109,92,255,.24) !important;
+}
+html body button.api-link-btn.recommend-glow:hover,
+html body .sidebar button.api-link-btn.recommend-glow:hover{
+  background:linear-gradient(135deg, rgba(139,109,255,.34), rgba(109,124,255,.22)) !important;
+  border-color:rgba(165,148,255,.9) !important; color:#ffffff !important;
+}
+html body button.api-link-btn.recommend-glow i,
+html body button.api-link-btn.recommend-glow svg{ color:#a78bff !important; }
+html body button.api-link-btn.recommend-glow::before{
+  content:''; position:absolute; top:-3px; right:-3px; width:8px; height:8px; border-radius:50%;
+  background:#8b6dff !important; box-shadow:0 0 6px 2px rgba(139,109,255,.65);
+  animation:recommendDotPulse 1.8s ease-in-out infinite;
+}
 /* key 行内小圆钮：参考图是深色圆形图标钮 */
 html.studio-theme-dark body .key-btn,
 html.theme-dark body .key-btn{

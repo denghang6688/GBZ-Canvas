@@ -159,6 +159,8 @@
         "api.viewPlans": { zh: "查看方案", en: "View Plans" },
         "api.recommendExellomeSummary": { zh: "稳定输出 GPT-Image2 和 Nano Banana 的 2K/4K。", en: "Stable 2K/4K output for GPT-Image2 and Nano Banana." },
         "api.recommendCompshareSummary": { zh: "MiniMax H3 官方视频 + Qwen-Image 官方生图，注册送积分。", en: "Official MiniMax H3 video and Qwen-Image APIs with free starter credits." },
+        "api.recommendBailianSummary": { zh: "阿里官方大模型平台：Qwen-Image 生图、通义千问 LLM、Wan 视频生成，新用户送额度。", en: "Alibaba's official model platform: Qwen-Image, Qwen LLMs, and Wan video generation with free starter credits." },
+        "api.recommendModelscopeSummary": { zh: "魔搭免费推理 API：Qwen-Image / FLUX 生图、千问 LLM、Wan 视频，每日免费额度。", en: "ModelScope free inference API: Qwen-Image / FLUX, Qwen LLMs, and Wan video with daily free quota." },
         "api.recommendExellome2k4k": { zh: "2K/4K", en: "2K/4K" },
         "api.recommendGroupStable": { zh: "稳定", en: "Stable" },
         "api.recommendGroupCheap": { zh: "便宜", en: "Budget" },
