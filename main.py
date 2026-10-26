@@ -1594,6 +1594,18 @@ def runninghub_openapi_url(provider, path=""):
     base = runninghub_openapi_base_url(provider)
     return f"{base}/{path}" if path else base
 
+def normalize_model_aliases(value):
+    """2026-10-26 模型显示别名映射 {真实模型ID: 显示名}；只影响界面展示，请求仍用真实 ID。"""
+    if not isinstance(value, dict):
+        return {}
+    aliases = {}
+    for key, val in list(value.items())[:300]:
+        model_id = str(key or "").strip()
+        alias = re.sub(r"\s+", " ", str(val or "").strip())[:60]
+        if model_id and alias:
+            aliases[model_id] = alias
+    return aliases
+
 def normalize_provider(item):
     provider_id = str(item.get("id") or "").strip().lower()
     if not PROVIDER_ID_RE.fullmatch(provider_id):
@@ -1641,6 +1653,7 @@ def normalize_provider(item):
         "video_models": model_list_from_values(item.get("video_models") or []),
         "audio_models": model_list_from_values(item.get("audio_models") or []),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
+        "model_aliases": normalize_model_aliases(item.get("model_aliases")),
         "ms_loras": normalize_ms_loras(item.get("ms_loras") or []),
         "ms_defaults_version": int(item.get("ms_defaults_version") or 0),
         "rh_apps": normalize_runninghub_entries(item.get("rh_apps") or [], "app"),
@@ -3298,6 +3311,7 @@ class ApiProviderPayload(BaseModel):
     video_models: List[str] = []
     audio_models: List[str] = []
     model_protocols: Dict[str, str] = {}
+    model_aliases: Dict[str, str] = {}
     ms_loras: List[Dict[str, Any]] = []
     ms_defaults_version: int = 0
     rh_apps: List[Dict[str, Any]] = []
@@ -16169,8 +16183,8 @@ async def generate_compshare_video(payload, provider):
         seconds = int(payload.duration or 5)
     except Exception:
         seconds = 5
-    # MiniMax H3 官方时长 4-15 秒整（超过会直接被拒）
-    seconds = max(4, min(15, seconds))
+    # 2026-10-26 按优云智算 H3 面板校准：时长 4-30 秒（面板滑杆最高 30s）
+    seconds = max(4, min(30, seconds))
     has_videos = any(str(v or "").strip() for v in (payload.videos or []))
     has_audios = any(str(a or "").strip() for a in (payload.audios or []))
     frame_roles = [str(getattr(ref, "role", "") or "").strip().lower() for ref in (payload.images or [])]
@@ -16659,9 +16673,10 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
 VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
     "minimax-h3": {
         "label": "MiniMax H3",
-        "duration": {"min": 4, "max": 15, "step": 1},
-        "resolutions": ["768p", "2k"],
-        "ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "2:3", "3:2"],
+        # 2026-10-26 按优云智算 H3 面板实测校准：时长滑杆 4-30s、分辨率 480P/768P/1080P/2K/4K、画幅 6 种（无 adaptive，首尾帧模式由适配器强制 adaptive）
+        "duration": {"min": 4, "max": 30, "step": 1},
+        "resolutions": ["480p", "768p", "1080p", "2k", "4k"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
         "audio": True,
     },

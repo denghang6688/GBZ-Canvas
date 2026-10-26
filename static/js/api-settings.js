@@ -3407,15 +3407,39 @@ function renderModels(kind){
     const showProtocol = providerSupportsModelProtocol(item);
     list.innerHTML = models.map((model, index) => {
         // 2026-10-22（用户要求）：界面上不再露出每模型积分 / 分档积分，数据字段保持原样不动
+        // 2026-10-26（用户要求）：模型显示别名内嵌输入框右侧徽章，行高保持等高一排不换行
+        const alias = (item?.model_aliases && typeof item.model_aliases === 'object') ? String(item.model_aliases[model] || '').trim() : '';
+        const tagSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>';
+        const aliasBadge = alias
+            ? `<button class="alias-badge" type="button" onclick="event.stopPropagation(); editModelAlias('${kind}', ${index})" title="显示名：${escapeAttr(alias)}（点击修改）">${tagSvg}<span class="nm">${escapeHtml(alias)}</span></button>`
+            : `<button class="tag-ghost" type="button" onclick="event.stopPropagation(); editModelAlias('${kind}', ${index})" title="设置显示名（仅界面展示，不影响请求）">${tagSvg}</button>`;
         return `
-        <div class="model-row${showProtocol ? ' has-protocol' : ''}">
-            <input value="${escapeAttr(model)}" oninput="updateModel('${kind}', ${index}, this.value)">
+        <div class="model-row${showProtocol ? ' has-protocol' : ''}${alias ? ' has-alias' : ''}">
+            <div class="cell-input${alias ? ' has-alias' : ''}">
+                <input value="${escapeAttr(model)}" oninput="updateModel('${kind}', ${index}, this.value)">
+                ${aliasBadge}
+            </div>
             ${modelProtocolSelectHtml(kind, index, model, item)}
             <button class="icon-btn" type="button" onclick="removeModel('${kind}', ${index})" title="删除"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
         </div>`;
     }).join('');
     refreshIcons();
     updateModelKindCounts();
+}
+// 2026-10-26 模型显示别名：prompt 输入，留空恢复原名；item.model_aliases 真实 ID → 显示名
+function editModelAlias(kind, index){
+    const item = provider();
+    const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : kind === 'audio' ? 'audio_models' : 'chat_models';
+    const model = String(item?.[key]?.[index] || '').trim();
+    if(!model) return;
+    if(!item.model_aliases || typeof item.model_aliases !== 'object') item.model_aliases = {};
+    const current = String(item.model_aliases[model] || '');
+    const name = window.prompt(`给模型起个显示名（留空恢复原名「${model}」，请求仍使用真实 ID）`, current);
+    if(name === null) return;
+    const trimmed = String(name).trim().slice(0, 60);
+    if(trimmed) item.model_aliases[model] = trimmed;
+    else delete item.model_aliases[model];
+    renderModels(kind);
 }
 // 2026-10-22：模型分类 chips 的数量与当前筛选状态
 function updateModelKindCounts(){
@@ -3660,6 +3684,12 @@ function modelProtocolStillUsed(item, name){
     const lists = ['image_models', 'chat_models', 'video_models'];
     return lists.some(k => Array.isArray(item[k]) && item[k].includes(name));
 }
+// 2026-10-26 显示别名清理用：含音频模型列表
+function modelStillUsed(item, name){
+    if(!item || !name) return false;
+    const lists = ['image_models', 'chat_models', 'video_models', 'audio_models'];
+    return lists.some(k => Array.isArray(item[k]) && item[k].includes(name));
+}
 function updateModel(kind, index, value){
     const item = provider();
     const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : kind === 'audio' ? 'audio_models' : 'chat_models';
@@ -3678,6 +3708,16 @@ function updateModel(kind, index, value){
             if(!stillUsedElsewhere) delete item.model_protocols[oldName];
             if(newName) item.model_protocols[newName] = proto;
         }
+    }
+    // 2026-10-26 重命名模型时同步迁移显示别名（逻辑同协议覆盖迁移）
+    if(item.model_aliases && typeof item.model_aliases === 'object' && oldName && oldName !== newName && Object.prototype.hasOwnProperty.call(item.model_aliases, oldName)){
+        const alias = item.model_aliases[oldName];
+        const stillUsedElsewhere = (() => {
+            const lists = ['image_models', 'chat_models', 'video_models', 'audio_models'];
+            return lists.some(k => Array.isArray(item[k]) && item[k].some((m, i) => !(k === key && i === index) && String(m || '').trim() === oldName));
+        })();
+        if(!stillUsedElsewhere) delete item.model_aliases[oldName];
+        if(newName) item.model_aliases[newName] = alias;
     }
     if(kind === 'image') renderMsLoras();
 }
@@ -3750,6 +3790,10 @@ function removeModel(kind, index){
     // 清理不再使用的协议覆盖
     if(removed && item.model_protocols && typeof item.model_protocols === 'object' && !modelProtocolStillUsed(item, removed)){
         delete item.model_protocols[removed];
+    }
+    // 2026-10-26 清理不再使用的显示别名
+    if(removed && item.model_aliases && typeof item.model_aliases === 'object' && !modelStillUsed(item, removed)){
+        delete item.model_aliases[removed];
     }
     renderModels(kind);
     if(kind === 'image') renderMsLoras();
@@ -3836,6 +3880,7 @@ async function saveProviders(){
                 video_models:item.video_models || [],
                 audio_models:item.audio_models || [],
                 model_protocols:(item.model_protocols && typeof item.model_protocols === 'object') ? item.model_protocols : {},
+                model_aliases:(item.model_aliases && typeof item.model_aliases === 'object') ? item.model_aliases : {},
                 ms_loras:item.id === 'modelscope' ? (item.ms_loras || []) : [],
                 ms_defaults_version:item.id === 'modelscope' ? (item.ms_defaults_version || 1) : 0,
                 rh_apps:item.id === 'runninghub' ? (item.rh_apps || []) : [],

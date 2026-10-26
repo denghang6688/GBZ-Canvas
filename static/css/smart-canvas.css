@@ -12343,6 +12343,16 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 .packed-sound-note { font-size: 12px; color: var(--text-tertiary, #888); background: rgba(255,255,255,.04); border: 1px dashed rgba(255,255,255,.14); border-radius: 8px; padding: 8px 10px; text-align: center; }
 .packed-sound-hint { font-size: 11px; color: var(--text-tertiary, #777); margin-top: 6px; line-height: 1.5; }
 
+/* 2026-10-26 面板 V4：生成模式「药丸 + 下拉列表」控件（样式对齐 H3 节点模式弹层：竖排选项、选中右侧圆点） */
+.video-mode-control { flex: 0 0 auto; }
+.video-mode-list { display: flex; flex-direction: column; gap: 2px; }
+.video-mode-option { min-height: 30px; }
+.video-mode-option.dis { opacity: .42; cursor: not-allowed; }
+.video-mode-option.dis:hover { background: transparent; border-color: transparent; transform: none; }
+
+/* 2026-10-26 模型药丸：doubao- 前缀已在 JS 里剥掉，这里兜底省略号（不允许在连字符处折行） */
+.model-control .smart-pill .sub { white-space: nowrap; }
+
 
 /* optimize prompt button */
 .opt-prompt-btn { position: relative; }

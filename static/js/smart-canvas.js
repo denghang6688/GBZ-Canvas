@@ -3687,6 +3687,15 @@ function loadRecentSmartSettings(){
     } catch(e) {
         recentSmartSettingsByMode = {};
     }
+    // 2026-10-26 一次性矫正：旧版本把用户手动关过的 videoGenerateAudio=false 存进了最近设置，
+    // 新节点恢复成「声音默认关」。启动时把所有没打 _audioUserSet 标志的「关」回写为「开」。
+    let fixed = false;
+    for(const v of Object.values(recentSmartSettingsByMode)){
+        if(!v || typeof v !== 'object') continue;
+        if(v._audioUserSet !== undefined){ delete v._audioUserSet; fixed = true; }
+        if(v.videoGenerateAudio === false){ v.videoGenerateAudio = true; fixed = true; }
+    }
+    if(fixed) saveRecentSmartSettings();
 }
 function saveRecentSmartSettings(){
     localStorage.setItem(RECENT_SMART_SETTINGS_KEY, JSON.stringify(recentSmartSettingsByMode));
@@ -3700,6 +3709,9 @@ function rememberRecentSmartSettings(source=settings, node=null){
     if(smartScopedSettingsDepth > 0) return;
     const clean = stripOutpaintDisplaySettings(settingsForStorage(source), node);
     sanitizeSmartApiSelection(clean);
+    // 2026-10-26 声音记忆矫正：没打 _audioUserSet 标志的「关」一律回写为「开」再入库，标志本身不落库
+    if(clean.videoGenerateAudio === false && clean._audioUserSet !== true) clean.videoGenerateAudio = true;
+    delete clean._audioUserSet;
     if(clean.outpaintResolutionLocked === true && clean.resolution === 'custom'){
         clean.resolution = '1k';
         clean.ratio = clean.ratio || 'square';
@@ -9078,13 +9090,46 @@ function renderVideoProviderControl(providers){
         </div>
     </div>`;
 }
+// 2026-10-26（用户要求）火山系模型显示名映射：药丸/界面用友好名，请求仍发完整真实 ID。
+// 顺序敏感：具体变体（fast/mini/lite/pro）必须排在同系通配规则之前；未命中的剥 doubao- 前缀兜底。
+const VIDEO_MODEL_DISPLAY_RULES = [
+    [/^doubao-seedance-2-5-fast/i, 'Seedance 2.5 Fast'],
+    [/^doubao-seedance-2-5/i,      'Seedance 2.5'],
+    [/^doubao-seedance-2-0-fast/i, 'Seedance 2.0 Fast'],
+    [/^doubao-seedance-2-0-mini/i, 'Seedance 2.0 Mini'],
+    [/^doubao-seedance-2-0/i,      'Seedance 2.0'],
+    [/^doubao-seedance-1-0-lite/i, 'Seedance 1.0 Lite'],
+    [/^doubao-seedance-1-0-pro/i,  'Seedance 1.0 Pro'],
+    [/^doubao-seed-1-0-lite/i,     'Seed 1.0 Lite'],
+    [/^doubao-seed-1-0-pro/i,      'Seed 1.0 Pro'],
+    [/^doubao-wan-2-5/i,           'Wan 2.5'],
+    [/^doubao-hailuo/i,            'Hailuo']
+];
+function videoModelDisplayName(model){
+    const name = String(model || '').trim();
+    if(!name) return name;
+    for(const [re, label] of VIDEO_MODEL_DISPLAY_RULES){ if(re.test(name)) return label; }
+    return name.replace(/^doubao-/i, '');
+}
+// 2026-10-26 API 设置里给模型起的显示别名（provider.model_aliases，真实 ID → 显示名；请求仍用真实 ID）
+function providerModelAlias(providerId, modelId){
+    try {
+        const p = (apiProviders || []).find(x => x.id === providerId);
+        const a = p?.model_aliases?.[String(modelId || '').trim()];
+        return typeof a === 'string' ? a.trim().slice(0, 60) : '';
+    } catch(_) { return ''; }
+}
 function renderVideoModelControl(models){
+    // 2026-10-26（用户要求）：药丸显示友好名（API 设置别名 → 内置映射表 → 剥前缀兜底），悬停 title 仍显示完整模型名；下拉列表跟随别名
+    const rawModel = String(settings.videoModel || tr('smart.model'));
+    const shortModel = providerModelAlias(settings.videoProvider, settings.videoModel) || videoModelDisplayName(settings.videoModel) || rawModel;
+    const listLabel = (m) => providerModelAlias(settings.videoProvider, m) || m;
     return `<div class="smart-control model-control">
-        <button class="smart-pill" type="button"><i data-lucide="film"></i><span class="sub">${escapeHtml(settings.videoModel || tr('smart.model'))}</span></button>
+        <button class="smart-pill" type="button" title="${escapeAttr(rawModel)}"><i data-lucide="film"></i><span class="sub">${escapeHtml(shortModel)}</span></button>
         <div class="smart-popover compact-popover">
             <div class="smart-popover-title">${escapeHtml(tr('smart.videoModel'))}</div>
             <div class="model-list">
-                ${models.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
+                ${models.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" title="${escapeAttr(m)}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(listLabel(m))}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -9270,7 +9315,9 @@ function videoGenModeOf(s){
     if(['t2v','ref','frames'].includes(v)) return v;
     return smartStrictBool(s?.videoUseFrameRoles, false) ? 'frames' : 'ref';
 }
-// 返回面板分区 HTML（嵌入打包面板 popover），不再是独立 pill。模型不支持的模式置灰并注明原因。
+// 2026-10-26 面板 V4：生成模式外置为「药丸 + 下拉列表」控件（用户指定样式，参考 H3 节点模式弹层）：
+// 药丸显示当前模式，点开竖排选项列表，选中项右侧带圆点（.direct-option.active::after）；
+// 主文字 + 小字说明，模型不支持的模式置灰并注明原因。打包面板里不再重复渲染。
 function renderVideoModeControl(){
     const caps = apiVideoModelCaps(settings.videoModel);
     const modes = caps.modes || {};
@@ -9284,15 +9331,25 @@ function renderVideoModeControl(){
     if(mode === 'ref' && !refOk) mode = framesOk ? 'frames' : (hasModes && modes.t2v !== false ? 't2v' : mode);
     settings.videoGenMode = mode;
     settings.videoUseFrameRoles = mode === 'frames';
-    const framesHint = modes.frames_only_first ? '仅首帧 · 该模型无尾帧' : (framesOk ? '1-2 张图，图1=首帧、图2=尾帧' : '该模型不支持首尾帧');
+    const framesHint = modes.frames_only_first ? '仅首帧 · 该模型无尾帧' : (framesOk ? '图 1-2 张，图1=首帧、图2=尾帧' : '该模型不支持首尾帧');
     const refHint = refOk ? ('图 \u2264' + (Number(modes.reference_image ?? 9) || 9) + ' · 视频 \u2264' + (Number(modes.reference_video ?? 3) || 3) + ' · 音频 \u2264' + (Number(modes.reference_audio ?? 3) || 3)) : '该模型不支持多模态参考输入';
-    const opt = function(value, label, hint){
-        const ok = value === 't2v' ? (hasModes ? modes.t2v !== false : true) : (value === 'ref' ? refOk : framesOk);
-        const active = mode === value;
-        if(!ok) return '<div class="packed-res-btn" style="opacity:.4;cursor:not-allowed;" title="' + hint + '">' + label + ' \u00b7 ' + hint + '</div>';
-        return '<button type="button" class="packed-res-btn' + (active ? ' active' : '') + '" data-smart-param="videoGenMode" data-smart-value="' + value + '">' + label + '</button>';
+    const opts = [
+        {value:'t2v',    label:'\u6587\u751f\u89c6\u9891', hint:'\u65e0\u9700\u7d20\u6750\uff0c\u76f4\u63a5\u6309\u63cf\u8ff0\u751f\u6210', ok: hasModes ? modes.t2v !== false : true},
+        {value:'ref',    label:'\u5168\u80fd\u53c2\u8003', hint:refHint, ok:refOk},
+        {value:'frames', label:'\u9996\u5c3e\u5e27',       hint:framesHint, ok:framesOk}
+    ];
+    const curLabel = (opts.find(o => o.value === mode) || opts[1]).label;
+    const opt = function(o){
+        // 2026-10-26（用户要求）：选项只显示模式名，素材数量说明移到悬停 title，界面更干净
+        if(!o.ok) return '<div class="direct-option video-mode-option dis" title="' + o.hint + '"><span>' + o.label + '</span></div>';
+        return '<button type="button" class="direct-option video-mode-option' + (o.value === mode ? ' active' : '') + '" title="' + o.hint + '" data-smart-param="videoGenMode" data-smart-value="' + o.value + '"><span>' + o.label + '</span></button>';
     };
-    return '<div class="packed-section-label">\u751f\u6210\u6a21\u5f0f</div><div class="packed-res-row">' + opt('t2v', '\u6587\u751f\u89c6\u9891', '\u65e0\u9700\u7d20\u6750\uff0c\u76f4\u63a5\u6309\u63cf\u8ff0\u751f\u6210') + opt('ref', '\u5168\u80fd\u53c2\u8003', refHint) + opt('frames', '\u9996\u5c3e\u5e27', framesHint) + '</div>';
+    return '<div class="smart-control video-mode-control">' +
+        '<button class="smart-pill" type="button"><i data-lucide="layers"></i><span class="sub">' + curLabel + '</span></button>' +
+        '<div class="smart-popover compact-popover">' +
+        '<div class="smart-popover-title">\u751f\u6210\u6a21\u5f0f</div>' +
+        '<div class="model-list video-mode-list">' + opts.map(opt).join('') + '</div>' +
+        '</div></div>';
 }
 // 2026-10-25 输出声音并入打包面板（原独立 pill 移除）：「开（默认）/ 关（静音）」两个档位按钮。
 // audio:false 的模型强制静音（分区显示禁用说明）；audio:null（未知）且非兜底档案时隐藏分区。
@@ -9428,9 +9485,10 @@ function syncPackedDurPillSummary(input){
 // 生成端（canvas_video → apply_video_model_caps）会按同一档案二次钳制，前端只负责「不让用户选错」。
 const API_VIDEO_MODEL_CAPS = {
     'minimax-h3': {
-        duration:{min:4, max:15, step:1},
-        resolutions:['768p', '2k'],
-        ratios:['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9', '2:3', '3:2'],
+        // 2026-10-26 按优云智算 H3 面板实测校准：时长 4-30s、分辨率 5 档、画幅 6 种（首尾帧模式后端强制 adaptive）
+        duration:{min:4, max:30, step:1},
+        resolutions:['480p', '768p', '1080p', '2k', '4k'],
+        ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
         modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
         audio:true
     },
@@ -9524,7 +9582,10 @@ function videoDurationRangeForProvider(providerId, modelName){
     return {min:1, max:30};
 }
 function renderVideoPackedControl(){
-    const resOptions = [['', 'Auto'], ['480p', '480P'], ['720p', '720P'], ['1080p', '1080P']];
+    // 2026-10-26 修 bug：清晰度选项原先写死 ['',480p,720p,1080p]，档案里声明的 768p/2k/4k 会被 filter 掉
+    //（H3 面板只剩 Auto）。现在有档案时直接按档案档位生成（映射成大写标签），没档案才用通用四档。
+    const RES_LABELS = {'':'Auto', '480p':'480P', '768p':'768P', '720p':'720P', '1080p':'1080P', '2k':'2K', '4k':'4K'};
+    const defaultResOptions = [['', 'Auto'], ['480p', '480P'], ['720p', '720P'], ['1080p', '1080P']];
     const aspOptions = [['', 'Auto'], ['16:9','16:9'], ['4:3','4:3'], ['1:1','1:1'], ['3:4','3:4'], ['9:16','9:16'], ['21:9','21:9']];
     // 2026-10-25 能力档案联动：只渲染该模型支持的画幅/清晰度，越界的当前值自动归位。
     const caps = apiVideoModelCaps(settings.videoModel);
@@ -9532,17 +9593,24 @@ function renderVideoPackedControl(){
     const allowedAsp = (caps.ratios || []).map(s => String(s).toLowerCase());
     let res = settings.videoResolution || '';
     let asp = settings.videoAspect || '16:9';
-    if(allowedRes.length && !allowedRes.includes(res.toLowerCase())){
-        // 当前清晰度该模型不支持 → 回退到档案第一档（多为 '768p'）；模型没声明 Auto 时不留空档
-        res = allowedRes[0] || '';
-        settings.videoResolution = res;
+    let resOptions = defaultResOptions;
+    if(allowedRes.length){
+        resOptions = allowedRes.map(r => [r, RES_LABELS[r] || String(r).toUpperCase()]);
+        if(!allowedRes.includes(res.toLowerCase())){
+            // 当前清晰度该模型不支持 → 优先回退 768P（H3 原生档），否则档案第一档
+            res = allowedRes.includes('768p') ? '768p' : (allowedRes[0] || '');
+            settings.videoResolution = res;
+        }
     }
     if(allowedAsp.length && !allowedAsp.includes(asp.toLowerCase())){
         asp = allowedAsp.includes('16:9') ? '16:9' : allowedAsp[0];
         settings.videoAspect = asp;
     }
-    const shownResOptions = allowedRes.length ? resOptions.filter(o => !o[0] || allowedRes.includes(o[0])) : resOptions;
-    const shownAspOptions = allowedAsp.length ? aspOptions.filter(o => !o[0] || allowedAsp.includes(o[0])) : aspOptions;
+    const shownResOptions = resOptions;
+    // 2026-10-26 比例 Auto（adaptive）只在档案声明 adaptive 时才渲染（与优云智算 H3 面板一致：6 画幅无 Auto）；
+    // 无档案（兜底）时维持全量选项。首尾帧模式的 adaptive 由后端适配器强制，无需前端选项。
+    const showAutoAsp = !allowedAsp.length || allowedAsp.includes('adaptive');
+    const shownAspOptions = allowedAsp.length ? aspOptions.filter(o => o[0] ? allowedAsp.includes(o[0]) : showAutoAsp) : aspOptions;
     // 2026-10-19 时长按模型判定；2026-10-25 读档案（固定档模型走 ticks 按钮而非滑条）。
     const durRange = videoDurationRangeForProvider(settings.videoProvider, settings.videoModel);
     const dur = Math.max(durRange.min, Math.min(durRange.max, Number(settings.videoDuration) || (durRange.ticks ? durRange.ticks[0] : 5)));
@@ -9555,8 +9623,7 @@ function renderVideoPackedControl(){
     let h = '<div class="smart-control video-packed-control">';
     h += '<button class="smart-pill" type="button"><i data-lucide="smartphone"></i><span>' + summary + '</span><i data-lucide="chevron-down" class="pill-caret"></i></button>';
     h += '<div class="smart-popover packed-popover">';
-    // 2026-10-25 生成模式（文生视频/全能参考/首尾帧）并入面板第一位
-    h += renderVideoModeControl();
+    // 2026-10-26 面板 V4：生成模式已外置到参数区（renderApiVideoParams/renderVolcengineVideoParams），面板里不再重复
     // 比例（档案不支持的档位不渲染；adaptive 只有档案声明才有）
     h += '<div class="packed-section-label">\u6bd4\u4f8b</div>';
     h += '<div class="packed-ratio-grid">';
@@ -9862,8 +9929,8 @@ function renderApiVideoParams(){
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
+        ${renderVideoModeControl()}
         ${renderVideoPackedControl()}
-        ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
     `;
@@ -9950,8 +10017,8 @@ function renderVolcengineVideoParams(){
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
+        ${renderVideoModeControl()}
         ${renderVideoPackedControl()}
-        ${renderVideoTrustedAssetControl()}
         ${renderVideoEnhancePromptControl()}
         ${renderOptimizeRuleControl()}
     `;
@@ -11076,14 +11143,18 @@ function renderProviderControl(providers){
     </div>`;
 }
 function renderModelControl(models){
+    // 2026-10-26 生图模型同样支持 API 设置里的显示别名（悬停 title 为真实模型名）
+    const rawModel = String(settings.model || tr('smart.model'));
+    const shortModel = providerModelAlias(settings.provider_id, settings.model) || rawModel;
+    const listLabel = (m) => providerModelAlias(settings.provider_id, m) || m;
     return `<div class="smart-control model-control">
-        <button class="smart-pill model-picker-pill" type="button" title="${escapeAttr(settings.model || tr('smart.model'))}" aria-label="${escapeAttr(tr('smart.imageModel'))}">
-            <i data-lucide="sparkles"></i><span class="model-picker-label">生图模型</span><span class="sub">${escapeHtml(settings.model || tr('smart.model'))}</span><i data-lucide="chevron-down" class="pill-caret"></i>
+        <button class="smart-pill model-picker-pill" type="button" title="${escapeAttr(rawModel)}" aria-label="${escapeAttr(tr('smart.imageModel'))}">
+            <i data-lucide="sparkles"></i><span class="model-picker-label">生图模型</span><span class="sub">${escapeHtml(shortModel)}</span><i data-lucide="chevron-down" class="pill-caret"></i>
         </button>
         <div class="smart-popover compact-popover">
             <div class="smart-popover-title">${escapeHtml(tr('smart.imageModel'))}${models.length ? ` · ${models.length}` : ''}</div>
             <div class="model-list">
-                ${models.map(m => `<button type="button" class="direct-option ${m === settings.model ? 'active' : ''}" data-smart-param="model" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noImageModel'))}</div>`}
+                ${models.map(m => `<button type="button" class="direct-option ${m === settings.model ? 'active' : ''}" title="${escapeAttr(m)}" data-smart-param="model" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(listLabel(m))}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noImageModel'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -11886,7 +11957,13 @@ function setDynamicSetting(key, value){
     const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioVoice','audioSpeed','videoUseFrameRoles','videoGenerateAudio','videoGenMode']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     // 布尔类参数：data-smart-value 传的是字符串，先转真布尔再落库（否则 "false" 会被当 true）
-    if(key === 'videoGenerateAudio') settings.videoGenerateAudio = smartStrictBool(value, true);
+    if(key === 'videoGenerateAudio'){
+        settings.videoGenerateAudio = smartStrictBool(value, true);
+        // 2026-10-26 声音默认开启：只有用户手动点过「关」才打 _audioUserSet 标志，
+        // 记忆里没标志的「关」一律不采纳（新节点恢复成默认开）
+        if(settings.videoGenerateAudio) delete settings._audioUserSet;
+        else settings._audioUserSet = true;
+    }
     if(key === 'videoUseFrameRoles') settings.videoUseFrameRoles = smartStrictBool(value, false);
     // 2026-10-25 生成模式三选一：同步旧布尔（frames→true，其余 false），旧逻辑继续可用
     if(key === 'videoGenMode'){

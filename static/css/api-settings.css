@@ -1090,6 +1090,32 @@ html.studio-theme-dark body .field-frame {
     box-shadow:0 0 0 3px rgba(37,99,235,.1);
 }
 
+/* 2026-10-26 模型显示别名：输入框 + 别名芯片 + 改名按钮组成一个 flex 单元（不破坏 model-row 的 grid 列数） */
+/* 2026-10-26 别名内嵌输入框右侧徽章：行高等高一排，不换行 */
+.cell-input { position:relative; display:flex; align-items:center; min-width:0; }
+.cell-input input { flex:1; min-width:0; }
+.cell-input.has-alias input { padding-right:92px; }
+.alias-badge {
+    position:absolute; right:4px; top:50%; transform:translateY(-50%);
+    display:inline-flex; align-items:center; gap:4px; max-width:86px; height:20px;
+    padding:0 7px; border-radius:999px; overflow:hidden;
+    border:1px solid rgba(37,99,235,.4); background:rgba(37,99,235,.14);
+    color:var(--api-text, #e8e8ee); font-size:11px; line-height:1;
+    cursor:pointer; flex:0 0 auto; transition:.14s;
+}
+.alias-badge:hover { background:rgba(37,99,235,.26); border-color:rgba(37,99,235,.65); }
+.alias-badge svg { flex:0 0 auto; width:10px; height:10px; }
+.alias-badge .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60px; }
+.tag-ghost {
+    position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    width:20px; height:20px; display:none; align-items:center; justify-content:center;
+    border-radius:6px; color:var(--api-text-muted, #9a9aa6); cursor:pointer; flex:0 0 auto;
+    background:transparent; border:none; transition:.14s;
+}
+.cell-input:hover .tag-ghost { display:flex; }
+.tag-ghost:hover { color:var(--api-text, #e8e8ee); background:rgba(255,255,255,.07); }
+.tag-ghost svg { width:13px; height:13px; }
+
 .icon-btn {
     border-radius:8px;
 }
