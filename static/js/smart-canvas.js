@@ -6213,8 +6213,17 @@ function smartNodeInputThumbsHtml(images, opts={}){
     const refs = (images || []).filter(img => img?.url);
     if(!refs.length) return '';
     const limit = Math.min(10, refs.length);
+    // 2026-10-26（用户要求）：同类素材各自从 1 开始编号（图1/图2…、视频1/视频2…、音频1/音频2…）
+    const thumbCounters = { image: 0, video: 0, audio: 0 };
+    const isEn = window.StudioI18n?.lang?.() === 'en';
     const items = refs.slice(0, limit).map((img, index) => {
-        const label = opts.labelPrefix ? `${opts.labelPrefix}${index + 1}` : (window.StudioI18n?.lang?.() === 'en' ? `Image ${index + 1}` : `图${index + 1}`);
+        const kind = isAudioMediaItem(img) ? 'audio' : (isVideoMediaItem(img) ? 'video' : 'image');
+        thumbCounters[kind] += 1;
+        const label = opts.labelPrefix
+            ? `${opts.labelPrefix}${index + 1}`
+            : isEn
+            ? (kind === 'video' ? `Video ${thumbCounters.video}` : kind === 'audio' ? `Audio ${thumbCounters.audio}` : `Image ${thumbCounters.image}`)
+            : (kind === 'video' ? `视频${thumbCounters.video}` : kind === 'audio' ? `音频${thumbCounters.audio}` : `图${thumbCounters.image}`);
         const media = isAudioMediaItem(img)
             ? `<div class="media-thumb audio-thumb"><i data-lucide="file-audio"></i><span>${escapeHtml(img.name || 'Audio')}</span></div>`
             : isVideoMediaItem(img)
@@ -6440,6 +6449,9 @@ function syncPromptLlmRefs(node){
         refreshIcons();
         return;
     }
+    // 2026-10-26（用户要求）：同类素材各自从 1 开始编号——图1/图2…、视频1/视频2…、音频1/音频2…，
+    // 不再用数组下标，避免前面的视频把图片角标顶成「图3、图4」。
+    const refCounters = { image: 0, video: 0, audio: 0 };
     const thumbsHtml = refs.map((img, i) => {
         const kind = img?.kind || mediaKindForItem(img);
         const isVid = kind === 'video';
@@ -6449,7 +6461,11 @@ function syncPromptLlmRefs(node){
         const key = inputRefKey(img);
         const removable = Boolean(key) && manualKeys.has(key);
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-llm-remove-reference="${escapeHtml(key)}" title="删除引用图" aria-label="删除引用图">×</button>` : '';
-        const label = kind === 'video' ? `视频${i + 1}` : `图${i + 1}`;
+        const seqKey = kind === 'video' ? 'video' : (kind === 'audio' ? 'audio' : 'image');
+        refCounters[seqKey] += 1;
+        const label = seqKey === 'video'
+            ? `视频${refCounters.video}`
+            : (seqKey === 'audio' ? `音频${refCounters.audio}` : `图${refCounters.image}`);
         return `<div class="input-thumb${removable ? ' input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(img.originalLocalUrl || img.url || '')}" data-kind="${escapeHtml(kind)}" title="${escapeHtml(`${img.name || label} · LLM 引用图`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
     }).join('');
     promptLlmRefs.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
@@ -7848,12 +7864,17 @@ function renderSmartAgentSelectedPreview(){
 function renderSmartAgentAttachments(){
     if(!smartAgentAttachPreview) return;
     smartAgentAttachPreview.classList.toggle('has-items', smartAgentAttachedRefs.length > 0);
-    smartAgentAttachPreview.innerHTML = smartAgentAttachedRefs.map((ref, index) => `
-        <span class="smart-agent-reference-token smart-agent-attachment" title="${escapeHtml(ref.name || ref.url || '素材')}">
+    // 2026-10-26（用户要求）：图片缩略图按顺序显示「图N」编号（从图1开始），与提示词里的 图N 引用对应
+    let imgSeq = 0;
+    smartAgentAttachPreview.innerHTML = smartAgentAttachedRefs.map((ref, index) => {
+        const isImage = ref?.kind === 'image' || (!ref?.kind && (ref?.url || '') && !isFileMediaItem(ref) && !isTextMediaItem(ref));
+        const badge = isImage ? `<i class="ref-index-badge">图${++imgSeq}</i>` : '';
+        return `<span class="smart-agent-reference-token smart-agent-attachment" title="${escapeHtml((isImage ? `图${imgSeq} · ` : '') + (ref.name || ref.url || '素材'))}">
             ${smartAgentAttachmentThumbHtml(ref)}
+            ${badge}
             <button type="button" data-agent-remove-ref="${index}" title="移除"><i data-lucide="x"></i></button>
-        </span>
-    `).join('');
+        </span>`;
+    }).join('');
     bindSmartPreviewImageFallbacks(smartAgentAttachPreview);
     if(window.lucide) lucide.createIcons();
     renderSmartAgentReferenceIndicators();
@@ -15008,6 +15029,7 @@ async function loadCanvas(){
         if(syncedWorkflowSource || normalizedLoopOutputLayout || migratedDirectLoopGroups || cleanedDetachedInputs || cleanedCompletedState || recoveredPendingOutputs || recoveredCompletedOutputs || recoveredLoopOutputs || hiddenCompletedTimers || strippedVideoTextArtifacts || purgedDuplicateMaterialSources || flattenedNestedMediaUrlCount || dedupedNodeMediaUrlCount) scheduleSave();
         resumeSmartPendingTasks();
         resumeJimengPendingNodes();
+        recoverUnattachedApiVideoResults();
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
 }
@@ -17319,7 +17341,9 @@ function promptNodeKindBadgeHtml(node){
         const rule = getCurrentLlmRule();
         if(!rule || rule.showOnNode === false) return '';
         const ico = LLM_RULE_TYPE_ICONS[rule.type] || '◇';
-        return `<span class="prompt-node-rule-badge" title="当前规则智能体：${escapeAttr(rule.name)}（${llmRuleMode(rule) === 'agent' ? '整段系统提示词' : '只改写指令'}）"><b>${escapeHtml(ico)}</b><span>${escapeHtml(rule.name)}</span></span>`;
+        // 2026-10-26（用户定稿）：徽标按模式着色——智能体=紫、润色=黄；尺寸整体缩小（方案A）
+        const modeClass = llmRuleMode(rule) === 'agent' ? ' is-agent' : ' is-polish';
+        return `<span class="prompt-node-rule-badge${modeClass}" title="当前规则智能体：${escapeAttr(rule.name)}（${llmRuleMode(rule) === 'agent' ? '整段系统提示词' : '只改写指令'}）"><b>${escapeHtml(ico)}</b><span>${escapeHtml(rule.name)}</span></span>`;
     }catch(err){ return ''; }
 }
 function promptNodeTitleHtml(node){
@@ -28984,8 +29008,12 @@ function renderInputThumbsRow(node){
             }
         }
         const overLimitFinal = overLimit || frameExcluded;
-        // 2026-10-24（用户要求）角标严格按竞品截图：纯数字 1/2/3 全局顺序，不再用 P1/V1/A1
-        const label = isLocalPreview ? '局部' : String(i + 1);
+        // 2026-10-26（用户要求）角标改为同类素材各自编号：视频1/视频2、图1/图2…、音频1…
+        // （2026-10-24 的纯数字全局顺序作废；与 H3 的 <Picture n>/<Video n>/<Audio n> 引用标签天然对应。
+        //   count 就是上面按 kind 累加的同类计数，直接复用。局部编辑预览仍显示「局部」）
+        const label = isLocalPreview
+            ? '局部'
+            : (kind === 'video' ? `视频${count}` : kind === 'audio' ? `音频${count}` : `图${count}`);
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
         // 2026-10-22（用户要求）所有引用缩略图右上角都有极简 ×：手动引用=直接删除；
@@ -29000,7 +29028,7 @@ function renderInputThumbsRow(node){
         const limitBadge = frameRoleBadge
             ? `<button type="button" class="input-thumb-role-badge${frameRoleBadge === '尾帧' ? ' is-last' : ''}${frameRoleToggleable ? ' toggleable' : ''}"${frameRoleToggleable ? ' data-frame-role-toggle="1"' : ''} title="${escapeHtml(frameRoleToggleable ? '点击切换：首帧 ⇄ 尾帧' : '首尾帧模式下图1=首帧、图2=尾帧')}">${escapeHtml(frameRoleBadge)}</button>`
             : (overLimitFinal ? `<span class="input-thumb-limit-badge">${escapeHtml('不参与')}</span>` : '');
-        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${isManualRef ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimitFinal ? ' input-thumb-limit' : ''}${frameRoleBadge ? ' has-frame-role' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
+        return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${isManualRef ? 'input-manual-ref' : ''} ${isLocalPreview ? 'input-local-preview' : ''}${overLimitFinal ? ' input-thumb-limit' : ''}${frameRoleBadge ? ' has-frame-role' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" data-kind="${escapeAttr(kind)}" title="${escapeHtml(`${img.name || label} · ${title}${limitNote}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${limitBadge}${removeBtn}</div>`;
     }).join('');
     inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
@@ -35641,9 +35669,18 @@ async function runPromptLLMNode(nodeId, options={}){
     const useLlmRule = node.llmPromptOptimize === true && Boolean(String(llmRule?.content || '').trim());
     const llmRuleModeNow = useLlmRule ? llmRuleMode(llmRule) : '';
     let llmRunInstructionOverride = '';
+    // 2026-10-26（用户要求修复「点生成没反应」）两处静默黑洞：
+    // ① 润色预演（改写指令）是一次独立 LLM 调用，可能十几秒——之前这期间按钮连「生成中」都不显示，看起来像死的。
+    //    先亮运行态 + AbortController 提前建好，生成中再点=取消 也能同时打断预演与正式请求。
+    const existingEarly = promptLlmAbortControllers.get(nodeId);
+    if(existingEarly) existingEarly.abort();
+    const controller = new AbortController();
+    promptLlmAbortControllers.set(nodeId, controller);
+    node.running = true;
+    render();
     if(useLlmRule && llmRuleModeNow === 'polish' && options.skipOptimize !== true){
-        try { llmRunInstructionOverride = await ensureLlmOptimizedInstruction(node); }
-        catch(err){ toast('指令优化失败，已按原文发送'); }
+        try { llmRunInstructionOverride = await ensureLlmOptimizedInstruction(node, controller.signal); }
+        catch(err){ if(err?.name !== 'AbortError') toast('指令优化失败，已按原文发送'); }
     }
     const message = (() => {
         if(!llmRunInstructionOverride) return promptNodeLLMInputText(node).trim();
@@ -35663,16 +35700,17 @@ async function runPromptLLMNode(nodeId, options={}){
     const finalMessage = message || (agentRuleActive
         ? '请按照系统提示词中的规则处理本次任务与附带的素材。'
         : (systemPromptOnlyRun ? '请按照系统提示词中的要求处理本次任务与附带的素材，直接输出结果。' : ''));
-    if(!finalMessage){ toast(tr('smart.promptLlmNeedText')); return; }
+    if(!finalMessage){
+        // 2026-10-26：运行态已提前亮起，这里必须复位
+        node.running = false;
+        if(promptLlmAbortControllers.get(nodeId) === controller) promptLlmAbortControllers.delete(nodeId);
+        render();
+        toast(tr('smart.promptLlmNeedText'));
+        return;
+    }
     const runDownstream = options.runDownstream === true;
     const writeMode = options.writeMode === 'append' ? 'append' : 'overwrite';
     const systemPrompt = (node.llmSystemPrompt || '').trim();
-    const existing = promptLlmAbortControllers.get(nodeId);
-    if(existing) existing.abort();
-    const controller = new AbortController();
-    promptLlmAbortControllers.set(nodeId, controller);
-    node.running = true;
-    render();
     try {
         const provider = resolveChatProviderId(node.llmProvider || '');
         const model = resolveChatModel(node.llmModel || '', provider);
@@ -35715,21 +35753,25 @@ async function runPromptLLMNode(nodeId, options={}){
             return r.json();
         });
         const generatedText = cleanPromptLLMGeneratedText(result.text || '');
-        if(writeMode === 'append' && String(node.text || '').trim()){
-            node.text = `${String(node.text || '').trimEnd()}\n\n${generatedText}`.trim();
+        // 2026-10-26（用户要求修复）：生成期间另一页面保存画布会整体替换 nodes 数组（applyMergedServerCanvas），
+        // 旧写法把结果写到已脱离数组的旧对象上 → 结果静默丢失，用户看到的就是「点生成没反应」。
+        // 落结果前按 id 重新找当前数组里的活节点；找不到（节点被另一页面删除）才退回旧引用。
+        const liveNode = nodes.find(n => n.id === nodeId) || node;
+        if(writeMode === 'append' && String(liveNode.text || '').trim()){
+            liveNode.text = `${String(liveNode.text || '').trimEnd()}\n\n${generatedText}`.trim();
         } else {
-            node.text = generatedText;
+            liveNode.text = generatedText;
         }
-        delete node.textHtml;
-        delete node.llmOptimizePrevText;   // 生成结果已覆盖节点文本，「已优化」状态随之失效
-        node.llmComposerCollapsed = true;
-        node.llmProvider = provider;
-        node.llmModel = model;
+        delete liveNode.textHtml;
+        delete liveNode.llmOptimizePrevText;   // 生成结果已覆盖节点文本，「已优化」状态随之失效
+        liveNode.llmComposerCollapsed = true;
+        liveNode.llmProvider = provider;
+        liveNode.llmModel = model;
         scheduleSave();
-        if(runDownstream && node.text.trim()){
-            node.running = false;
+        if(runDownstream && liveNode.text.trim()){
+            liveNode.running = false;
             render();
-            await runPromptLLMDownstream(node);
+            await runPromptLLMDownstream(liveNode);
         }
     } catch(e) {
         if(e?.name === 'AbortError'){
@@ -35737,8 +35779,14 @@ async function runPromptLLMNode(nodeId, options={}){
         }
         toast((e.message || tr('smart.promptLlmFailed')).slice(0, 160));
     } finally {
-        if(promptLlmAbortControllers.get(nodeId) === controller) promptLlmAbortControllers.delete(nodeId);
-        node.running = false;
+        const isCurrentRun = promptLlmAbortControllers.get(nodeId) === controller;
+        if(isCurrentRun) promptLlmAbortControllers.delete(nodeId);
+        // 只有仍是本轮运行时才清运行态：若已被新一轮运行接管（生成中再点=取消后立刻重发），不能把新运行的状态清掉
+        if(isCurrentRun){
+            const liveFinally = nodes.find(n => n.id === nodeId);
+            if(liveFinally) liveFinally.running = false;
+            node.running = false;
+        }
         render();
     }
 }
@@ -36176,6 +36224,8 @@ function normalizeLlmRule(raw, base){
     };
 }
 let llmRulesCache = null;
+let llmRulesRawSeen = null;   // 2026-10-26：记录上次读取的存储原文，变了就重建（修复多标签页不同步）
+let llmOptMenuRerender = null; // 规则菜单打开时的重绘钩子（storage 事件用）
 let llmCurrentRuleCache;
 function getLlmUserRules(){
     try{
@@ -36184,7 +36234,11 @@ function getLlmUserRules(){
     }catch(err){ return []; }
 }
 function getLlmRules(){
-    if(llmRulesCache) return llmRulesCache;
+    // 2026-10-26（用户要求修复）多标签页/多画布同时打开时，另一个标签页新建的智能体在本页永远看不到：
+    // 旧逻辑 llmRulesCache 只在页面加载后构建一次，localStorage 被别的标签页改了也不重读。
+    // 现在每次调用先比对存储原文（一个 key 的读取，开销可忽略），变了就重建合并结果。
+    const raw = localStorage.getItem(LLM_RULE_KEY);
+    if(llmRulesCache && raw === llmRulesRawSeen) return llmRulesCache;
     const user = getLlmUserRules();
     const merged = BUILTIN_LLM_RULES.map(base => {
         const override = user.find(u => u.name === base.name);
@@ -36194,13 +36248,26 @@ function getLlmRules(){
         if(!merged.some(m => m.name === u.name)) merged.push(normalizeLlmRule({...u, enabled:u.enabled !== false}, null));
     });
     llmRulesCache = merged.filter(r => r.name);
+    llmRulesRawSeen = raw;
     return llmRulesCache;
 }
 function saveLlmRules(rules){
     localStorage.setItem(LLM_RULE_KEY, JSON.stringify(Array.isArray(rules) ? rules : []));
     llmRulesCache = null;
+    llmRulesRawSeen = null;
     llmCurrentRuleCache = undefined;
 }
+// 2026-10-26：别的标签页改了规则/当前规则 → 本页实时失效缓存，刷新打开中的规则菜单和节点徽标
+window.addEventListener('storage', e => {
+    if(e.key && e.key !== LLM_RULE_KEY && e.key !== LLM_RULE_CURRENT_KEY) return;
+    llmRulesCache = null;
+    llmRulesRawSeen = null;
+    llmCurrentRuleCache = undefined;
+    if(typeof llmOptMenuRerender === 'function') llmOptMenuRerender(true);
+    if(typeof syncPromptLlmOptimizeUI === 'function'){
+        try{ syncPromptLlmOptimizeUI(typeof activePromptLlmComposerNode === 'function' ? activePromptLlmComposerNode() : null); }catch(err){}
+    }
+});
 function getCurrentLlmRule(){
     if(llmCurrentRuleCache !== undefined) return llmCurrentRuleCache;
     const rules = getLlmRules();
@@ -36265,20 +36332,20 @@ function llmRuleSystemPrompt(rule, node, {polish=true}={}){
 }
 // 润色模式下的「发送前改写指令」：规则只改指令，生成仍走节点自己的系统词。
 // 同一段原文命中缓存就不重复请求（连点生成不会越改越走样）。
-async function ensureLlmOptimizedInstruction(node){
+async function ensureLlmOptimizedInstruction(node, signal){
     if(!node || node.llmPromptOptimize !== true) return '';
     const rule = getCurrentLlmRule();
     if(!rule || llmRuleMode(rule) !== 'polish') return '';
     const cur = String(node.llmInstruction || '').trim();
     if(!cur) return '';
     if(String(node.llmOptimizeOriginal || '') === cur && node.llmOptimizeResult) return node.llmOptimizeResult;
-    const optimized = await rewriteInstructionWithRule(node, cur, rule);
+    const optimized = await rewriteInstructionWithRule(node, cur, rule, signal);
     if(!optimized || optimized === cur) return '';
     node.llmOptimizeOriginal = cur;
     node.llmOptimizeResult = optimized;
     return optimized;
 }
-async function rewriteInstructionWithRule(node, text, rule){
+async function rewriteInstructionWithRule(node, text, rule, signal){
     const raw = String(text || '').trim();
     if(!raw) throw new Error('没有可改写的指令');
     const provider = resolveChatProviderId(rule?.provider || node?.llmProvider || '');
@@ -36286,6 +36353,7 @@ async function rewriteInstructionWithRule(node, text, rule){
     const model = resolveChatModel(rule?.model || node?.llmModel || '', provider);
     const res = await fetch('/api/llm/canvas', {
         method:'POST',
+        signal,
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
             message:raw, messages:[], images:[], videos:[], files:[],
@@ -36336,18 +36404,22 @@ function toggleLlmRulePin(name){
 }
 function closeLlmOptMenu(){
     if(llmOptMenuEl){ llmOptMenuEl.remove(); llmOptMenuEl = null; }
+    llmOptMenuRerender = null;
 }
 function llmOptMenuAgentCat(rule){
-    return LLM_RULE_AGENT_CATS.includes(rule?.acat) ? rule.acat : '未分类';
+    if(LLM_RULE_AGENT_CATS.includes(rule?.acat)) return rule.acat;
+    // 2026-10-26（用户定稿）：润色型也进菜单，未选分类时自动归「文案类」；智能体型未分类才是「未分类」
+    return llmRuleMode(rule) === 'polish' ? '文案类' : '未分类';
 }
 function llmOptMenuCatWeight(cat){
     if(cat === '未分类') return 99;
     const i = LLM_RULE_AGENT_CATS.indexOf(cat);
     return i < 0 ? 50 : i;
 }
-// 纯函数：只取智能体 → 按分类出 chips → 按分类分节；「全部」视图顶部单列「常用置顶」
+// 纯函数：全部规则（智能体 + 润色）→ 按分类出 chips → 按分类分节；「全部」视图顶部单列「常用置顶」
+// 2026-10-26（用户定稿）：润色型不再从菜单隐藏——之前只列 agent 型，用户把规则改成润色后它就“消失”，反直觉
 function llmOptMenuView(rules){
-    const list = (Array.isArray(rules) ? rules : []).filter(r => llmRuleMode(r) === 'agent');
+    const list = Array.isArray(rules) ? rules.slice() : [];
     const pinned = getLlmPinnedRuleNames().map(n => list.find(r => r.name === n)).filter(Boolean);
     const pinnedSet = new Set(pinned.map(r => r.name));
     const countOf = cat => list.filter(r => llmOptMenuAgentCat(r) === cat).length;
@@ -36382,9 +36454,11 @@ function openLlmOptMenu(){
     el.className = 'llm-opt-menu';
     const cur = getCurrentLlmRule();
     const pinnedNow = new Set(getLlmPinnedRuleNames());
-    const ruleRowHtml = r => `<button type="button" class="llm-opt-menu-row ${r.name === cur?.name ? 'active' : ''} ${r.enabled === false ? 'is-off' : ''}" data-rule="${escapeAttr(r.name)}">
+    // 2026-10-26（用户要求）：悬停行显示完整规则内容（预设智能体提示词全文）；换行转 &#10;，否则 HTML 解析会把 \n 归一成空格
+    const ruleRowHtml = r => `<button type="button" class="llm-opt-menu-row ${r.name === cur?.name ? 'active' : ''} ${r.enabled === false ? 'is-off' : ''}" data-rule="${escapeAttr(r.name)}" title="${escapeAttr(String(r.content || '').trim() || '（这条规则没有内容）').replace(/\n/g, '&#10;')}">
             <span class="llm-opt-menu-ico">${escapeHtml(LLM_RULE_TYPE_ICONS[r.type] || '◇')}</span>
             <span class="llm-opt-menu-name">${escapeHtml(r.name)}</span>
+            ${llmRuleMode(r) === 'polish' ? '<em class="polish">润色</em>' : '<em class="agent">智能体</em>'}
             ${r.name === cur?.name ? '<em class="cur">当前</em>' : ''}
             ${r.enabled === false ? '<em class="off">已停用</em>' : ''}
             <span class="llm-opt-menu-pin ${pinnedNow.has(r.name) ? 'on' : ''}" role="button" data-pin="${escapeAttr(r.name)}" title="${pinnedNow.has(r.name) ? '取消置顶' : '置顶到常用'}">${pinnedNow.has(r.name) ? '⚑' : '⚐'}</span>
@@ -36403,10 +36477,10 @@ function openLlmOptMenu(){
         const listHtml = parts.length ? parts.join('') : '<div class="llm-opt-menu-empty">这个分类下还没有智能体</div>';
         return `<div class="llm-opt-menu-chips">${chipHtml}</div><div class="llm-opt-menu-list">${listHtml}</div>`;
     };
-    // 当前生效规则若是润色型（默认的「指令清晰化」就是），本菜单里选不到它 —— 头部明确标出来，不让人误以为丢了
+    // 2026-10-26（用户定稿）：润色型也在列表里（带润色标），头部只作类型说明
     const curIsPolish = Boolean(cur) && llmRuleMode(cur) !== 'agent';
     const curHtml = cur
-        ? `<span class="llm-opt-menu-cur${curIsPolish ? ' polish' : ''}" title="${curIsPolish ? '当前生效的是润色型规则（不在智能体列表里，节点仍按它执行）；选任一智能体即切换' : '当前生效的智能体'}">当前：${escapeHtml(cur.name)}${curIsPolish ? ' · 润色' : ''}</span>`
+        ? `<span class="llm-opt-menu-cur${curIsPolish ? ' polish' : ''}" title="${curIsPolish ? '当前生效的是润色型规则（列表里带润色标）；选任一条即切换' : '当前生效的智能体'}">当前：${escapeHtml(cur.name)}${curIsPolish ? ' · 润色' : ''}</span>`
         : '<span class="llm-opt-menu-cur">未选择</span>';
     el.innerHTML = `<div class="llm-opt-menu-head"><span class="llm-opt-menu-title">规则智能体<em>系统提示词</em></span>${curHtml}<span data-close>收起</span></div>`
         + `<div data-menu-body>${bodyHtml()}</div>`
@@ -36433,6 +36507,7 @@ function openLlmOptMenu(){
         // 重绘后高度可能变化（筛选后条目变少），重新贴回按钮上方
         placeMenu();
     };
+    llmOptMenuRerender = rerenderBody;
     el.addEventListener('mousedown', e => e.stopPropagation());
     el.addEventListener('click', e => {
         // 2026-10-22 修复：chips 点击会重绘 body，把点击目标从 DOM 摘掉；
@@ -36478,7 +36553,8 @@ function openLlmRuleEditor(name){
     let type = LLM_RULE_TYPES.includes(existing?.type) ? existing.type : '自定义';
     let cat = LLM_RULE_CATS.includes(existing?.cat) ? existing.cat : (LLM_RULE_TYPE_CATS[type] || '未分类');
     // 2026-10-22（用户要求）智能体分类：业务维度，菜单里按它筛选/分组
-    let acat = LLM_RULE_AGENT_CATS.includes(existing?.acat) ? existing.acat : '';
+    // 2026-10-26（用户定稿）：润色型也参与分类，旧的润色规则（acat 空）默认归「文案类」
+    let acat = LLM_RULE_AGENT_CATS.includes(existing?.acat) ? existing.acat : (existing && llmRuleMode(existing) === 'polish' ? '文案类' : '');
     const mask = document.createElement('div');
     mask.className = 'llm-rule-mask';
     mask.innerHTML = `<div class="llm-rule-modal">
@@ -36490,7 +36566,7 @@ function openLlmRuleEditor(name){
             <label class="llm-rule-label">分组<select class="llm-rule-input" data-cat>${LLM_RULE_CATS.map(c => `<option ${c === cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         </div>
         <label class="llm-rule-label">智能体分类<select class="llm-rule-input" data-acat>${['', ...LLM_RULE_AGENT_CATS].map(c => `<option value="${escapeAttr(c)}" ${c === acat ? 'selected' : ''}>${c || '不分类'}</option>`).join('')}</select>
-            <span class="llm-rule-scope-hint">仅智能体生效：菜单里按「分组 · 智能体分类」归组，也可用分类快速筛选</span>
+            <span class="llm-rule-scope-hint">智能体与润色都生效：菜单里按分类归组、可用 chips 筛选；润色未选分类时自动归「文案类」</span>
         </label>
         <div class="llm-rule-label">显示范围
             <div class="llm-rule-scope">
@@ -36504,6 +36580,7 @@ function openLlmRuleEditor(name){
                 <button type="button" data-m="agent" class="${mode === 'agent' ? 'on' : ''}">智能体（整段作为系统提示词）</button>
                 <button type="button" data-m="polish" class="${mode === 'polish' ? 'on' : ''}">润色（只改写指令）</button>
             </div>
+            <span class="llm-rule-scope-hint">润色型也会出现在菜单里，行尾带黄色「润色」标，选择方式与智能体相同</span>
         </div>
         <label class="llm-rule-label">规则内容 / 系统提示词<textarea class="llm-rule-textarea" data-content placeholder="Role&#10;你是一位……&#10;&#10;工作方式&#10;……&#10;&#10;输出格式&#10;……">${escapeHtml(existing?.content || '')}</textarea></label>
         <label class="llm-rule-check"><span class="box ${enabled ? 'on' : ''}" data-enabled>${enabled ? '✓' : ''}</span>启用这条规则</label>
@@ -36573,7 +36650,7 @@ function openLlmRuleEditor(name){
         acat = q('[data-acat]').value || '';
         // 只维护“用户层”：同名即覆盖内置规则，绝不把内置规则整批写进 localStorage
         const user = getLlmUserRules().filter(r => r.name !== (existing?.name || '') && r.name !== nextName);
-        user.push({name:nextName, content, mode, type, cat, acat: mode === 'agent' ? acat : '', enabled, showOnNode, showOnAssistant, provider:'', model:''});
+        user.push({name:nextName, content, mode, type, cat, acat, enabled, showOnNode, showOnAssistant, provider:'', model:''});
         saveLlmRules(user);
         if(enabled) { localStorage.setItem(LLM_RULE_CURRENT_KEY, nextName); llmCurrentRuleCache = undefined; }
         mask.remove();
@@ -37456,6 +37533,61 @@ function resumeSmartPendingTasks(){
     nodes.filter(node => smartPendingTasks(node).length).forEach(node => {
         resumeSmartPendingNode(node);
     });
+}
+// 2026-10-26（用户要求修复「生成的视频不显示出来」）：
+// /api/video/generate 是同步长请求，生成期间刷新/关页会掐断连接——结果文件其实已由后端落库（/api/video/jobs），
+// 但任务记录没绑节点号，节点端也没有可恢复标记，表现为「花了钱节点却是空的」。
+// 这里在画布加载后自动扫一遍：空的视频节点 × 最近 2 天成功任务，按「任务完成时间 ≥ 节点开始运行」+ 提示词前缀匹配自动挂回。
+// 已挂过的任务（url 已在画布上）直接跳过；每节点每次加载最多回填一条，防重复。
+async function recoverUnattachedApiVideoResults(){
+    try{
+        if(!canvas) return;
+        const candidates = nodes.filter(n => n.type === 'smart-image'
+            && isApiLikeEngine(n.runSettings?.engine) && n.runSettings?.apiKind === 'video'
+            && !(n.images || []).some(i => i?.url)
+            && !n.running && !n.queued && !(Number(n.pending) > 0)
+            && Number(n.runStartedAt || 0) > 0
+            && !n.__videoRecoverDone);
+        if(!candidates.length) return;
+        const res = await fetch('/api/video/jobs?limit=40&days=2');
+        if(!res.ok) return;
+        const jobs = await res.json();
+        if(!Array.isArray(jobs)) return;
+        const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+        const mediaUrlOf = img => smartOriginalMediaUrl(img?.url || img?.src || '') || '';
+        const onCanvas = url => nodes.some(nd => (nd.images || []).some(img => mediaUrlOf(img) === url));
+        let attached = 0;
+        jobs.forEach(job => {
+            const rawUrl = String(job?.url || (job?.urls || [])[0] || '');
+            if(!rawUrl) return;
+            const url = smartOriginalMediaUrl(rawUrl) || rawUrl;
+            if(!url || onCanvas(url)) return;
+            const jobTs = Number(job.ts || 0) * 1000;
+            if(!jobTs) return;
+            const jobPromptHead = norm(job.prompt).slice(0, 60);
+            // 裁剪（trim）等辅助记录没有提示词，无法可靠归属节点 → 不参与自动找回
+            if(!jobPromptHead) return;
+            const matches = candidates.filter(n => {
+                if(n.__videoRecoverDone) return false;
+                const startedAt = Number(n.runStartedAt || 0);
+                if(jobTs < startedAt - 5000 || jobTs - startedAt > 6 * 3600 * 1000) return false;
+                const nodeHead = norm(n.runPrompt).slice(0, 60);
+                return !nodeHead || nodeHead === jobPromptHead || jobPromptHead.startsWith(nodeHead) || nodeHead.startsWith(jobPromptHead);
+            });
+            matches.sort((a, b) => Number(b.runStartedAt) - Number(a.runStartedAt));
+            const node = matches[0];
+            if(!node) return;
+            node.images = [{url, kind:'video', name:decodeURIComponent((url.split('/').pop() || '').split('?')[0]) || 'video.mp4', generatedResult:true}];
+            node.runTimerHidden = true;
+            node.__videoRecoverDone = true;
+            attached++;
+        });
+        if(attached){
+            toast(`已自动找回 ${attached} 条视频生成结果（此前页面刷新导致丢失）`);
+            render();
+            scheduleSave();
+        }
+    }catch(err){}
 }
 function updateSelectionBox(event){
     if(!selectionState) return;

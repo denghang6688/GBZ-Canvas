@@ -54,6 +54,34 @@ body.studio-theme-dark .api-link-btn,
 html.studio-theme-dark body .api-link-btn { background:#f5f6f8; border-color:#f5f6f8; color:#0e1014; box-shadow:0 8px 18px rgba(0,0,0,.24); }
 body.studio-theme-dark .api-link-btn:hover,
 html.studio-theme-dark body .api-link-btn:hover { background:#ffffff; border-color:#ffffff; color:#05070b; }
+/* 2026-10-26 推荐API按钮：紫色亮点标识（呼吸圆点 + 紫色主题，!important 压过主题覆盖） */
+.api-link-btn.recommend-glow {
+    position:relative;
+    border-color:rgba(139,109,255,.55) !important;
+    background:linear-gradient(135deg, rgba(139,109,255,.16), rgba(109,124,255,.09)) !important;
+    color:var(--text) !important;
+    box-shadow:0 0 0 1px rgba(139,109,255,.12), 0 4px 14px rgba(109,92,255,.18);
+}
+.api-link-btn.recommend-glow::before {
+    content:''; position:absolute; top:-3px; right:-3px; width:8px; height:8px; border-radius:50%;
+    background:#8b6dff; box-shadow:0 0 6px 2px rgba(139,109,255,.65);
+    animation:recommendDotPulse 1.8s ease-in-out infinite;
+}
+.api-link-btn.recommend-glow i,
+.api-link-btn.recommend-glow svg { color:#8b6dff !important; }
+.api-link-btn.recommend-glow:hover {
+    border-color:#8b6dff !important;
+    background:linear-gradient(135deg, rgba(139,109,255,.3), rgba(109,124,255,.18)) !important;
+    color:var(--text) !important;
+    box-shadow:0 0 0 1px rgba(139,109,255,.25), 0 6px 18px rgba(109,92,255,.32);
+    transform:translateY(-1px);
+}
+body.studio-theme-dark .api-link-btn.recommend-glow,
+html.studio-theme-dark body .api-link-btn.recommend-glow { color:#e9e4ff; }
+@keyframes recommendDotPulse {
+    0%, 100% { opacity:1; transform:scale(1); }
+    50% { opacity:.45; transform:scale(.8); }
+}
 .cli-quick-group { display:flex; flex-direction:column; gap:8px; padding-top:4px; }
 .cli-quick-list { display:grid; grid-template-columns:1fr; gap:6px; }
 .cli-quick-btn { width:100%; min-height:34px; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--muted); display:inline-flex; align-items:center; justify-content:flex-start; gap:8px; padding:0 10px; font-size:11.5px; font-weight:850; transition:all .15s ease; }

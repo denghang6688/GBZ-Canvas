@@ -25,13 +25,13 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/vendor/js/lucide.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/js/theme.js?v=V26.10.26.1.1792979323"></script>
-    <script src="/static/js/i18n.js?v=V26.10.26.1.1792979323"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.26.1.1792979323">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=V26.10.26.2.1790042522"></script>
+    <script src="/static/vendor/js/lucide.js?v=V26.10.26.2.1790042522"></script>
+    <script src="/static/js/theme.js?v=V26.10.26.2.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V26.10.26.2.1790305929"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.26.2.1790492361">
     <style>
-        @import url('/static/vendor/css/fonts.css?v=V26.10.26.1.1792979323');
+        @import url('/static/vendor/css/fonts.css?v=V26.10.26.1.1790042522');
         :root {
             --ease:cubic-bezier(.4,0,.2,1);
             --chat-bg:#eeeeee;
@@ -4536,6 +4536,13 @@
             return kind === 'image' || mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|tiff?)(\?|#|$)/.test(url);
         }
 
+        function isVideoRef(ref){
+            const kind = String(ref?.kind || '').toLowerCase();
+            const mime = String(ref?.mime || '').toLowerCase();
+            const url = String(ref?.url || '').toLowerCase();
+            return kind === 'video' || mime.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/.test(url);
+        }
+
         function attachmentName(ref){
             return ref?.name || (ref?.url || '').split('/').pop() || '附件';
         }
@@ -4557,11 +4564,15 @@
         }
 
         function renderRefChip(ref, i){
-            const refLabel = isImageRef(ref) ? `图${i + 1}` : `附件${i + 1}`;
+            // 2026-10-26（用户要求）：图片按图片自己的顺序连续编号（图1/图2/…），文件附件单独编附件号，互不挤占
+            return `<div class="ref-chip${isImageRef(ref) ? '' : ' file'}" data-ref-label="${escapeHtml(ref._refLabel || '')}">${renderRefChipInner(ref, i)}</div>`;
+        }
+
+        function renderRefChipInner(ref, i){
             if(isImageRef(ref)){
-                return `<div class="ref-chip" data-ref-label="${escapeHtml(refLabel)}"><img src="${escapeHtml(ref.url)}" title="${escapeHtml(refLabel)} · ${escapeHtml(attachmentName(ref))}"><button onclick="removeRef(${i})">×</button></div>`;
+                return `<img src="${escapeHtml(ref.url)}" title="${escapeHtml(ref._refLabel || '')} · ${escapeHtml(attachmentName(ref))}"><button onclick="removeRef(${i})">×</button>`;
             }
-            return `<div class="ref-chip file" data-ref-label="${escapeHtml(refLabel)}"><i data-lucide="file"></i><span class="ref-file-name" title="${escapeHtml(refLabel)} · ${escapeHtml(attachmentName(ref))}">${escapeHtml(attachmentName(ref))}</span><button onclick="removeRef(${i})">×</button></div>`;
+            return `<i data-lucide="file"></i><span class="ref-file-name" title="${escapeHtml(ref._refLabel || '')} · ${escapeHtml(attachmentName(ref))}">${escapeHtml(attachmentName(ref))}</span><button onclick="removeRef(${i})">×</button>`;
         }
 
         async function uploadFiles(files){
@@ -4584,6 +4595,14 @@
             const clearButton = refs.length
                 ? '<button type="button" class="ref-clear-all" onclick="clearRefs()" title="清空全部引用" aria-label="清空全部引用">×</button>'
                 : '';
+            // 2026-10-26（用户要求）：同类素材各自从 1 开始编号——图1/图2…、视频1/视频2…、附件1/附件2…，
+            // 互不挤占，保证提示词里的 图N 始终对应第 N 张图。
+            let imgSeq = 0, vidSeq = 0, fileSeq = 0;
+            refs.forEach(ref => {
+                if(isImageRef(ref)) ref._refLabel = `图${++imgSeq}`;
+                else if(isVideoRef(ref)) ref._refLabel = `视频${++vidSeq}`;
+                else ref._refLabel = `附件${++fileSeq}`;
+            });
             strip.innerHTML = `${refs.map((ref,i) => renderRefChip(ref, i)).join('')}${clearButton}`;
             lucide.createIcons();
             updateComposerOverflow();
