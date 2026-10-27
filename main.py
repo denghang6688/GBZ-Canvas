@@ -16749,7 +16749,8 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "duration": {"min": 4, "max": 30, "step": 1},
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
-        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        # 2026-10-27（用户反馈：参考图按实际数量提交）：官方参考素材上限 50（30图+10视频+10音频），不再钳 4 张。
+        "modes": {"frames": True, "reference_image": 30, "reference_video": 10, "reference_audio": 10},
         "audio": True,
     },
     "seedance": {
@@ -16757,7 +16758,8 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "duration": {"min": 4, "max": 15, "step": 1},
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
-        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        # 2026-10-27：Seedance 2.0 系列官方上限 15（9图+3视频+3音频），参考图 4 → 9（音频参考官方要求搭配图片/视频，仍不单独放开）。
+        "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 0},
         "audio": True,
     },
     "hailuo": {
@@ -17133,6 +17135,12 @@ async def canvas_video(payload: CanvasVideoRequest):
                     image_like_urls = set()
                     frame_roles_used = {"first_frame": False, "last_frame": False}
                     volc_video_count = 0
+                    # 2026-10-27：素材切片上限按模型能力档案动态取（Seedance 2.5=30图/10视频/10音频、
+                    # 2.0 系列=9图/3视频/3音频），不再写死 9/3/3；档案缺失时回落官方基础值。
+                    _volc_modes = video_model_caps(volc_model).get("modes") or {}
+                    volc_img_cap = max(1, int(_volc_modes.get("reference_image") or 9))
+                    volc_vid_cap = max(0, int(_volc_modes.get("reference_video") or 3))
+                    volc_aud_cap = max(0, int(_volc_modes.get("reference_audio") or 0))
 
                     def append_volcengine_image(url: str, role: str):
                         if role in {"first_frame", "last_frame"}:
@@ -17149,7 +17157,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         image_like_urls.add(url)
                         return True
 
-                    for ref in payload.images[:9]:
+                    for ref in payload.images[:volc_img_cap]:
                         url = await volcengine_normalize_reference_url_async(ref.url, max_image_size=1536)
                         if not url:
                             continue
@@ -17162,7 +17170,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         elif not frame_roles_used["first_frame"]:
                             # 普通图生视频没有显式 role 时，只取第一张作为首帧。
                             append_volcengine_image(url, "first_frame")
-                    for url in (payload.videos or [])[:3]:
+                    for url in (payload.videos or [])[:volc_vid_cap]:
                         text_url = str(url or "").strip()
                         if not text_url:
                             continue
@@ -17175,7 +17183,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         video_items = await volcengine_video_reference_content_items(media_url)
                         body["content"].extend(video_items)
                         volc_video_count += 1
-                    for url in (payload.audios or [])[:3]:
+                    for url in (payload.audios or [])[:volc_aud_cap]:
                         duration = probe_local_audio_duration_seconds(url)
                         if duration is not None and (duration < 1.8 or duration > 15.2):
                             raise HTTPException(

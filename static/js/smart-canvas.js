@@ -9522,14 +9522,16 @@ const API_VIDEO_MODEL_CAPS = {
         duration:{min:4, max:30, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        // 2026-10-27（用户反馈：参考图按实际数量提交）：官方参考素材上限 50（30图+10视频+10音频），不再钳 4 张。
+        modes:{frames:true, reference_image:30, reference_video:10, reference_audio:10},
         audio:true
     },
     'seedance': {
         duration:{min:4, max:15, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        // 2026-10-27：Seedance 2.0 系列官方上限 15（9图+3视频+3音频），参考图 4 → 9。
+        modes:{frames:true, reference_image:9, reference_video:3, reference_audio:0},
         audio:true
     },
     'hailuo': {
