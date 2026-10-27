@@ -21524,10 +21524,15 @@ function syncSmartSelectionFrameDuringDrag(){
 function smartSelectionToolbarHtml(){
     const metrics = smartSelectionFrameMetrics();
     if(!metrics) return '';
+    // 2026-10-27（用户要求）：框选工具条加「下载」——把选中节点里的图像逐张下载（浏览器原生多文件下载，不打包 zip）。
+    // 只有选中内容里真的有图像才显示这个按钮；视频/音频素材不参与。
+    const selectedNodes = metrics.ids.map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const downloadCount = smartSelectionDownloadItems(selectedNodes).length;
     const actions = [
         {key:'arrange', icon:'layout-grid', label:'整理排列'},
         {key:'group', icon:'group', label:'成组'},
-        {key:'workflowGroup', icon:'box-select', label:'创建工作流组'}
+        {key:'workflowGroup', icon:'box-select', label:'创建工作流组'},
+        ...(downloadCount ? [{key:'download', icon:'download', label:`下载 ${downloadCount} 张图`}] : [])
     ];
     return `<div class="smart-selection-frame" style="left:${metrics.frameX}px;top:${metrics.frameY}px;width:${metrics.frameW}px;height:${metrics.frameH}px"></div>
         <div class="smart-selection-floating-menu" style="left:${metrics.left}px;top:${metrics.top}px">${actions.map(action => `
@@ -21620,6 +21625,40 @@ function beginBatchPortDragFromSelection(e){
     updatePortDragVisual();
     return true;
 }
+// 2026-10-27（用户要求）：框选工具条「下载」——收集选中节点的图像，逐张触发浏览器下载，不打包 zip。
+// 智能分组成员图已在 node.images 里，天然覆盖；工作流组不参与（框选框本身也把它排除在外）。
+function smartSelectionDownloadItems(selectedNodes){
+    const items = [];
+    const seenUrls = new Set();
+    (selectedNodes || []).forEach(node => {
+        (node?.images || []).forEach(item => {
+            if(!item || isVideoMediaItem(item) || isAudioMediaItem(item)) return;
+            const url = smartOriginalMediaUrl(item);
+            if(!url || seenUrls.has(url)) return;
+            seenUrls.add(url);
+            items.push({...item, url});
+        });
+    });
+    return items;
+}
+async function downloadSelectedNodeImages(){
+    const selectedNodes = selectedNodeIds().map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const items = smartSelectionDownloadItems(selectedNodes);
+    if(!items.length){ toast('选中的节点里没有可下载的图像'); return; }
+    // 逐张触发下载：走 /api/download-output 认证代理（同预览单图下载），间隔留给浏览器排队能弹多个保存任务。
+    items.forEach((item, index) => {
+        setTimeout(() => {
+            const name = downloadNameForMediaItem(item, 'image');
+            const link = document.createElement('a');
+            link.href = `/api/download-output?url=${encodeURIComponent(item.url)}&name=${encodeURIComponent(name)}`;
+            link.download = name;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }, index * 350);
+    });
+    toast(`已开始下载 ${items.length} 张图片`);
+}
 function bindSmartSelectionToolbar(){
     const frame = world.querySelector('.smart-selection-frame');
     if(frame && !frame._boundDrag){
@@ -21650,6 +21689,7 @@ function bindSmartSelectionToolbar(){
             if(action === 'arrange') arrangeSelectedSmartNodes(e.currentTarget);
             if(action === 'group') groupSelectedNodes();
             if(action === 'workflowGroup') createWorkflowGroupFromSelection();
+            if(action === 'download') downloadSelectedNodeImages();
         });
     });
     world.querySelectorAll('[data-smart-selection-port]').forEach(port => {
