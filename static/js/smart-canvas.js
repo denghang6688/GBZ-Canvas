@@ -24513,8 +24513,8 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                     url:node.images?.[imgIndex]?.url || '',
                     detachOnLeave:true
                 };
-                // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡内抓缩略图 = 拖整组。
-                // 脱离判定按「按下时的卡框快照」——否则组跟着指针走后，实时卡框永远罩住指针，拆图手势就死了。
+                // 2026-10-27：成组卡快照用于「拖出组框」判定。拖动过程中组框保持原位
+                //（只有幽灵缩略图跟随指针），松手才按落点决定「整组平移 / 拆图」。
                 if(isSmartGroupNode(node)) thumbDragState.sourceRect = nodeRect(node);
                 capturePendingUndo();
             });
@@ -24713,19 +24713,46 @@ function restoreDraggedNodePosition(){
         }
     });
 }
-// 2026-10-27：成组卡内抓缩略图的「整组跟随」是临时态——一旦手势最终变成「拆图」，
-// 组要回弹到按下前的位置，不能把跟随位移留下来。
-function restoreThumbGroupMove(state){
-    (state?.groupMove || []).forEach(item => {
-        const n = nodes.find(x => x.id === item.id);
-        if(n){
-            n.x = item.ox;
-            n.y = item.oy;
-            const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
-            if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
+// 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：成组卡内抓缩略图的
+// 幽灵预览——组框保持原位，跟随指针的只是一个缩略图虚影；松手按落点决定整组平移或拆图。
+let thumbDragGhostEl = null;
+function updateThumbDragGhost(e, source){
+    const st = thumbDragState;
+    if(!st) return;
+    if(!st.ghost){
+        const nodeEl = world.querySelector(`.image-node[data-id="${CSS.escape(st.nodeId)}"]`);
+        const thumbEl = nodeEl?.querySelector(`.thumb-item[data-image-index="${st.imgIndex}"]`);
+        const mediaEl = thumbEl?.querySelector('img, video');
+        if(!mediaEl) return;
+        const rect = mediaEl.getBoundingClientRect();
+        const el = document.createElement('div');
+        el.className = 'smart-thumb-drag-ghost';
+        el.style.width = `${Math.round(rect.width)}px`;
+        el.style.height = `${Math.round(rect.height)}px`;
+        st.ghostDX = e.clientX - rect.left;
+        st.ghostDY = e.clientY - rect.top;
+        if(mediaEl.tagName === 'VIDEO'){
+            // video 克隆不保证有画面，直接抓当前帧快照
+            if(mediaEl.readyState >= 2 && mediaEl.videoWidth){
+                const c = document.createElement('canvas');
+                c.width = mediaEl.videoWidth; c.height = mediaEl.videoHeight;
+                try { c.getContext('2d').drawImage(mediaEl, 0, 0); el.appendChild(c); } catch(_) {}
+            }
+        } else {
+            el.appendChild(mediaEl.cloneNode(true));
         }
-    });
-    state.groupMoved = false;
+        document.body.appendChild(el);
+        thumbDragGhostEl = el;
+        st.ghost = el;
+    }
+    if(thumbDragGhostEl){
+        thumbDragGhostEl.style.left = `${e.clientX - (st.ghostDX || 0)}px`;
+        thumbDragGhostEl.style.top = `${e.clientY - (st.ghostDY || 0)}px`;
+    }
+}
+function removeThumbDragGhost(){
+    if(thumbDragGhostEl){ thumbDragGhostEl.remove(); thumbDragGhostEl = null; }
+    if(thumbDragState?.ghost) thumbDragState.ghost = null;
 }
 function pruneSmartGroupMembershipsForNode(node){
     if(!node || !node.id) return false;
@@ -39411,28 +39438,11 @@ window.onmousemove = e => {
             return point.x < r.x - pad || point.x > r.x + r.width + pad || point.y < r.y - pad || point.y > r.y + r.height + pad;
         })();
         if(!thumbDragState.detached && movedFarEnough && source && !canLeaveDetach){
-            // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡片几乎整面都是缩略图，
-            // 原来卡内抓图只会尝试重排、组永远拖不动。现在成组卡内拖动 = 整组跟随指针；
-            // 拖出原卡快照范围仍拆图（组回弹原位），普通多图节点的重排行为不变。
+            // 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：成组卡内
+            // 抓缩略图不再让整组跟随指针——组框保持原位，只有幽灵缩略图跟随；
+            // 松手在组内 = 整组按本次位移平移，拖出原卡快照范围 = 拆图。
             if(isSmartGroupNode(source)){
-                if(!thumbDragState.groupMove){
-                    thumbDragState.groupMove = [source.id, ...smartGroupMembers(source).map(m => m.id)].map(gid => {
-                        const n = nodes.find(x => x.id === gid);
-                        return n ? { id:gid, ox:Number(n.x) || 0, oy:Number(n.y) || 0 } : null;
-                    }).filter(Boolean);
-                }
-                const gdx = (e.clientX - thumbDragState.startX) / viewport.scale;
-                const gdy = (e.clientY - thumbDragState.startY) / viewport.scale;
-                thumbDragState.groupMoved = true;
-                thumbDragState.groupMove.forEach(item => {
-                    const n = nodes.find(x => x.id === item.id);
-                    if(!n) return;
-                    n.x = item.ox + gdx;
-                    n.y = item.oy + gdy;
-                    n.posEditedAt = Date.now();
-                    const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
-                    if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
-                });
+                updateThumbDragGhost(e, source);
                 suppressImageClickUntil = Date.now() + 260;
                 return;
             }
@@ -39455,11 +39465,11 @@ window.onmousemove = e => {
         }
         if(!thumbDragState.detached && movedFarEnough && canLeaveDetach){
             const canDetachThumb = source && (isSmartGroupNode(source) ? (source.images || []).length >= 1 : (source.images || []).length > 1);
-            if(canDetachThumb){
-                const sourceImg = source.images[thumbDragState.imgIndex];
-                if(sourceImg){
-                    // 拆图手势成立：整组跟随是临时的，先把组回弹到按下前的位置
-                    if(thumbDragState.groupMoved) restoreThumbGroupMove(thumbDragState);
+                if(canDetachThumb){
+                    const sourceImg = source.images[thumbDragState.imgIndex];
+                    if(sourceImg){
+                        // 拆图手势成立：撤掉幽灵缩略图，组框全程没动过、无需回弹
+                        removeThumbDragGhost();
                     commitPendingUndo();
                     undoSuppressed = true;
                     const img = stripImageGenerationMeta({...sourceImg});
@@ -39759,8 +39769,27 @@ function handleCanvasMouseUp(e){
         return;
     }
     if(thumbDragState){
-        // 2026-10-27：成组卡内拖动落定 = 位置真改了，提交撤销快照并落盘重绘；
-        // 拆图路径已在分离瞬间回弹过组，这里 groupMoved 已被清掉。
+        removeThumbDragGhost();
+        // 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：拖动过程中
+        // 组框保持原位，松手落定——在组内松手 = 整组按本次指针位移平移（沿用
+        // 「卡内抓缩略图可拖整组」的手势，只是不再实时跟手）；拖出组外已走拆图。
+        if(!thumbDragState.detached && !thumbDragState.reordered
+            && Math.abs(e.clientX - thumbDragState.startX) + Math.abs(e.clientY - thumbDragState.startY) > 6){
+            const group = nodes.find(n => n.id === thumbDragState.nodeId);
+            if(group && isSmartGroupNode(group)){
+                const gdx = (e.clientX - thumbDragState.startX) / viewport.scale;
+                const gdy = (e.clientY - thumbDragState.startY) / viewport.scale;
+                [group.id, ...smartGroupMembers(group).map(m => m.id)].forEach(gid => {
+                    const n = nodes.find(x => x.id === gid);
+                    if(!n) return;
+                    n.x = (Number(n.x) || 0) + gdx;
+                    n.y = (Number(n.y) || 0) + gdy;
+                    n.posEditedAt = Date.now();
+                });
+                thumbDragState.groupMoved = true;
+            }
+        }
+        // 组内拖动落定 = 位置真改了，提交撤销快照并落盘重绘。
         if(thumbDragState.reordered || thumbDragState.detached || thumbDragState.groupMoved) commitPendingUndo();
         else discardPendingUndo();
         if(thumbDragState.groupMoved){
