@@ -1342,6 +1342,41 @@ function smartTrimFrameGrabber(srcUrl, canvasEl, mirrors = []){
     };
 }
 
+// 2026-10-27（用户反馈：裁剪面板「读取区域裁剪范围」加载慢）：
+// 1) 胶片条前端 Promise 缓存 —— 同一视频重开面板即时渲染；
+// 2) 悬停工具条「截取片段」按钮即预取 —— 真正点开时多数已就绪；
+// 3) 后端同步改为并行 fast-seek 抽帧 + 进程内缓存（见 main.py /api/video/filmstrip）。
+const SMART_TRIM_FILMSTRIP_TTL = 10 * 60 * 1000;
+const smartTrimFilmstripCache = new Map(); // url -> { at, promise }
+let smartTrimPrefetchBound = false;
+
+function smartTrimFilmstripUrl(url){ return `/api/video/filmstrip?url=${encodeURIComponent(url)}&count=10&w=160`; }
+
+function smartTrimFetchFilmstrip(url){
+    const hit = smartTrimFilmstripCache.get(url);
+    if(hit && Date.now() - hit.at < SMART_TRIM_FILMSTRIP_TTL) return hit.promise;
+    const promise = fetch(smartTrimFilmstripUrl(url))
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('胶片条生成失败')))
+        .catch(err => { smartTrimFilmstripCache.delete(url); throw err; });
+    smartTrimFilmstripCache.set(url, { at: Date.now(), promise });
+    return promise;
+}
+
+// 悬停「截取片段」按钮时提前拉胶片条（pointerover 委托，promise 去重不会重复请求）
+function bindSmartTrimFilmstripPrefetch(){
+    if(smartTrimPrefetchBound) return;
+    smartTrimPrefetchBound = true;
+    document.addEventListener('pointerover', e => {
+        const btn = e.target?.closest?.('[data-smart-node-action="trim"]');
+        if(!btn || btn.disabled) return;
+        const nodeId = btn.dataset.nodeId;
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const videoUrl = nodeEl?.querySelector('video[data-url]')?.dataset?.url || '';
+        if(videoUrl) smartTrimFetchFilmstrip(videoUrl).catch(() => {});
+    }, { passive: true });
+}
+bindSmartTrimFilmstripPrefetch();
+
 function openSmartVideoTrimPanel(video, url, nodeId){
     closeSmartVideoTrimPanel();
     const duration = Number(video?.duration);
@@ -1513,9 +1548,8 @@ function openSmartVideoTrimPanel(video, url, nodeId){
         flashBubble('r');
     });
 
-    // 胶片条：后端均匀抽帧
-    fetch(`/api/video/filmstrip?url=${encodeURIComponent(url)}&count=10&w=160`)
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('胶片条生成失败')))
+    // 胶片条：后端均匀抽帧（走前端缓存，命中即时渲染；悬停工具条按钮时已预取）
+    smartTrimFetchFilmstrip(url)
         .then(data => {
             if(smartVideoTrimState !== state) return;
             const framesBox = overlay.querySelector('.vtm-frames');

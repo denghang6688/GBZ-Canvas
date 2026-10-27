@@ -28,6 +28,7 @@ import math
 import shlex
 import functools
 import html
+import concurrent.futures
 import socket
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
@@ -7470,6 +7471,45 @@ def probe_local_video_duration_seconds(path: str) -> Optional[float]:
 
 VIDEO_TRIM_MIN_SECONDS = 0.5
 
+# ===== 2026-10-27（用户反馈：裁剪面板胶片条加载慢）=====
+# 优化 1：结果按 (文件, mtime, size, count, width) 进程内缓存 —— 重开面板秒出。
+# 优化 2：主路径改为「并行 fast-seek 逐帧抽帧」—— -ss 放在 -i 之前走关键帧寻址，
+#          每帧只解码极短一段，多线程并发；不再从头全量解码整条视频。
+#          兜底保留原单趟 fps 过滤器（个别封装对 -ss 输入寻址失效时）。
+_FILMSTRIP_CACHE: Dict[tuple, list] = {}
+_FILMSTRIP_CACHE_MAX = 48
+_FILMSTRIP_CACHE_LOCK = Lock()
+
+def _filmstrip_cache_key(path: str, count: int, width: int):
+    try:
+        st = os.stat(path)
+        return (os.path.abspath(path), st.st_mtime_ns, st.st_size, count, width)
+    except OSError:
+        return None
+
+def _ffmpeg_extract_one_frame(ffmpeg, path, t: float, width: int, out_dir: str, idx: int):
+    """fast-seek 抽单帧：成功返回 jpg 路径，失败返回 None。"""
+    fd, tmp = tempfile.mkstemp(prefix=f"fs_{idx:02d}_", suffix=".jpg", dir=out_dir)
+    os.close(fd)
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{t:.3f}", "-i", path,
+        "-frames:v", "1",
+        "-vf", f"scale='min({width},iw)':-2",
+        tmp,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            return tmp
+    except Exception:
+        pass
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return None
+
 @app.get("/api/video/filmstrip")
 async def video_filmstrip(url: str, count: int = 10, w: int = 160):
     """均匀抽取 N 帧缩略图（base64 JPEG 数组 + 视频总时长），给视频截取胶片条用。"""
@@ -7487,11 +7527,43 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
     if not ffmpeg:
         raise HTTPException(status_code=500, detail="未找到 ffmpeg")
 
-    def _build() -> list:
+    cache_key = _filmstrip_cache_key(path, count, width)
+    if cache_key:
+        with _FILMSTRIP_CACHE_LOCK:
+            cached = _FILMSTRIP_CACHE.get(cache_key)
+        if cached is not None:
+            return {"duration": duration, "frames": cached, "cached": True}
+
+    def _frames_from_files(file_list: list) -> list:
         frames = []
+        for fp in file_list:
+            if not fp:
+                frames.append(None)
+                continue
+            try:
+                with open(fp, "rb") as fh:
+                    frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
+            except OSError:
+                frames.append(None)
+        return frames
+
+    def _build() -> list:
         fd_base = tempfile.mkdtemp(prefix="filmstrip_")
         try:
-            # 单趟 fps 过滤器：每 D/N 秒出一帧，恰好 N 帧（比逐帧起 ffmpeg 快一个量级）
+            # 主路径：并行 fast-seek 逐帧（-ss 在 -i 前，关键帧寻址，长视频也秒级）
+            targets = [duration * (i + 0.5) / count for i in range(count)]
+            workers = min(6, count)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_ffmpeg_extract_one_frame, ffmpeg, path, t, width, fd_base, i)
+                    for i, t in enumerate(targets)
+                ]
+                files = [f.result() for f in futures]
+            frames = _frames_from_files(files)
+            frames = [f for f in frames if f]
+            if frames:
+                return frames
+            # 兜底：单趟 fps 过滤器（-ss 输入寻址对个别封装失效时）
             fps_expr = f"{count}/{duration:.6f}"
             cmd = [
                 ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -7503,14 +7575,8 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if proc.returncode == 0:
                 names = sorted(os.listdir(fd_base))
-                for name in names:
-                    fp = os.path.join(fd_base, name)
-                    try:
-                        if os.path.getsize(fp) > 0:
-                            with open(fp, "rb") as fh:
-                                frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
-                    except OSError:
-                        continue
+                frames = _frames_from_files([os.path.join(fd_base, n) for n in names])
+                frames = [f for f in frames if f]
         except Exception:
             pass
         finally:
@@ -7518,37 +7584,19 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
                 shutil.rmtree(fd_base, ignore_errors=True)
             except Exception:
                 pass
-        if not frames:
-            # 兜底：逐帧起 ffmpeg（fps 过滤器对个别封装失效时）
-            for i in range(count):
-                t = duration * (i + 0.5) / count
-                fd, tmp = tempfile.mkstemp(prefix="filmstrip_", suffix=".jpg")
-                os.close(fd)
-                try:
-                    cmd = [
-                        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                        "-ss", f"{t:.3f}", "-i", path,
-                        "-frames:v", "1",
-                        "-vf", f"scale='min({width},iw)':-2",
-                        tmp,
-                    ]
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                    if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
-                        with open(tmp, "rb") as fh:
-                            frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
-                except Exception:
-                    continue
-                finally:
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
         return frames
 
     frames = await asyncio.to_thread(_build)
     if not frames:
         raise HTTPException(status_code=415, detail="未能抽取视频帧")
-    return {"duration": duration, "frames": frames}
+    if cache_key:
+        with _FILMSTRIP_CACHE_LOCK:
+            if len(_FILMSTRIP_CACHE) >= _FILMSTRIP_CACHE_MAX:
+                # 简单 FIFO 淘汰，避免长会话内存膨胀
+                for k in list(_FILMSTRIP_CACHE.keys())[: len(_FILMSTRIP_CACHE) - _FILMSTRIP_CACHE_MAX + 1]:
+                    _FILMSTRIP_CACHE.pop(k, None)
+            _FILMSTRIP_CACHE[cache_key] = frames
+    return {"duration": duration, "frames": frames, "cached": False}
 
 class VideoTrimRequest(BaseModel):
     url: str
