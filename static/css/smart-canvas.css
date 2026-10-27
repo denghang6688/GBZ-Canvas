@@ -159,6 +159,10 @@ body.smart-agent-open .preset-workflow-panel { inset:0 402px 0 72px; padding-rig
 .preset-workflow-info em { color:var(--muted); font-size:11px; line-height:1.35; font-style:normal; font-weight:720; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .preset-workflow-empty { grid-column:1/-1; min-height:260px; display:flex; align-items:center; justify-content:center; text-align:center; padding:18px; border:1px dashed var(--line); border-radius:16px; color:var(--muted); font-size:13px; font-weight:800; line-height:1.5; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:26px; background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; }
+/* 2026-10-27（用户反馈：画布太卡）：视口外节点跳过 layout/paint（浏览器按需渲染）。
+   节点自身有内联宽高，offscreen 不渲染内容也不影响占位；连线端点用的是节点数据坐标
+   （nodeRect 不读 DOM 内部矩形），不受影响。on-screen 节点渲染行为与原来完全一致。 */
+.image-node { content-visibility: auto; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-image-replace-drag * { user-select:none !important; }
 body.smart-image-replace-drag { cursor:copy; }

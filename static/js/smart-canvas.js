@@ -858,7 +858,35 @@ async function copyTextToClipboard(text){
     } catch(_) {}
     return false;
 }
-function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
+// 2026-10-27（用户反馈：画布太卡）：lucide.createIcons() 每次会把 DOM 里 1000+ 个已转换的
+// svg 也重新替换一遍（实测 54 节点画布 ≈ 14ms + 全文档 style recalc）。
+// 改为只转换「还没转换的」（i/span 等 非 svg 的 [data-lucide]），已转换的原地不动。
+function convertPendingLucideIcons(root=document){
+    if(!window.lucide) return;
+    let pending = null;
+    try { pending = (root || document).querySelectorAll('[data-lucide]:not(svg)'); } catch(_) { pending = null; }
+    if(!pending || !pending.length) return;
+    if(typeof lucide.createElement !== 'function'){ lucide.createIcons(); return; }
+    const pascal = kebab => String(kebab || '').split(/[-_\s]+/).filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+    pending.forEach(el => {
+        const raw = el.getAttribute('data-lucide') || '';
+        if(!raw) return;
+        const iconNode = (lucide.icons ? lucide.icons[pascal(raw)] : null) || lucide[pascal(raw)];
+        if(!iconNode) return;
+        try {
+            const svg = lucide.createElement(iconNode);
+            // createElement 不带 lucide 基础类名（createIcons 才会加），补齐：lucide lucide-<名> + 原元素类名
+            const prevClass = el.getAttribute('class') || '';
+            svg.setAttribute('class', `lucide lucide-${raw}${prevClass ? ` ${prevClass}` : ''}`);
+            [...el.attributes].forEach(attr => {
+                if(attr.name !== 'data-lucide' && attr.name !== 'class') svg.setAttribute(attr.name, attr.value);
+            });
+            svg.setAttribute('data-lucide', raw);
+            el.replaceWith(svg);
+        } catch(_) {}
+    });
+}
+function refreshIcons(){ convertPendingLucideIcons(document); }
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
@@ -921,6 +949,10 @@ function workflowNavSavedItemMatchesCategory(item, category){
     const haystack = `${item?.category_name || ''} ${(item?.tags || []).join(' ')} ${item?.name || ''}`.toLowerCase();
     return keys.some(key => haystack.includes(key));
 }
+// 2026-10-27（用户反馈：画布太卡）：本函数每次 render 会被每张图调用，URL 构造器解析
+// 实测 ≈13ms/次渲染，而同一 URL 在画布里反复出现 → 加一层 LRU 记忆（命中直接返回）。
+const SMART_ORIGINAL_URL_CACHE_MAX = 1024;
+const smartOriginalMediaUrlCache = new Map();
 function smartOriginalMediaUrl(itemOrUrl){
     // 2026-10-10 兼容嵌套损坏数据：历史画布里出现过 item.url 本身又是一个
     // {url:"...", kind:"video"} 对象（生成结果落地时双重包裹）。不拆开的话
@@ -931,6 +963,8 @@ function smartOriginalMediaUrl(itemOrUrl){
     while (raw && typeof raw === 'object' && depth < 5) { raw = raw.url; depth++; }
     let text = String(raw || '').trim();
     if(!text) return '';
+    const cached = smartOriginalMediaUrlCache.get(text);
+    if(cached !== undefined) return cached;
     // 画布里很多图片会先被包成 /api/download-output 或 /api/media-preview，
     // 下载时必须把这层壳拆开，拿到真正的原始地址再交给后端。
     for(let i = 0; i < 4; i++){
@@ -946,6 +980,8 @@ function smartOriginalMediaUrl(itemOrUrl){
         } catch(e) {}
         break;
     }
+    if(smartOriginalMediaUrlCache.size >= SMART_ORIGINAL_URL_CACHE_MAX) smartOriginalMediaUrlCache.clear();
+    smartOriginalMediaUrlCache.set(text, text);
     return text;
 }
 // 画布缩略图不需要按原图尺寸解码：768px 足够支撑常用卡片和 100% 缩放，
@@ -21940,8 +21976,20 @@ function normalizePendingGroupNodeBoxes(){
     }
     return changed;
 }
+let smartPostRenderPassRaf = 0;
 function render(){
     smartVideoMountUsed = 0;   // 2026-10-10 视频懒挂载：每次全量渲染重新分配真 video 预算
+    // 2026-10-27：render 尾部的两个 pass（高清升级/图片测量）逐 img 读 getBoundingClientRect，
+    // 在 DOM 刚动过、布局脏的时点执行会强制回流（CPU profile 实测占 render 总耗时一半以上），
+    // 且结果晚一帧无感知差异 → 挪到本帧绘制后的 rAF 里执行（可合并，不叠加）。
+    if(!smartPostRenderPassRaf){
+        smartPostRenderPassRaf = requestAnimationFrame(() => {
+            smartPostRenderPassRaf = 0;
+            if(!world.isConnected) return;
+            syncSmartSelectedImageResolution(world);
+            measureSmartNodeImages();
+        });
+    }
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     rememberInlineVideoActivations();
     world.classList.toggle('smart-multi-selected', selectedNodeIds().length > 1);
@@ -21951,7 +21999,9 @@ function render(){
     // 移动 DOM 节点会打断输入法合成会话,导致输入中断(即使保留焦点描边也接不上)。
     const promptHadFocus = document.activeElement === promptInput;
     const reusableNodes = new Map();
+    const existingNodeEls = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
+        existingNodeEls.set(el.dataset.id, el);
         const node = nodes.find(n => n.id === el.dataset.id);
         if(smartNodeHasLiveMedia(node)) reusableNodes.set(node.id, el);
     });
@@ -22046,13 +22096,32 @@ function render(){
         return {node, html};
     });
     const tpl = document.createElement('template');
-    tpl.innerHTML = nodeHtmlEntries.map(entry => entry.html).join('');
+    // 2026-10-27（用户反馈：画布太卡）：全量重建 54 节点 ≈ 90-180ms，任何点选/状态变化都卡
+    // 0.1s+。这里做差量：生成的 HTML 串与现有元素上缓存的串一致、且节点对象引用没换的，
+    // 直接沿用旧 DOM（<video> 播放态、contenteditable 焦点、已绑事件原样保留），只重建有变化的节点。
+    // 节点对象引用必须参与判定：对象换了说明数据被整体重载，元素上闭包引用的旧对象必须随之作废。
     const renderedNodeEls = new Map();
+    const dirtyEntries = [];
     nodeHtmlEntries.forEach(entry => {
+        const el = existingNodeEls.get(entry.node.id);
+        if(el && el.__smartHtml === entry.html && el.__smartNodeRef === entry.node){
+            entry.reuseEl = el;
+            return;
+        }
+        dirtyEntries.push(entry);
+    });
+    tpl.innerHTML = dirtyEntries.map(entry => entry.html).join('');
+    dirtyEntries.forEach(entry => {
         const fresh = tpl.content.querySelector(`.image-node[data-id="${CSS.escape(entry.node.id)}"]`);
-        if(fresh) renderedNodeEls.set(entry.node.id, fresh);
+        if(fresh){
+            fresh.__smartHtml = entry.html;
+            fresh.__smartNodeRef = entry.node;
+            renderedNodeEls.set(entry.node.id, fresh);
+        }
     });
     const keepEls = new Set();
+    // 未变化的节点元素整体保留（不拆不重建）；待移植媒体的旧元素也先留住
+    nodeHtmlEntries.forEach(entry => { if(entry.reuseEl) keepEls.add(entry.reuseEl); });
     reusableNodes.forEach(el => keepEls.add(el));
     if(composerEl) keepEls.add(composerEl);
     if(promptLlmComposer) keepEls.add(promptLlmComposer);
@@ -22075,6 +22144,8 @@ function render(){
     // composer 已在 keepEls 中(未被移除),不重排也不影响显示(z-index 固定)。
     if(composerEl && !promptHadFocus) world.appendChild(composerEl);
     nodeHtmlEntries.forEach(entry => {
+        // 差量复用：appendChild 保序挪动（DOM 移动 ≠ 重建，播放态/焦点/监听全保留）
+        if(entry.reuseEl){ world.appendChild(entry.reuseEl); return; }
         const fresh = renderedNodeEls.get(entry.node.id);
         if(!fresh) return;
         world.appendChild(fresh);
@@ -22103,12 +22174,11 @@ function render(){
     renderSmartAgentContext();
     renderSmartAgentSelectedPreview();
     renderMinimap();
-    if(window.lucide) lucide.createIcons();
+    convertPendingLucideIcons(document);
     bindSmartPreviewImageFallbacks(world);
     bindSmartVideoPlaybackControls(world);
     bindSmartAudioPlaybackControls(world);
-    syncSmartSelectedImageResolution(world);
-    measureSmartNodeImages();
+    // syncSmartSelectedImageResolution / measureSmartNodeImages 已挪到函数开头的 rAF（见上）
     applySmartTransformDraftPreview();
     refreshRunTimerPills();
     updateSmartJunkClean();
@@ -23625,6 +23695,11 @@ function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
         const nodeForControls = nodes.find(n => n.id === id);
+        // 2026-10-27（配合差量渲染）：差量复用的元素事件已经绑过，重绑会给 addEventListener
+        // 系监听（缩略图拖拽排序/提示词控件等）叠加重复触发。节点对象没换就整体跳过；
+        // 对象换了（数据重载/撤销重做）说明旧闭包已过期，必须重绑。
+        if(nodeForControls && el.__smartBoundNode === nodeForControls) return;
+        el.__smartBoundNode = nodeForControls;
         bindImageThumbSorting(el, nodeForControls);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(isMinimaxH3Node(nodeForControls)) bindMinimaxH3NodeControls(el, nodeForControls);
