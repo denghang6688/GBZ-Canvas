@@ -21773,13 +21773,16 @@ WORKFLOW_CATEGORY_ALIASES = {
     "放大": "upscale", "放大扩图": "upscale", "扩图": "upscale",
     "其他": "other", "工具": "other",
 }
-# 名称关键词：优先级 upscale > edit > video > audio，命中即定（生图/编辑靠名字区分）。
+# 名称关键词：优先级 upscale > video > edit > audio，命中即定（生图/编辑靠名字区分）。
 # ⚠「扩图」必须先判，否则 FLUX2扩图 / F2K扩图 会被"图"字带进生图。
+# 2026-10-27（用户反馈：benini视频编辑 被归进图像编辑）：「视频编辑」同时命中 视频(video)
+# 与 编辑(edit)，edit 优先会误归 —— 名字里带 视频/video 的理应是生视频，video 提到 edit 前；
+# 纯图像编辑（F2K图像编辑/洗图等）名字不含视频字样，不受影响。
 _WORKFLOW_CATEGORY_NAME_MARKERS = (
     ("upscale", ("扩图", "放大", "超分", "upscale", "outpaint", "seedvr")),
+    ("video", ("视频", "video", "i2v", "t2v", "ref2va")),
     ("edit", ("编辑", "迁移", "融图", "洗图", "增强", "重绘", "修复", "换装", "换脸",
               "inpaint", "edit", "enhance", "retouch")),
-    ("video", ("视频", "video", "i2v", "t2v", "ref2va")),
     ("audio", ("音频", "配音", "声音克隆", "tts", "audio")),
 )
 # 节点判定：优先级 视频 > 音频 > 放大 > 图像编辑 > 生图。

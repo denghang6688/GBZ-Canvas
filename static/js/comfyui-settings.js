@@ -50,10 +50,12 @@ function normalizeWorkflowItem(item){
     return {...item, builtin:isBuiltinWorkflowItem(item)};
 }
 // ===== ComfyUI 工作流分类（2026-10-15）=====
-// 与画布 composer 共用同一套后端分类（GET /api/workflows 返回 category / category_source）：
-// 生图 / 生视频 / 生音频 / 放大 / 其他。
+// 与画布 composer 共用同一套后端分类（GET /api/workflows 返回 category / category_source）。
+// 2026-10-27（用户反馈：设置页与画布分类不一致）：补上「图像编辑」，与画布 6 类完全对齐
+// —— 之前缺 edit 键，'edit' 类工作流只能按名字兜底猜，导致设置页显示生视频、画布却归图像编辑。
 const WF_CATEGORY_DEFS = [
     {key:'image',   label:'生图'},
+    {key:'edit',    label:'图像编辑'},
     {key:'video',   label:'生视频'},
     {key:'audio',   label:'生音频'},
     {key:'upscale', label:'放大'},
