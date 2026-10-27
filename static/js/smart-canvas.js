@@ -39429,8 +39429,7 @@ window.onmousemove = e => {
             if(!thumbDragState.detachOnLeave) return true;
             if(!source) return false;
             const point = screenToWorld(e);
-            // 2026-10-27：成组卡内拖动会让组跟随指针，实时卡框永远罩住指针——
-            // 有快照（成组）按快照判脱离，其余仍按实时框。
+            // 2026-10-27：成组卡内拖动组框保持原位，用起始快照判脱离即可（其余按实时框）。
             const r = thumbDragState.sourceRect || nodeRect(source);
             // 2026-10-12（用户要求：拖宫格组容易误触拖子图）：分离阈值 8 → 24，
             // 子图要拖出组框 24 世界像素才算「拆出」，路过边距带/贴边拖动不再瞬间分离。
@@ -39439,8 +39438,7 @@ window.onmousemove = e => {
         })();
         if(!thumbDragState.detached && movedFarEnough && source && !canLeaveDetach){
             // 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：成组卡内
-            // 抓缩略图不再让整组跟随指针——组框保持原位，只有幽灵缩略图跟随；
-            // 松手在组内 = 整组按本次位移平移，拖出原卡快照范围 = 拆图。
+            // 抓缩略图组框保持原位，只有幽灵缩略图跟随；拖出原卡快照范围 = 拆图。
             if(isSmartGroupNode(source)){
                 updateThumbDragGhost(e, source);
                 suppressImageClickUntil = Date.now() + 260;
@@ -39770,32 +39768,11 @@ function handleCanvasMouseUp(e){
     }
     if(thumbDragState){
         removeThumbDragGhost();
-        // 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：拖动过程中
-        // 组框保持原位，松手落定——在组内松手 = 整组按本次指针位移平移（沿用
-        // 「卡内抓缩略图可拖整组」的手势，只是不再实时跟手）；拖出组外已走拆图。
-        if(!thumbDragState.detached && !thumbDragState.reordered
-            && Math.abs(e.clientX - thumbDragState.startX) + Math.abs(e.clientY - thumbDragState.startY) > 6){
-            const group = nodes.find(n => n.id === thumbDragState.nodeId);
-            if(group && isSmartGroupNode(group)){
-                const gdx = (e.clientX - thumbDragState.startX) / viewport.scale;
-                const gdy = (e.clientY - thumbDragState.startY) / viewport.scale;
-                [group.id, ...smartGroupMembers(group).map(m => m.id)].forEach(gid => {
-                    const n = nodes.find(x => x.id === gid);
-                    if(!n) return;
-                    n.x = (Number(n.x) || 0) + gdx;
-                    n.y = (Number(n.y) || 0) + gdy;
-                    n.posEditedAt = Date.now();
-                });
-                thumbDragState.groupMoved = true;
-            }
-        }
-        // 组内拖动落定 = 位置真改了，提交撤销快照并落盘重绘。
-        if(thumbDragState.reordered || thumbDragState.detached || thumbDragState.groupMoved) commitPendingUndo();
+        // 2026-10-27（用户反馈「移动智能分组里的图片，框不要跟着走」）：组内拖动
+        // 不再平移整组——组框全程保持原位；拖出组框范围仍走拆图，自由布局模式
+        // 走 thumbFreeLayoutState 落定。组内松手且未拆图 = 无操作。
+        if(thumbDragState.reordered || thumbDragState.detached) commitPendingUndo();
         else discardPendingUndo();
-        if(thumbDragState.groupMoved){
-            scheduleSave();
-            render();
-        }
         thumbDragState = null;
     }
     if(panState) {
