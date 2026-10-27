@@ -39437,13 +39437,9 @@ window.onmousemove = e => {
             return point.x < r.x - pad || point.x > r.x + r.width + pad || point.y < r.y - pad || point.y > r.y + r.height + pad;
         })();
         if(!thumbDragState.detached && movedFarEnough && source && !canLeaveDetach){
-            // 2026-10-27（用户反馈「从组里拖动图像出来，组框不要跟着动」）：成组卡内
-            // 抓缩略图组框保持原位，只有幽灵缩略图跟随；拖出原卡快照范围 = 拆图。
-            if(isSmartGroupNode(source)){
-                updateThumbDragGhost(e, source);
-                suppressImageClickUntil = Date.now() + 260;
-                return;
-            }
+            // 2026-10-27（用户反馈「拖动又不能排序了」）：组内拖动恢复与普通多图节点
+            // 一致的互换式排序（落点对齐哪个格子就和哪张互换）；组框全程原位，
+            // 拖出原卡快照范围仍走拆图。
             const hit = document.elementFromPoint(e.clientX, e.clientY);
             const targetItem = hit?.closest?.('.thumb-item');
             const targetNodeEl = targetItem?.closest?.('.image-node');
