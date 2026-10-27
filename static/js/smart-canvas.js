@@ -15675,6 +15675,12 @@ function renderConnections(){
             : '';
         const isPendingLine = Boolean(pendingLineMode);
         const isSelectedLine = selectedConnIds.size > 0 && (selectedConnIds.has(item.from) || selectedConnIds.has(item.toId) || item.targets.some(t => selectedConnIds.has(t)));
+        // 2026-10-27（用户要求）：生成过程中连线也是蓝色——目标节点在跑（running/pending/队列）时
+        // 复用选中线的蓝渐变+流光；占位线（pendingLineMode）与级联彗星线（自带蓝色）不重复套用。
+        const isGeneratingLine = !isHistory && !pendingLineMode
+            && !(isCascade && cascadeState === 'active')
+            && item.targets.some(t => { const n = nodes.find(x => x.id === t); return n && smartNodeInFlight(n); });
+        const isActiveLine = isSelectedLine || isGeneratingLine;
         const fx = isHistory ? fr.x + fr.width / 2 : fr.x + fr.width;
         const fy = isHistory ? fr.y + fr.height : fr.y + fr.height / 2;
         const tx = isHistory ? tr.x + tr.width / 2 : tr.x;
@@ -15693,10 +15699,11 @@ function renderConnections(){
             isCascade && Boolean(cascadeState) && cascadeState !== 'done' ? 'conn-cascade-wait' : '',
             isCascade && cascadeState === 'active' ? 'conn-cascade-active' : '',
             isHistory ? 'conn-history' : '',
-            isSelectedLine ? 'conn-selected' : ''
+            isActiveLine ? 'conn-selected' : '',
+            isGeneratingLine ? 'conn-generating' : ''
         ].filter(Boolean).join(' ');
-        const selGradId = isSelectedLine ? `connSelGrad-${dataIndex}` : '';
-        const selFlowId = isSelectedLine ? `connFlowGrad-${dataIndex}` : '';
+        const selGradId = isActiveLine ? `connSelGrad-${dataIndex}` : '';
+        const selFlowId = isActiveLine ? `connFlowGrad-${dataIndex}` : '';
         if(selGradId){
             // 2026-10-27（用户反馈「选中后细线变蓝色，不是变亮」）：底线全蓝（不要白头）；
             // 亮白渐变单独给流光层用，滑过时才提亮。
