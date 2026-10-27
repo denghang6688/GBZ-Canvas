@@ -7239,6 +7239,46 @@ function openArrangeModePicker(ids, anchorEl){
         });
     });
 }
+// 2026-10-27 视口外节点绘制裁剪（替代之前那条常开的 CSS content-visibility）。
+// 为什么不能给 .image-node 常开 CV：CV 会强制 paint containment，把节点边界外的浮层
+// （选中面板 smart-node-floating-menu 在 bottom:100%+10px、组标题 top:-34px、端口负偏移角标）
+// 全部裁掉 —— 用户反馈「视频上面的按钮面板没有了」。
+// 现在改成 JS 判定：只给「整块都在视口外（留 360px 余量）且未选中」的节点挂
+// .smart-node-culled 开 CV。这些节点用户根本看不见，裁剪零副作用，但能省掉它们的
+// layout/paint —— 布局开销正是 63 节点画布 render 从 15ms 涨回 90ms+ 的主因。
+const SMART_CULL_MARGIN = 360;
+let smartCullRaf = 0;
+function scheduleSmartNodeCulling(){
+    if(smartCullRaf) return;
+    smartCullRaf = requestAnimationFrame(() => {
+        smartCullRaf = 0;
+        applySmartNodeCulling();
+    });
+}
+function applySmartNodeCulling(){
+    if(!world || !world.isConnected) return;
+    const w = shell.clientWidth || window.innerWidth || 0;
+    const h = shell.clientHeight || window.innerHeight || 0;
+    if(!w || !h) return;
+    const scale = safeScale(viewport.scale);
+    const m = SMART_CULL_MARGIN;
+    // 视口反算成世界坐标（只做算术，绝不读 DOM，避免搬运期间的强制回流）
+    const left = (-m - viewport.x) / scale;
+    const right = (w + m - viewport.x) / scale;
+    const top = (-m - viewport.y) / scale;
+    const bottom = (h + m - viewport.y) / scale;
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    world.querySelectorAll('.image-node').forEach(el => {
+        const node = byId.get(el.dataset.id);
+        if(!node){ el.classList.remove('smart-node-culled'); return; }
+        const r = nodeRect(node);
+        const outside = r.x > right || (r.x + r.width) < left || r.y > bottom || (r.y + r.height) < top;
+        // 选中/拖拽中/正在生成的节点永不开 CV：用户可能立刻要看它的浮层或进度动画
+        const keepAlive = isNodeSelected(node.id) || el.classList.contains('dragging') || smartNodeInFlight(node);
+        el.classList.toggle('smart-node-culled', outside && !keepAlive);
+    });
+}
+
 function applyViewport(options={}){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     const scale = safeScale(viewport.scale);
@@ -7263,6 +7303,7 @@ function applyViewport(options={}){
     // 平移期间跳过「选中图高清升级」：缩放没变、结论不会变，而它每帧都要遍历全画布
     // 100+ 张图并读真实矩形。平移结束时（clearCanvasPanState）会补跑一次。
     if(!options.pan) syncSmartSelectedImageResolution(world);
+    scheduleSmartNodeCulling();
 }
 function cancelScheduledViewportApply(){
     if(viewportApplyRaf) cancelAnimationFrame(viewportApplyRaf);
@@ -22183,6 +22224,8 @@ function render(){
     refreshRunTimerPills();
     updateSmartJunkClean();
     alignSmartNodeTitlesWithMenus();
+    // 渲染后重算视口外裁剪（重建过的节点会丢掉 .smart-node-culled）
+    scheduleSmartNodeCulling();
     return;
     // 以下为历史遗留的整表重绘路径（world.innerHTML 清空重建），
     // 已被上方增量复用 DOM 的渲染方式取代且永不可达，保留仅为对照，请勿在此处追加逻辑。
@@ -22244,6 +22287,9 @@ function syncSingleImageNodeNaturalLayout(node, image){
 }
 function measureSmartNodeImages(){
     world.querySelectorAll('.image-node img,.image-node video').forEach(imgEl => {
+        // 2026-10-27 视口外裁剪（CV）的节点此时没有布局，读出来全是 0，
+        // 会把错误尺寸写进 image.layout_w/h → 滚进视口后比例错乱。跳过，等可见后自然会测。
+        if(imgEl.closest('.smart-node-culled')) return;
         const nodeEl = imgEl.closest('.image-node');
         const itemEl = imgEl.closest('[data-image-index]');
         const containerNode = nodes.find(n => n.id === nodeEl?.dataset.id);
