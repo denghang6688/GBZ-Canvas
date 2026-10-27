@@ -31680,7 +31680,8 @@ function inputMentionCandidateImages(node){
     const seen = new Set();
     return current.filter(img => {
         if(!img?.url || seen.has(img.url)) return false;
-        if(img.clipResult) return false;
+        // 2026-10-27（用户反馈「@ 里面没有视频，只有图片」）：剪辑/截取片段也是合法
+        // 引用素材（如生视频接着片段续写），不再排除 clipResult，与输入图行 1:1。
         seen.add(img.url);
         return true;
     }).map((img, index) => ({
