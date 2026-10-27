@@ -1277,7 +1277,9 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .connection-layer .conn-pending-append { stroke:rgba(170,170,170,.78) !important; filter:none; }
 .connection-layer .conn-cascade { filter:none; }
 .connection-layer .conn-cascade-wait { opacity:.58; }
-.connection-layer .conn-cascade-active { stroke:#3b82f6 !important; opacity:1; filter:drop-shadow(0 0 6px rgba(59,130,246,.65)); }
+/* 2026-10-27（用户要求）：级联/工作流组执行线改用选中线同款蓝渐变+流光（stroke 由 SVG 渐变注入，
+   不能再强制 #3b82f6 !important，否则盖掉渐变）；只保留不透明度与旧的宽线观感。 */
+.connection-layer .conn-cascade-active { opacity:1; }
 .connection-layer.conn-reduce-motion .conn-pending,
 .connection-layer.conn-reduce-motion .conn-cascade-active,
 .connection-layer.conn-reduce-motion .conn-flow-dot,

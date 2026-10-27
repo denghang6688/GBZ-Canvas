@@ -15676,11 +15676,12 @@ function renderConnections(){
         const isPendingLine = Boolean(pendingLineMode);
         const isSelectedLine = selectedConnIds.size > 0 && (selectedConnIds.has(item.from) || selectedConnIds.has(item.toId) || item.targets.some(t => selectedConnIds.has(t)));
         // 2026-10-27（用户要求）：生成过程中连线也是蓝色——目标节点在跑（running/pending/队列）时
-        // 复用选中线的蓝渐变+流光；占位线（pendingLineMode）与级联彗星线（自带蓝色）不重复套用。
+        // 复用选中线的蓝渐变+流光；占位线（pendingLineMode）不重复套用。
+        // 2026-10-27（用户要求）：工作流组执行进度线（级联 active）同样改用蓝渐变+流光，替代旧彗星。
+        const isCascadeActive = isCascade && cascadeState === 'active';
         const isGeneratingLine = !isHistory && !pendingLineMode
-            && !(isCascade && cascadeState === 'active')
             && item.targets.some(t => { const n = nodes.find(x => x.id === t); return n && smartNodeInFlight(n); });
-        const isActiveLine = isSelectedLine || isGeneratingLine;
+        const isActiveLine = isSelectedLine || isGeneratingLine || isCascadeActive;
         const fx = isHistory ? fr.x + fr.width / 2 : fr.x + fr.width;
         const fy = isHistory ? fr.y + fr.height : fr.y + fr.height / 2;
         const tx = isHistory ? tr.x + tr.width / 2 : tr.x;
@@ -15715,8 +15716,6 @@ function renderConnections(){
             ? 'rgba(170,170,170,0.78)'
             : pendingLineMode === 'replace'
             ? 'rgba(156,156,156,0.76)'
-            // 2026-10-11（用户要求）：级联进行中的连线由绿色改蓝色（#3b82f6）。
-            : isCascade && cascadeState === 'active' ? '#3b82f6'
             : isHistory ? 'rgba(140,140,140,0.26)'
             // 2026-10-27（用户确认 D2）：默认线降调成发丝线（配合 stroke-opacity .62 ≈ 12% 白），选中关系线才亮。
             : 'rgba(255,255,255,0.19)';
@@ -15725,15 +15724,12 @@ function renderConnections(){
         // 2026-10-12（用户要求「连线变粗一点」）：在 10-11 基础上再 ×1.4（1.56→2.2 / 1.37→1.9）。
         // 2026-10-27（用户确认 D2 参考向）：默认线整体降细（1.9→1.2 / 2.2→1.6），选中线走独立样式。
         const width = kind === 'input' ? '1.6' : '1.2';
-        // 2026-10-27（用户要求）：选中线动效改为「贯穿流光」——渐变光段沿线循环滑过（参考截图效果）；
-        // 彗星点保留给级联进行中的线（生成进度指示）。
-        const flowDot = (isCascade && cascadeState === 'active')
-            ? `<g class="conn-flow-dot"><path d="M-40 0 L8 0" stroke="url(#connCometGrad)" stroke-width="3.8" stroke-linecap="round" fill="none"/><circle cx="8" cy="0" r="2.8" fill="#e0f2fe"/><animateMotion dur="1.6s" begin="${(item.indices[0] % 5) * 0.24}s" repeatCount="indefinite" path="${curve}" rotate="auto"/></g>`
-            : '';
+        // 2026-10-27（用户要求）：执行进度线统一为「贯穿流光」（与选中线 D2 同语言），
+        // 旧「蓝色彗星点」（animateMotion）退役——群组执行、生成中都走同一套流光。
         const flowLine = selGradId
             ? `<path class="conn-flowline" d="${curve}" pathLength="100" stroke="url(#${selFlowId})" stroke-width="2" stroke-linecap="round" fill="none" stroke-dasharray="32 68"><animate attributeName="stroke-dashoffset" values="100;0" dur="1.6s" repeatCount="indefinite"/></path>`
             : '';
-        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowDot}${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
+        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
     }).join('');
     const interactionStyles = `<style>.conn-path{stroke-opacity:.62!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke-opacity:.85!important;stroke-width:1.4!important}.conn-flowline{opacity:.95;filter:drop-shadow(0 0 2.5px rgba(186,230,253,.75)) drop-shadow(0 0 7px rgba(56,189,248,.4));pointer-events:none}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path:not(.conn-selected){stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.35!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
     return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${interactionStyles}<defs><linearGradient id="connCometGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset="0.45" stop-color="#3b82f6" stop-opacity="0.45"/><stop offset="0.8" stop-color="#93c5fd" stop-opacity="0.95"/><stop offset="1" stop-color="#e0f2fe" stop-opacity="1"/></linearGradient>${selGrads.join('')}</defs>${paths}</svg>`;
@@ -35436,7 +35432,10 @@ async function runGeneration(){
     const runLog = smartRunSnapshot(node, prompt, refs, logKind);
     rememberRecentSmartSettings(settings, node);
     const runLogStart = nowMs();
-    const appendOutputMode = (concurrentImageRun || smartAppendGenerationEnabled(settings, logKind)) && !audioApiRun;
+    // 2026-10-27（用户要求）：工作流组执行时生成图强制替换模式——组内节点不追加、覆盖上次结果；
+    // 只在「执行工作流组」链路生效（smartLoopContext 带 workflowGroupId），单节点手动运行的追加设置不受影响。
+    const inWorkflowGroupRun = Boolean(smartLoopContext?.workflowGroupId);
+    const appendOutputMode = !inWorkflowGroupRun && (concurrentImageRun || smartAppendGenerationEnabled(settings, logKind)) && !audioApiRun;
     const expectedCount = videoApiRun
         ? 1
         : audioApiRun
