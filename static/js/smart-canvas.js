@@ -15646,6 +15646,8 @@ function renderConnections(){
             items.push({merged:false, from:conn.from, toId:conn.to, kind, indices:[conn.index], targets:[conn.to]});
         }
     });
+    // 2026-10-27（用户要求）：选中线改「方案A 渐变光带 + 贯穿流光」——渐变沿每条线的实际走向注入。
+    const selGrads = [];
     const paths = items.map(item => {
         const fromNode = nodes.find(n => n.id === item.from);
         const toNode = nodes.find(n => n.id === item.toId);
@@ -15688,26 +15690,41 @@ function renderConnections(){
             isHistory ? 'conn-history' : '',
             isSelectedLine ? 'conn-selected' : ''
         ].filter(Boolean).join(' ');
-        const color = pendingLineMode === 'append'
+        const selGradId = isSelectedLine ? `connSelGrad-${dataIndex}` : '';
+        const selFlowId = isSelectedLine ? `connFlowGrad-${dataIndex}` : '';
+        if(selGradId){
+            // 2026-10-27（用户反馈「选中后细线变蓝色，不是变亮」）：底线全蓝（不要白头）；
+            // 亮白渐变单独给流光层用，滑过时才提亮。
+            selGrads.push(`<linearGradient id="${selGradId}" gradientUnits="userSpaceOnUse" x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}"><stop offset="0" stop-color="#1d4ed8"/><stop offset="0.55" stop-color="#2b6ff0"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>`);
+            selGrads.push(`<linearGradient id="${selFlowId}" gradientUnits="userSpaceOnUse" x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}"><stop offset="0" stop-color="#38bdf8"/><stop offset="0.6" stop-color="#7dd3fc"/><stop offset="1" stop-color="#e0f2fe"/></linearGradient>`);
+        }
+        const color = selGradId ? `url(#${selGradId})`
+            : pendingLineMode === 'append'
             ? 'rgba(170,170,170,0.78)'
             : pendingLineMode === 'replace'
             ? 'rgba(156,156,156,0.76)'
             // 2026-10-11（用户要求）：级联进行中的连线由绿色改蓝色（#3b82f6）。
             : isCascade && cascadeState === 'active' ? '#3b82f6'
             : isHistory ? 'rgba(140,140,140,0.26)'
-            : kind === 'input' ? 'rgba(200,200,200,0.40)' : 'rgba(200,200,200,0.40)';
+            // 2026-10-27（用户确认 D2）：默认线降调成发丝线（配合 stroke-opacity .62 ≈ 12% 白），选中关系线才亮。
+            : 'rgba(255,255,255,0.19)';
         const opacity = isPendingLine ? '.82' : '1';
         // 2026-10-11（用户要求）：连线加粗 1.3 倍（1.2→1.56 / 1.05→1.37）。
         // 2026-10-12（用户要求「连线变粗一点」）：在 10-11 基础上再 ×1.4（1.56→2.2 / 1.37→1.9）。
-        const width = kind === 'input' ? '2.2' : '1.9';
-        // 2026-10-11（用户要求）：流动效果改成参考图样式——蓝色发光彗星（渐隐尾巴 + 亮头）沿线流动。
-        const flowDot = isSelectedLine || (isCascade && cascadeState === 'active')
+        // 2026-10-27（用户确认 D2 参考向）：默认线整体降细（1.9→1.2 / 2.2→1.6），选中线走独立样式。
+        const width = kind === 'input' ? '1.6' : '1.2';
+        // 2026-10-27（用户要求）：选中线动效改为「贯穿流光」——渐变光段沿线循环滑过（参考截图效果）；
+        // 彗星点保留给级联进行中的线（生成进度指示）。
+        const flowDot = (isCascade && cascadeState === 'active')
             ? `<g class="conn-flow-dot"><path d="M-40 0 L8 0" stroke="url(#connCometGrad)" stroke-width="3.8" stroke-linecap="round" fill="none"/><circle cx="8" cy="0" r="2.8" fill="#e0f2fe"/><animateMotion dur="1.6s" begin="${(item.indices[0] % 5) * 0.24}s" repeatCount="indefinite" path="${curve}" rotate="auto"/></g>`
             : '';
-        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowDot}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
+        const flowLine = selGradId
+            ? `<path class="conn-flowline" d="${curve}" pathLength="100" stroke="url(#${selFlowId})" stroke-width="2" stroke-linecap="round" fill="none" stroke-dasharray="32 68"><animate attributeName="stroke-dashoffset" values="100;0" dur="1.6s" repeatCount="indefinite"/></path>`
+            : '';
+        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowDot}${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
     }).join('');
-    const interactionStyles = `<style>.conn-path{stroke-opacity:.62!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke:#9b9b9b!important;stroke-opacity:.96!important;stroke-width:2.55!important}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path{stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.35!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
-    return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${interactionStyles}<defs><linearGradient id="connCometGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset="0.45" stop-color="#3b82f6" stop-opacity="0.45"/><stop offset="0.8" stop-color="#93c5fd" stop-opacity="0.95"/><stop offset="1" stop-color="#e0f2fe" stop-opacity="1"/></linearGradient></defs>${paths}</svg>`;
+    const interactionStyles = `<style>.conn-path{stroke-opacity:.62!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke-opacity:.85!important;stroke-width:1.4!important}.conn-flowline{opacity:.95;filter:drop-shadow(0 0 2.5px rgba(186,230,253,.75)) drop-shadow(0 0 7px rgba(56,189,248,.4));pointer-events:none}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path:not(.conn-selected){stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.35!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
+    return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${interactionStyles}<defs><linearGradient id="connCometGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset="0.45" stop-color="#3b82f6" stop-opacity="0.45"/><stop offset="0.8" stop-color="#93c5fd" stop-opacity="0.95"/><stop offset="1" stop-color="#e0f2fe" stop-opacity="1"/></linearGradient>${selGrads.join('')}</defs>${paths}</svg>`;
 }
 function refreshConnectionLayer(){
     connectionLayerRaf = 0;
@@ -15718,13 +15735,22 @@ function refreshConnectionLayer(){
     // 任何一次刷新都会把它连带删掉、看起来像线断了。先摘下，替换后挂回新 SVG；
     // 拖拽与右拉菜单都结束后则随旧 SVG 正常清理（与 render() 的守卫一致）。
     let portDragTempPath = oldSvg.querySelector('path.port-drag-temp');
+    const portDragTempFlow = oldSvg.querySelector('path.port-drag-temp-flow');
     if(portDragTempPath && !portDragState && !portNextMenuState) portDragTempPath = null;
+    portDragTempPath?.remove();
+    if(!portDragTempPath) portDragTempFlow?.remove();
     const tpl = document.createElement('template');
     tpl.innerHTML = renderConnections().trim();
     const nextSvg = tpl.content.firstElementChild;
     if(nextSvg){
         oldSvg.replaceWith(nextSvg);
-        if(portDragTempPath) nextSvg.appendChild(portDragTempPath);
+        if(portDragTempPath){
+            nextSvg.appendChild(portDragTempPath);
+            if(portDragTempFlow){
+                nextSvg.appendChild(portDragTempFlow);
+                portDragTempFlow.setAttribute('d', portDragTempPath.getAttribute('d') || '');
+            }
+        }
     }
     bindConnectionEvents();
 }
@@ -21943,7 +21969,13 @@ function render(){
     // 新 connection-layer 渲染完后再挂回去。仅在拖拽中/右拉菜单打开时保留；
     // 两者都结束后（取消、落面板等分支），临时线随旧 SVG 一起正常清理，避免悬空残留。
     let portDragTempPath = world.querySelector('path.port-drag-temp');
-    if(portDragTempPath && !portDragState && !portNextMenuState) portDragTempPath = null;
+    const portDragTempFlow = world.querySelector('path.port-drag-temp-flow');
+    if(portDragTempPath && !portDragState && !portNextMenuState){
+        portDragTempPath = null;
+        portDragTempFlow?.remove();
+    } else {
+        portDragTempFlow?.remove();
+    }
     portDragTempPath?.remove();
     [...world.childNodes].forEach(child => {
         if(!keepEls.has(child)) child.remove();
@@ -21964,7 +21996,13 @@ function render(){
     // 节点尺寸和位置先写入 DOM，再计算连线端点，避免改尺寸后线路仍使用旧边界。
     world.insertAdjacentHTML('beforeend', renderConnections());
     // 2026-10-06 挂回端口拖拽临时连线（右拉菜单打开期间保持连线不断）
-    if(portDragTempPath) world.querySelector('svg.connection-layer')?.appendChild(portDragTempPath);
+    if(portDragTempPath){
+        world.querySelector('svg.connection-layer')?.appendChild(portDragTempPath);
+        if(portDragTempFlow){
+            world.querySelector('svg.connection-layer')?.appendChild(portDragTempFlow);
+            portDragTempFlow.setAttribute('d', portDragTempPath.getAttribute('d') || '');
+        }
+    }
     world.insertAdjacentHTML('beforeend', smartSelectionToolbarHtml());
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
@@ -22176,13 +22214,22 @@ function ensurePortDragPathElement(){
     if(!svg) return null;
     let path = svg.querySelector('path.port-drag-temp');
     if(!path){
+        // 2026-10-27（用户要求）：拖拽临时线改为蓝色细线 + 流光（与选中线 D2 同语言）。
         path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'port-drag-temp conn-pending');
-        path.setAttribute('stroke', 'rgba(120,120,120,0.92)');
-        path.setAttribute('stroke-width', '1.8');
+        path.setAttribute('stroke', '#2b6ff0');
+        path.setAttribute('stroke-width', '1.4');
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke-linecap', 'round');
         svg.appendChild(path);
+        const flow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        flow.setAttribute('class', 'port-drag-temp-flow');
+        flow.setAttribute('stroke', '#bfe9ff');
+        flow.setAttribute('stroke-width', '2');
+        flow.setAttribute('fill', 'none');
+        flow.setAttribute('stroke-linecap', 'round');
+        flow.setAttribute('pathLength', '100');
+        svg.appendChild(flow);
     }
     return path;
 }
@@ -22192,6 +22239,7 @@ function clearPortDragHighlights(){
 }
 function clearPortDragVisual(){
     world.querySelector('path.port-drag-temp')?.remove();
+    world.querySelector('path.port-drag-temp-flow')?.remove();
     portNextMenuAnchorEl?.remove();
     portNextMenuAnchorEl = null;
     clearPortDragHighlights();
@@ -22215,10 +22263,12 @@ function portDragPreviewPathD(drag, endWorld){
 function drawPortDragPreview(drag, endWorld, options={}){
     const path = ensurePortDragPathElement();
     if(!path) return null;
-    path.setAttribute('d', portDragPreviewPathD(drag, endWorld));
+    const d = portDragPreviewPathD(drag, endWorld);
+    path.setAttribute('d', d);
     path.setAttribute('class', options.className || 'port-drag-temp conn-pending');
-    path.setAttribute('stroke', options.stroke || 'rgba(120,120,120,0.92)');
-    path.setAttribute('stroke-width', options.strokeWidth || '1.8');
+    path.setAttribute('stroke', options.stroke || '#2b6ff0');
+    path.setAttribute('stroke-width', options.strokeWidth || '1.4');
+    world.querySelector('path.port-drag-temp-flow')?.setAttribute('d', d);
     return path;
 }
 function drawBatchPortDragAnchor(drag, endWorld){
@@ -33287,6 +33337,12 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
         });
     };
     const imgs = dedupeImgsByUrl(stripTextArtifactsFromVideoMedia(rawImgs) || rawImgs);
+    // 2026-10-27（用户反馈：生成的视频显示很慢）：生成完成的视频与拖入/上传一视同仁
+    // 标记进 fresh 窗口 —— 节点直接挂 <video preload="metadata"> 由浏览器自己解首帧，
+    // 不等服务端抽帧海报 / faststart 首次构建（首次请求现场 ffmpeg，期间是黑格子）。
+    (imgs || []).forEach(img => {
+        if(mediaKindForItem(img) === 'video') markSmartFreshUploadedVideo(img);
+    });
     // 2026-10-11（用户要求）：视频也走追加——appendPendingOutput 对 video 同样生效，
     // 新视频追加进节点，不再替换上一个视频（与等待态的「旧视频+占位格」预览一致）。
     const appendOutput = Boolean(pendingNode.appendPendingOutput);

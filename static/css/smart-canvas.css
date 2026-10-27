@@ -1265,7 +1265,8 @@ video.node-img { object-fit:cover; background:var(--soft); }
 @keyframes shine { from { transform:translateX(-100%); } to { transform:translateX(100%); } }
 .connection-layer { position:absolute; left:0; top:0; width:6000px; height:4000px; pointer-events:none; z-index:1; overflow:visible; }
 .connection-layer path { transition:stroke-opacity .14s ease; }
-.connection-layer .conn-selected { stroke:var(--strong); opacity:1; }
+/* 2026-10-27：选中线颜色交还给 JS 渲染的蓝渐变（D2 参考向），此处不再强制 var(--strong) 白色。
+.connection-layer .conn-selected { stroke:var(--strong); opacity:1; } */
 /* 2026-10-11（用户要求）：流动效果改参考图「蓝色发光彗星」——渐隐尾巴 + 亮头 + 大范围蓝色光晕。 */
 .connection-layer .conn-flow-dot { filter:drop-shadow(0 0 10px rgba(59,130,246,.85)) drop-shadow(0 0 3px rgba(191,219,254,.95)); }
 .connection-layer .conn-hit { pointer-events:stroke; cursor:pointer; }
@@ -1279,9 +1280,18 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .connection-layer .conn-cascade-active { stroke:#3b82f6 !important; opacity:1; filter:drop-shadow(0 0 6px rgba(59,130,246,.65)); }
 .connection-layer.conn-reduce-motion .conn-pending,
 .connection-layer.conn-reduce-motion .conn-cascade-active,
-.connection-layer.conn-reduce-motion .conn-flow-dot { animation:none; stroke-dashoffset:0; display:none; }
+.connection-layer.conn-reduce-motion .conn-flow-dot,
+/* 2026-10-27：贯穿流光在降级模式下同样关闭（>24 条级联同时跑时保帧率） */
+.connection-layer.conn-reduce-motion .conn-flowline,
+.connection-layer.conn-reduce-motion .conn-path.conn-selected { animation:none; stroke-dashoffset:0; }
+.connection-layer.conn-reduce-motion .conn-flow-dot,
+.connection-layer.conn-reduce-motion .conn-flowline { display:none; }
 .connection-layer .conn-cascade-done { stroke:rgba(205,205,205,.72) !important; stroke-dasharray:none; opacity:1; }
 .connection-layer .conn-history { }
+/* 2026-10-27（用户要求）：端口拖拽临时线 = 蓝色细线 + 流光（与选中线 D2 同语言） */
+.connection-layer .port-drag-temp { stroke:#2b6ff0 !important; stroke-width:1.4 !important; filter:drop-shadow(0 0 3px rgba(56,189,248,.4)); }
+.connection-layer .port-drag-temp-flow { stroke:#bfe9ff !important; stroke-width:2 !important; stroke-dasharray:30 70; animation:portDragFlow 1.2s linear infinite; filter:drop-shadow(0 0 3px rgba(186,230,253,.8)); pointer-events:none; }
+@keyframes portDragFlow { from { stroke-dashoffset:100; } to { stroke-dashoffset:0; } }
 @keyframes dash-flow { to { stroke-dashoffset:-13; } }
 @keyframes dash-flow-pending { to { stroke-dashoffset:-9; } }
 @keyframes conn-breathe { 0%,100% { stroke-opacity:.55; filter:drop-shadow(0 0 2px rgba(220,220,220,.2)); } 50% { stroke-opacity:1; filter:drop-shadow(0 0 9px rgba(230,230,230,.65)); } }
@@ -8438,11 +8448,12 @@ html.studio-theme-dark body .shell {
     stroke-opacity:1 !important;
 }
 
+/* 2026-10-27：同上，选中线不再强制白色（老 07-30 可读性规则，已由 D2 蓝渐变+流光取代）。
 .connection-layer .conn-selected {
     stroke:#ffffff !important;
     opacity:1 !important;
     filter:drop-shadow(0 0 4px rgba(255,255,255,.24));
-}
+} */
 
 /* 2026-07-30 clean canvas: remove the dotted matrix from the main canvas. */
 :root,
@@ -8612,13 +8623,14 @@ body.smart-agent-open .smart-top-dock {
 }
 
 /* 2026-07-31 left rail tonal unification: remove black islands and darken canvas. */
+/* 2026-10-27（用户要求）：画布背景灰度加深 10%（#121212 → #101010），侧栏同步保持统一。 */
 :root,
 html.theme-dark,
 body.theme-dark,
 html.theme-custom,
 body.theme-custom {
-    --smart-canvas-surface:#121212 !important;
-    --smart-canvas-rail:#121212 !important;
+    --smart-canvas-surface:#101010 !important;
+    --smart-canvas-rail:#101010 !important;
     --smart-canvas-control:#1a1a1a !important;
     --smart-canvas-control-hover:#222222 !important;
     --smart-canvas-control-active:#2a2a2a !important;
@@ -14140,13 +14152,14 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 
 /* ===== 2026-09-28（用户要求）画布工作区底色加深 =====
    9580 行（2026-07-31 density pass）把 .shell 底色定为 #141414，
-   用户反馈偏亮，这里加深为 #0a0a0a（亮度减半、非纯黑，网格点仍可辨）。 */
+   用户反馈偏亮，这里加深为 #0a0a0a（亮度减半、非纯黑，网格点仍可辨）。
+   2026-10-27（用户要求）灰度再加深 10%：#0a0a0a → #090909。 */
 html body .shell,
 body.theme-dark .shell,
 html.theme-dark body .shell,
 body.theme-custom .shell,
 html.theme-custom body .shell {
-    background-color:#0a0a0a !important;
+    background-color:#090909 !important;
 }
 
 /* ===== 2026-09-28（用户要求）组节点标题：不加粗、上下居中、与浮动面板拉开 =====

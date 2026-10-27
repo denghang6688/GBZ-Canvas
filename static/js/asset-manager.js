@@ -99,6 +99,11 @@ let managedSelectionPointerGuard = null;
 let assetEditMode = false;
 let promptEditMode = false;
 let promptCreateMode = false;
+// 2026-10-27：提示词效果预览图 —— 列表/网格两种视图 + 编辑期预览图草稿 + 素材选取弹窗。
+let promptViewMode = (() => { try { return localStorage.getItem('gbzPromptViewMode') === 'grid' ? 'grid' : 'list'; } catch(_) { return 'list'; } })();
+let promptPreviewDraft = '';
+let promptPreviewBusy = false;
+let promptAssetPickerOpen = false;
 let pendingDeleteAssetId = '';
 let pendingDeletePromptId = '';
 let pendingBatchDelete = '';
@@ -2343,6 +2348,10 @@ function renderPromptManager(){
                 </div>
                 <div class="asset-tools">
                     <label class="asset-search-wrap"><i data-lucide="search"></i><input id="promptSearch" class="asset-search" type="search" value="${escapeAttr(promptQuery)}" placeholder="搜索名称、说明或正文"></label>
+                    <div class="prompt-view-seg" role="group" aria-label="视图切换">
+                        <button type="button" class="${promptViewMode === 'list' ? 'on' : ''}" data-prompt-view="list" title="列表视图"><i data-lucide="rows-3"></i></button>
+                        <button type="button" class="${promptViewMode === 'grid' ? 'on' : ''}" data-prompt-view="grid" title="网格视图（看图选词）"><i data-lucide="layout-grid"></i></button>
+                    </div>
                     <button class="asset-btn primary" type="button" data-prompt-new ${readonly ? 'disabled' : ''}><i data-lucide="file-plus-2"></i><span>新增</span></button>
                     <button class="asset-btn ${promptManageMode ? 'primary' : ''}" type="button" data-prompt-manage><i data-lucide="list-checks"></i><span>${promptManageMode ? '完成管理' : '批量管理'}</span></button>
                 </div>
@@ -2356,7 +2365,11 @@ function renderPromptManager(){
                 </div>
             </div>
             <div class="content-scroll">
-                ${items.length ? `<div class="prompt-list">${items.map(item => renderPromptRow(item, readonly)).join('')}</div>` : `<div class="empty-state">${escapeHtml(promptEmptyText)}</div>`}
+                ${items.length
+                    ? (promptViewMode === 'grid'
+                        ? `<div class="prompt-grid">${items.map(item => renderPromptCard(item, readonly)).join('')}</div>`
+                        : `<div class="prompt-list">${items.map(item => renderPromptRow(item, readonly)).join('')}</div>`)
+                    : `<div class="empty-state">${escapeHtml(promptEmptyText)}</div>`}
             </div>
         </section>
         <aside class="asset-panel asset-detail">
@@ -2431,15 +2444,82 @@ function renderPromptTreeInlineEdit(kind){
         <button type="button" data-prompt-tree-edit-cancel><i data-lucide="x"></i><span>取消</span></button>
     </div>`;
 }
+function promptPreviewOf(item){
+    return String(item?.preview || '').trim();
+}
+function promptThumbHtml(item, size=256){
+    const src = promptPreviewOf(item);
+    if(!src) return `<div class="prompt-thumb is-empty"><i data-lucide="image"></i><span>暂无预览图</span></div>`;
+    return `<div class="prompt-thumb"><img src="${escapeAttr(assetPreviewUrl(src, size))}" alt="${escapeAttr(item?.name || '预览图')}" loading="lazy" decoding="async" onerror="this.parentElement.classList.add('is-broken');this.remove()"><span class="prompt-thumb-badge" title="效果预览图">效果</span></div>`;
+}
 function renderPromptRow(item, readonly){
-    return `<article class="prompt-row ${item.id === selectedPromptId ? 'active' : ''}" data-prompt-row="${escapeAttr(item.id)}">
+    return `<article class="prompt-row has-preview ${item.id === selectedPromptId ? 'active' : ''}" data-prompt-row="${escapeAttr(item.id)}">
         <input class="prompt-row-check" type="checkbox" data-prompt-check="${escapeAttr(item.id)}" ${selectedPromptIds.has(item.id) ? 'checked' : ''} ${readonly ? 'disabled' : ''}>
+        ${promptThumbHtml(item, 236)}
         <div class="prompt-row-main">
             <div class="prompt-row-title"><strong>${escapeHtml(item.name || '提示词')}</strong><span class="prompt-tag">${escapeHtml(promptCategoryLabel(item.category || 'custom'))}</span></div>
             <div class="prompt-row-scene">${escapeHtml(item.scene || '未填写用途说明')}</div>
             <div class="prompt-row-text">${escapeHtml(item.positive || '')}</div>
         </div>
     </article>`;
+}
+function renderPromptCard(item, readonly){
+    return `<article class="prompt-card ${item.id === selectedPromptId ? 'active' : ''}" data-prompt-row="${escapeAttr(item.id)}">
+        <input class="prompt-row-check" type="checkbox" data-prompt-check="${escapeAttr(item.id)}" ${selectedPromptIds.has(item.id) ? 'checked' : ''} ${readonly ? 'disabled' : ''}>
+        <div class="prompt-card-cover">${promptThumbHtml(item, 520)}</div>
+        <div class="prompt-card-body">
+            <div class="prompt-row-title"><strong>${escapeHtml(item.name || '提示词')}</strong><span class="prompt-tag">${escapeHtml(promptCategoryLabel(item.category || 'custom'))}</span></div>
+            <div class="prompt-row-scene">${escapeHtml(item.scene || '未填写用途说明')}</div>
+            <div class="prompt-row-text">${escapeHtml(item.positive || '')}</div>
+        </div>
+    </article>`;
+}
+function renderPromptPreviewView(item){
+    const src = promptPreviewOf(item);
+    if(!src){
+        return `<div class="prompt-preview is-empty">
+            <i data-lucide="image"></i>
+            <span>暂无效果预览图</span>
+            <small>编辑时上传一张，即可直观看到这条提示词的产出效果</small>
+        </div>`;
+    }
+    return `<div class="prompt-preview" data-prompt-preview-open="${escapeAttr(item.id)}" title="点击放大查看">
+        <img src="${escapeAttr(assetPreviewUrl(src, 720))}" alt="${escapeAttr(item.name || '效果预览图')}" loading="lazy" decoding="async">
+        <span class="prompt-preview-zoom"><i data-lucide="maximize-2"></i>点击放大</span>
+    </div>`;
+}
+function renderPromptPreviewEditor(){
+    if(promptPreviewBusy){
+        return `<div class="prompt-upload-zone is-busy"><span class="prompt-upload-spin"></span><div class="prompt-upload-txt"><b>正在上传预览图…</b><small>稍等，图片保存后会自动显示</small></div></div>`;
+    }
+    if(promptPreviewDraft){
+        return `<div class="prompt-upload-zone has-image">
+            <img class="prompt-upload-img" src="${escapeAttr(assetPreviewUrl(promptPreviewDraft, 520))}" alt="效果预览图">
+            <div class="prompt-upload-actions">
+                <button type="button" data-prompt-preview-upload><i data-lucide="replace"></i><span>更换</span></button>
+                <button type="button" class="danger" data-prompt-preview-remove><i data-lucide="trash-2"></i><span>移除</span></button>
+                <button type="button" data-prompt-preview-pick><i data-lucide="images"></i><span>素材库</span></button>
+            </div>
+        </div>`;
+    }
+    return `<div class="prompt-upload-zone" data-prompt-preview-drop tabindex="0">
+        <div class="prompt-upload-ic"><i data-lucide="image-plus"></i></div>
+        <div class="prompt-upload-txt">
+            <b>上传效果预览图</b>
+            <small>点击选择 / 拖入图片 / 直接 Ctrl+V 粘贴截图 · 也可以从「图像资产」里选</small>
+        </div>
+        <div class="prompt-upload-btns">
+            <button type="button" class="asset-btn" data-prompt-preview-upload><i data-lucide="upload"></i><span>选择图片</span></button>
+            <button type="button" class="asset-btn" data-prompt-preview-pick><i data-lucide="images"></i><span>从素材库选取</span></button>
+        </div>
+    </div>`;
+}
+// 只刷新预览图区域，不整页 render —— 否则编辑表单里用户已输入的名称/正文会被重置。
+function setPromptPreviewArea(){
+    const host = document.querySelector('.prompt-field-preview');
+    if(!host) return;
+    host.innerHTML = `<span>效果预览图</span>${renderPromptPreviewEditor()}`;
+    refreshIcons();
 }
 function renderPromptDetail(item, readonly){
     if(promptCreateMode && !readonly){
@@ -2453,6 +2533,7 @@ function renderPromptDetail(item, readonly){
             </div>
             <div class="detail-scroll">
                 <div class="inline-edit-form">
+                    <div class="inline-edit-field prompt-field-preview"><span>效果预览图</span>${renderPromptPreviewEditor()}</div>
                     <label class="inline-edit-field"><span>名称</span><input id="promptEditName" type="text" value="" placeholder="提示词名称"></label>
                     <label class="inline-edit-field"><span>用途说明</span><textarea id="promptEditScene" placeholder="用途说明"></textarea></label>
                     <label class="inline-edit-field"><span>正向提示词</span><textarea id="promptEditPositive" placeholder="正向提示词"></textarea></label>
@@ -2473,6 +2554,7 @@ function renderPromptDetail(item, readonly){
             </div>
             <div class="detail-scroll">
                 <div class="inline-edit-form">
+                    <div class="inline-edit-field prompt-field-preview"><span>效果预览图</span>${renderPromptPreviewEditor()}</div>
                     <label class="inline-edit-field"><span>名称</span><input id="promptEditName" type="text" value="${escapeAttr(item.name || '')}" placeholder="提示词名称"></label>
                     <label class="inline-edit-field"><span>用途说明</span><textarea id="promptEditScene" placeholder="用途说明">${escapeHtml(item.scene || '')}</textarea></label>
                     <label class="inline-edit-field"><span>正向提示词</span><textarea id="promptEditPositive" placeholder="正向提示词">${escapeHtml(item.positive || '')}</textarea></label>
@@ -2491,6 +2573,7 @@ function renderPromptDetail(item, readonly){
             </div>
         </div>
         <div class="detail-scroll">
+            ${renderPromptPreviewView(item)}
             <div class="prompt-detail-head">
                 <div class="prompt-detail-title">${escapeHtml(item.name || '提示词')}</div>
                 <div class="prompt-detail-scene">${escapeHtml(item.scene || '未填写用途说明')}</div>
@@ -3652,9 +3735,35 @@ async function handleClick(event){
     const promptEditSave = target.closest?.('[data-prompt-edit-save]');
     if(promptEditSave){ await savePromptEdit(promptEditSave.dataset.promptEditSave || ''); return; }
     if(target.closest?.('[data-prompt-create-save]')){ await savePromptCreate(); return; }
-    if(target.closest?.('[data-prompt-edit-cancel]')){ promptEditMode = false; promptCreateMode = false; render(); return; }
+    if(target.closest?.('[data-prompt-edit-cancel]')){ promptEditMode = false; promptCreateMode = false; promptPreviewDraft = ''; closePromptAssetPicker(); render(); return; }
+    const promptViewBtn = target.closest?.('[data-prompt-view]');
+    if(promptViewBtn){
+        promptViewMode = promptViewBtn.dataset.promptView === 'grid' ? 'grid' : 'list';
+        try { localStorage.setItem('gbzPromptViewMode', promptViewMode); } catch(_) {}
+        render();
+        return;
+    }
+    const promptPreviewOpen = target.closest?.('[data-prompt-preview-open]');
+    if(promptPreviewOpen){
+        const targetItem = findPromptItem(promptPreviewOpen.dataset.promptPreviewOpen || '');
+        if(targetItem && promptPreviewOf(targetItem)) openPromptPreviewLightbox(promptPreviewOf(targetItem), targetItem.name || '效果预览图');
+        return;
+    }
+    if(target.closest?.('[data-prompt-preview-upload]')){ pickPromptPreviewFile(); return; }
+    if(target.closest?.('[data-prompt-preview-pick]')){ openPromptAssetPicker(); return; }
+    if(target.closest?.('[data-prompt-preview-remove]')){ promptPreviewDraft = ''; setPromptPreviewArea(); setStatus('已移除预览图，保存后生效'); return; }
+    if(target.closest?.('[data-prompt-preview-drop]')){ pickPromptPreviewFile(); return; }
+    if(target.closest?.('[data-prompt-picker-close]')){ closePromptAssetPicker(); return; }
+    const promptPickAsset = target.closest?.('[data-prompt-picker-asset]');
+    if(promptPickAsset){
+        promptPreviewDraft = promptPickAsset.dataset.promptPickerAsset || '';
+        closePromptAssetPicker();
+        setPromptPreviewArea();
+        setStatus('已选用素材库图片，保存后生效');
+        return;
+    }
     const promptEditStart = target.closest?.('[data-prompt-edit-start]');
-    if(promptEditStart){ selectedPromptId = promptEditStart.dataset.promptEditStart || selectedPromptId; promptEditMode = true; promptCreateMode = false; pendingDeletePromptId = ''; render(); return; }
+    if(promptEditStart){ selectedPromptId = promptEditStart.dataset.promptEditStart || selectedPromptId; promptEditMode = true; promptCreateMode = false; pendingDeletePromptId = ''; promptPreviewDraft = promptPreviewOf(findPromptItem(selectedPromptId)); render(); return; }
     if(target.closest?.('[data-prompt-manage]')){
         promptManageMode = !promptManageMode;
         pendingBatchDelete = '';
@@ -3675,7 +3784,7 @@ async function handleClick(event){
         const catRow = target.closest('[data-prompt-cat]');
         if(libId){ activePromptLibraryId = libId; activePromptCategory = 'all'; }
         if(catRow){ activePromptLibraryId = catRow.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = catRow.dataset.promptCat || activePromptCategory; }
-        promptCreateMode = true; promptEditMode = false; pendingDeletePromptId = ''; render(); return;
+        promptCreateMode = true; promptEditMode = false; pendingDeletePromptId = ''; promptPreviewDraft = ''; render(); return;
     }
     if(target.closest?.('[data-prompt-lib-new]')){ promptTreeFocus = 'library'; promptTreeEdit = {kind:'library-new', placement:'head', value:'新提示词库', label:'提示词库名称'}; render(); focusTreeEditInput('promptTreeEditInput'); return; }
     if(target.closest?.('[data-prompt-cat-new]')){
@@ -3709,9 +3818,9 @@ async function handleClick(event){
         await deletePromptLibrary(); return;
     }
     const promptLib = target.closest?.('[data-prompt-lib]');
-    if(promptLib){ activePromptLibraryId = promptLib.dataset.promptLib || ''; activePromptCategory = 'all'; promptTreeFocus = 'library'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return; }
+    if(promptLib){ activePromptLibraryId = promptLib.dataset.promptLib || ''; activePromptCategory = 'all'; promptTreeFocus = 'library'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; promptPreviewDraft = ''; selectedPromptIds.clear(); render(); return; }
     const promptCat = target.closest?.('[data-prompt-cat]');
-    if(promptCat){ activePromptLibraryId = promptCat.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = promptCat.dataset.promptCat || 'all'; promptTreeFocus = 'category'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return; }
+    if(promptCat){ activePromptLibraryId = promptCat.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = promptCat.dataset.promptCat || 'all'; promptTreeFocus = 'category'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; promptPreviewDraft = ''; selectedPromptIds.clear(); render(); return; }
     const promptRow = target.closest?.('[data-prompt-row]');
     if(promptRow){
         const id = promptRow.dataset.promptRow || '';
@@ -3723,6 +3832,7 @@ async function handleClick(event){
         }
         promptEditMode = false;
         promptCreateMode = false;
+        promptPreviewDraft = '';
         pendingDeletePromptId = '';
         pendingBatchDelete = '';
         render();
@@ -3770,6 +3880,130 @@ function closeDetailPreview(){
     document.body.classList.remove('asset-lightbox-open');
     lightboxPanState = null;
 }
+/* ===== 2026-10-27：提示词效果预览图 —— 灯箱 / 上传 / 素材库选取 ===== */
+function openPromptPreviewLightbox(url, title='效果预览图'){
+    if(!url) return;
+    document.querySelector('.asset-lightbox')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'asset-lightbox';
+    overlay.dataset.scale = '1';
+    overlay.dataset.x = '0';
+    overlay.dataset.y = '0';
+    overlay.innerHTML = `<div class="asset-lightbox-inner" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}"><img class="asset-lightbox-image" src="${escapeAttr(url)}" alt="${escapeAttr(title)}" draggable="false"></div>`;
+    document.body.appendChild(overlay);
+    document.body.classList.add('asset-lightbox-open');
+}
+function pickPromptPreviewFile(){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        input.remove();
+        if(file) uploadPromptPreviewFile(file).catch(err => setStatus(err.message || '预览图上传失败'));
+    });
+    document.body.appendChild(input);
+    input.click();
+}
+async function uploadPromptPreviewFile(file){
+    if(!(promptEditMode || promptCreateMode)){ setStatus('请先进入编辑或新增状态'); return; }
+    if(!file || !String(file.type || '').startsWith('image/')){ setStatus('请选择图片文件（png / jpg / webp）'); return; }
+    if(file.size > 30 * 1024 * 1024){ setStatus('图片超过 30MB，请先压缩后再上传'); return; }
+    promptPreviewBusy = true;
+    setPromptPreviewArea();
+    try{
+        const form = new FormData();
+        form.append('files', file);
+        const data = await apiJson('/api/ai/upload', {method:'POST', body:form});
+        const url = (data.files || []).map(entry => entry?.url).find(Boolean) || '';
+        if(!url) throw new Error('上传未返回图片地址');
+        promptPreviewDraft = url;
+        setStatus('预览图已上传，保存后生效');
+    } finally {
+        promptPreviewBusy = false;
+        setPromptPreviewArea();
+    }
+}
+function promptPickerAssets(){
+    return assetCategories()
+        .flatMap(cat => cat.items || [])
+        .filter(item => item?.url && assetKind(item) === 'image');
+}
+function openPromptAssetPicker(){
+    promptAssetPickerOpen = true;
+    mountPromptAssetPicker();
+}
+function closePromptAssetPicker(){
+    promptAssetPickerOpen = false;
+    document.querySelector('.prompt-picker')?.remove();
+}
+function mountPromptAssetPicker(){
+    document.querySelector('.prompt-picker')?.remove();
+    if(!promptAssetPickerOpen) return;
+    const items = promptPickerAssets();
+    const overlay = document.createElement('div');
+    overlay.className = 'prompt-picker';
+    overlay.innerHTML = `<div class="prompt-picker-panel" role="dialog" aria-modal="true" aria-label="从图像资产选取">
+        <div class="prompt-picker-head">
+            <div class="panel-title"><strong>从图像资产选取</strong><span>共 ${items.length} 张图片</span></div>
+            <button class="asset-icon-btn" type="button" data-prompt-picker-close title="关闭"><i data-lucide="x"></i></button>
+        </div>
+        <div class="prompt-picker-body">
+            ${items.length ? items.map(item => `<button type="button" class="prompt-picker-item" data-prompt-picker-asset="${escapeAttr(item.url)}" title="${escapeAttr(item.name || '素材')}">
+                <img src="${escapeAttr(assetPreviewUrl(item.url, 320))}" alt="${escapeAttr(item.name || '素材')}" loading="lazy" decoding="async">
+                <span>${escapeHtml(item.name || '素材')}</span>
+            </button>`).join('') : `<div class="prompt-picker-empty">图像资产里还没有图片。可以先去「图像资产」上传，或直接上传本地图片作为预览图。</div>`}
+        </div>
+    </div>`;
+    overlay.addEventListener('click', event => {
+        if(event.target.closest('[data-prompt-picker-close]')){ closePromptAssetPicker(); return; }
+        const pick = event.target.closest('[data-prompt-picker-asset]');
+        if(pick){
+            promptPreviewDraft = pick.dataset.promptPickerAsset || '';
+            closePromptAssetPicker();
+            render();
+            setStatus('已选用素材库图片，保存后生效');
+            return;
+        }
+        if(event.target === overlay) closePromptAssetPicker();
+    });
+    document.body.appendChild(overlay);
+    refreshIcons();
+}
+// 编辑/新增提示词时：拖入图片、Ctrl+V 粘贴截图 都可直接成为效果预览图。
+document.addEventListener('paste', event => {
+    if(!(promptEditMode || promptCreateMode) || activeTab !== 'prompts') return;
+    const entries = [...(event.clipboardData?.items || [])];
+    for(const entry of entries){
+        if(String(entry.type || '').startsWith('image/')){
+            const file = entry.getAsFile?.();
+            if(file){
+                event.preventDefault();
+                uploadPromptPreviewFile(file).catch(err => setStatus(err.message || '预览图上传失败'));
+            }
+            break;
+        }
+    }
+});
+document.addEventListener('dragover', event => {
+    const zone = event.target.closest?.('.prompt-upload-zone');
+    if(!zone) return;
+    event.preventDefault();
+    zone.classList.add('is-over');
+});
+document.addEventListener('dragleave', event => {
+    const zone = event.target.closest?.('.prompt-upload-zone');
+    if(zone) zone.classList.remove('is-over');
+});
+document.addEventListener('drop', event => {
+    const zone = event.target.closest?.('.prompt-upload-zone');
+    if(!zone) return;
+    event.preventDefault();
+    zone.classList.remove('is-over');
+    const file = event.dataTransfer?.files?.[0];
+    if(file) uploadPromptPreviewFile(file).catch(err => setStatus(err.message || '预览图上传失败'));
+});
 function applyLightboxTransform(overlay){
     const image = overlay?.querySelector?.('.asset-lightbox-image');
     if(!image) return;
@@ -4617,10 +4851,11 @@ async function savePromptCreate(){
         return;
     }
     const category = activePromptCategory === 'all' ? 'custom' : activePromptCategory;
-    const data = await apiJson('/api/prompt-libraries/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative, category, scene})});
+    const data = await apiJson('/api/prompt-libraries/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative, category, scene, preview:promptPreviewDraft})});
     promptLibrary = data.library || promptLibrary;
     selectedPromptId = data.item?.id || selectedPromptId;
     promptCreateMode = false;
+    promptPreviewDraft = '';
     render();
     setStatus('提示词已新增');
 }
@@ -4651,10 +4886,11 @@ async function savePromptEdit(id){
         setStatus('名称和正向提示词不能为空');
         return;
     }
-    const data = await apiJson(`/api/prompt-libraries/items/${encodeURIComponent(id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative, category:item.category || 'custom', scene})});
+    const data = await apiJson(`/api/prompt-libraries/items/${encodeURIComponent(id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative, category:item.category || 'custom', scene, preview:promptPreviewDraft})});
     promptLibrary = data.library || promptLibrary;
     selectedPromptId = id;
     promptEditMode = false;
+    promptPreviewDraft = '';
     render();
     setStatus('提示词已保存');
 }
