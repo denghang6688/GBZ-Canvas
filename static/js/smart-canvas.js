@@ -38604,7 +38604,7 @@ function drawPortNextMenuPreview(state=portNextMenuState){
 function defaultPortNextOptions(fromPort){
     if(fromPort === 'out') return [
         {action:'image', icon:'sparkles', title:'API生图', sub:''},
-        {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
+        {action:'comfy', icon:'workflow', title:'comfyui', sub:'工作流'},
         {action:'video', icon:'video', title:'API生视频', sub:''},
         {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
         {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
@@ -38624,7 +38624,7 @@ function portNextOptions(drag){
     if(drag.fromPort === 'out'){
         return [
             {action:'image', icon:'sparkles', title:'API生图', sub:''},
-            {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
+            {action:'comfy', icon:'workflow', title:'comfyui', sub:'工作流'},
             {action:'video', icon:'video', title:'API生视频', sub:''},
             {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
             {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
