@@ -3621,6 +3621,8 @@ class PromptLibraryItemRequest(BaseModel):
     positive: str = ""
     negative: str = ""
     scene: str = ""
+    # 2026-10-27：条目效果预览图地址。None = 不修改（PATCH 部分更新），"" = 清空。
+    preview: Optional[str] = None
 
 class PromptLibraryBatchDeleteRequest(BaseModel):
     ids: List[str] = []
@@ -8614,6 +8616,18 @@ def normalize_prompt_category_id(category="custom"):
     category_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(category or "custom"))[:40] or "custom"
     return "custom" if category_id in {"mine", "my", "personal"} else category_id
 
+def normalize_prompt_preview_url(value) -> str:
+    """提示词效果预览图地址规范化（2026-10-27）。
+    只接受站内 /assets、/output 相对路径和 http(s) 绝对地址；data:/blob: 会撑大 JSON，直接丢弃。"""
+    url = str(value or "").strip()[:1000]
+    if not url:
+        return ""
+    if url.startswith(("/assets/", "/output/")):
+        return url
+    if re.match(r"^https?://", url, re.I):
+        return url
+    return ""
+
 def normalize_prompt_library_item(item):
     if not isinstance(item, dict):
         item = {}
@@ -8626,6 +8640,8 @@ def normalize_prompt_library_item(item):
         "scene": str(item.get("scene") or "").strip()[:500],
         "positive": positive,
         "negative": str(item.get("negative") or "").strip(),
+        # 2026-10-27：效果预览图（图片地址）。只允许站内 /output、/assets 或 http(s)，其它一律丢弃。
+        "preview": normalize_prompt_preview_url(item.get("preview")),
         "params": item.get("params") if isinstance(item.get("params"), dict) else {},
         "created_at": int(item.get("created_at") or now_ms()),
         "updated_at": int(item.get("updated_at") or item.get("created_at") or now_ms()),
@@ -18169,6 +18185,7 @@ async def add_prompt_library_item(payload: PromptLibraryItemRequest):
         "positive": payload.positive,
         "negative": payload.negative,
         "scene": payload.scene,
+        "preview": payload.preview or "",
         "created_at": now_ms(),
         "updated_at": now_ms(),
     })
@@ -18192,6 +18209,8 @@ async def update_prompt_library_item(item_id: str, payload: PromptLibraryItemReq
                     "positive": payload.positive or item.get("positive"),
                     "negative": payload.negative,
                     "scene": payload.scene,
+                    # preview 为 None 表示本次不改（旧调用方只传文本字段），空串表示移除预览图。
+                    "preview": item.get("preview") if payload.preview is None else payload.preview,
                     "updated_at": now_ms(),
                 })
                 library["items"][index] = next_item
