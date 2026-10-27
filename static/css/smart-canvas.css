@@ -162,7 +162,10 @@ body.smart-agent-open .preset-workflow-panel { inset:0 402px 0 72px; padding-rig
 /* 2026-10-27 曾在此加 .image-node { content-visibility:auto } 提速视口外节点，
    但 CV 会强制 paint containment（绘制裁剪），把浮在节点边界外的元素全部裁掉：
    选中节点的 smart-node-floating-menu（bottom:100%+10px）、组标题（top:-34px）、
-   端口角标（负偏移）等 —— 用户反馈「视频上面的按钮面板没有了」即此回归。已撤。 */
+   端口角标（负偏移）等 —— 用户反馈「视频上面的按钮面板没有了」即此回归。已撤。
+   改为 JS 受控裁剪：只给「整块在视口外 + 未选中 + 非生成中」的节点挂 .smart-node-culled，
+   它们本来就看不见，裁掉零副作用，同时省掉其 layout/paint（见 applySmartNodeCulling）。 */
+.image-node.smart-node-culled { content-visibility: auto; contain-intrinsic-size: auto 260px auto 240px; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-image-replace-drag * { user-select:none !important; }
 body.smart-image-replace-drag { cursor:copy; }
