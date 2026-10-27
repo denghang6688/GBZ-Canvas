@@ -29,6 +29,11 @@ const portNextMenuSearch = document.getElementById('portNextMenuSearch');
 const promptInput = document.getElementById('promptInput');
 const mentionPicker = document.getElementById('mentionPicker');
 const slashMenu = document.getElementById('slashMenu');
+// slash 面板「悬停看效果图」预览卡（单例，fixed 挂 body）：声明放顶部，
+// 避免 closeFloatingCanvasPanels 等在脚本执行早期调用时踩 TDZ
+const slashPeek = document.getElementById('slashPeek');
+const SLASH_PEEK_DELAY = 180;
+const slashPeekState = { timer:0, hideTimer:0, idx:-1, btn:null };
 const mentionPreview = document.getElementById('mentionPreview');
 const engineSelect = document.getElementById('engineSelect');
 const composerPanelTitle = document.getElementById('composerPanelTitle');
@@ -660,6 +665,9 @@ let gridJoinOutputSize = 2048;
 let gridJoinCustomRatio = '';
 // 非空时表示当前宫格拼接的数据源是整个分组（聚合组内所有图片成员），而不是单个节点。
 let gridJoinGroupId = '';
+// 2026-10-27（用户要求）：框选工具条「宫格拼接」的数据源——非空时表示当前拼接素材来自
+// 框选的多个节点（而非某个分组/单节点），编辑器关闭时随 gridJoinGroupId 一并清空。
+let gridJoinSelectionRefs = [];
 let imageEditZoom = 1.0;
 let imageEditBaseW = 0;
 let imageEditBaseH = 0;
@@ -850,7 +858,35 @@ async function copyTextToClipboard(text){
     } catch(_) {}
     return false;
 }
-function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
+// 2026-10-27（用户反馈：画布太卡）：lucide.createIcons() 每次会把 DOM 里 1000+ 个已转换的
+// svg 也重新替换一遍（实测 54 节点画布 ≈ 14ms + 全文档 style recalc）。
+// 改为只转换「还没转换的」（i/span 等 非 svg 的 [data-lucide]），已转换的原地不动。
+function convertPendingLucideIcons(root=document){
+    if(!window.lucide) return;
+    let pending = null;
+    try { pending = (root || document).querySelectorAll('[data-lucide]:not(svg)'); } catch(_) { pending = null; }
+    if(!pending || !pending.length) return;
+    if(typeof lucide.createElement !== 'function'){ lucide.createIcons(); return; }
+    const pascal = kebab => String(kebab || '').split(/[-_\s]+/).filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+    pending.forEach(el => {
+        const raw = el.getAttribute('data-lucide') || '';
+        if(!raw) return;
+        const iconNode = (lucide.icons ? lucide.icons[pascal(raw)] : null) || lucide[pascal(raw)];
+        if(!iconNode) return;
+        try {
+            const svg = lucide.createElement(iconNode);
+            // createElement 不带 lucide 基础类名（createIcons 才会加），补齐：lucide lucide-<名> + 原元素类名
+            const prevClass = el.getAttribute('class') || '';
+            svg.setAttribute('class', `lucide lucide-${raw}${prevClass ? ` ${prevClass}` : ''}`);
+            [...el.attributes].forEach(attr => {
+                if(attr.name !== 'data-lucide' && attr.name !== 'class') svg.setAttribute(attr.name, attr.value);
+            });
+            svg.setAttribute('data-lucide', raw);
+            el.replaceWith(svg);
+        } catch(_) {}
+    });
+}
+function refreshIcons(){ convertPendingLucideIcons(document); }
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
@@ -913,6 +949,10 @@ function workflowNavSavedItemMatchesCategory(item, category){
     const haystack = `${item?.category_name || ''} ${(item?.tags || []).join(' ')} ${item?.name || ''}`.toLowerCase();
     return keys.some(key => haystack.includes(key));
 }
+// 2026-10-27（用户反馈：画布太卡）：本函数每次 render 会被每张图调用，URL 构造器解析
+// 实测 ≈13ms/次渲染，而同一 URL 在画布里反复出现 → 加一层 LRU 记忆（命中直接返回）。
+const SMART_ORIGINAL_URL_CACHE_MAX = 1024;
+const smartOriginalMediaUrlCache = new Map();
 function smartOriginalMediaUrl(itemOrUrl){
     // 2026-10-10 兼容嵌套损坏数据：历史画布里出现过 item.url 本身又是一个
     // {url:"...", kind:"video"} 对象（生成结果落地时双重包裹）。不拆开的话
@@ -923,6 +963,8 @@ function smartOriginalMediaUrl(itemOrUrl){
     while (raw && typeof raw === 'object' && depth < 5) { raw = raw.url; depth++; }
     let text = String(raw || '').trim();
     if(!text) return '';
+    const cached = smartOriginalMediaUrlCache.get(text);
+    if(cached !== undefined) return cached;
     // 画布里很多图片会先被包成 /api/download-output 或 /api/media-preview，
     // 下载时必须把这层壳拆开，拿到真正的原始地址再交给后端。
     for(let i = 0; i < 4; i++){
@@ -938,6 +980,8 @@ function smartOriginalMediaUrl(itemOrUrl){
         } catch(e) {}
         break;
     }
+    if(smartOriginalMediaUrlCache.size >= SMART_ORIGINAL_URL_CACHE_MAX) smartOriginalMediaUrlCache.clear();
+    smartOriginalMediaUrlCache.set(text, text);
     return text;
 }
 // 画布缩略图不需要按原图尺寸解码：768px 足够支撑常用卡片和 100% 缩放，
@@ -1334,6 +1378,41 @@ function smartTrimFrameGrabber(srcUrl, canvasEl, mirrors = []){
     };
 }
 
+// 2026-10-27（用户反馈：裁剪面板「读取区域裁剪范围」加载慢）：
+// 1) 胶片条前端 Promise 缓存 —— 同一视频重开面板即时渲染；
+// 2) 悬停工具条「截取片段」按钮即预取 —— 真正点开时多数已就绪；
+// 3) 后端同步改为并行 fast-seek 抽帧 + 进程内缓存（见 main.py /api/video/filmstrip）。
+const SMART_TRIM_FILMSTRIP_TTL = 10 * 60 * 1000;
+const smartTrimFilmstripCache = new Map(); // url -> { at, promise }
+let smartTrimPrefetchBound = false;
+
+function smartTrimFilmstripUrl(url){ return `/api/video/filmstrip?url=${encodeURIComponent(url)}&count=10&w=160`; }
+
+function smartTrimFetchFilmstrip(url){
+    const hit = smartTrimFilmstripCache.get(url);
+    if(hit && Date.now() - hit.at < SMART_TRIM_FILMSTRIP_TTL) return hit.promise;
+    const promise = fetch(smartTrimFilmstripUrl(url))
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('胶片条生成失败')))
+        .catch(err => { smartTrimFilmstripCache.delete(url); throw err; });
+    smartTrimFilmstripCache.set(url, { at: Date.now(), promise });
+    return promise;
+}
+
+// 悬停「截取片段」按钮时提前拉胶片条（pointerover 委托，promise 去重不会重复请求）
+function bindSmartTrimFilmstripPrefetch(){
+    if(smartTrimPrefetchBound) return;
+    smartTrimPrefetchBound = true;
+    document.addEventListener('pointerover', e => {
+        const btn = e.target?.closest?.('[data-smart-node-action="trim"]');
+        if(!btn || btn.disabled) return;
+        const nodeId = btn.dataset.nodeId;
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const videoUrl = nodeEl?.querySelector('video[data-url]')?.dataset?.url || '';
+        if(videoUrl) smartTrimFetchFilmstrip(videoUrl).catch(() => {});
+    }, { passive: true });
+}
+bindSmartTrimFilmstripPrefetch();
+
 function openSmartVideoTrimPanel(video, url, nodeId){
     closeSmartVideoTrimPanel();
     const duration = Number(video?.duration);
@@ -1505,9 +1584,8 @@ function openSmartVideoTrimPanel(video, url, nodeId){
         flashBubble('r');
     });
 
-    // 胶片条：后端均匀抽帧
-    fetch(`/api/video/filmstrip?url=${encodeURIComponent(url)}&count=10&w=160`)
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('胶片条生成失败')))
+    // 胶片条：后端均匀抽帧（走前端缓存，命中即时渲染；悬停工具条按钮时已预取）
+    smartTrimFetchFilmstrip(url)
         .then(data => {
             if(smartVideoTrimState !== state) return;
             const framesBox = overlay.querySelector('.vtm-frames');
@@ -9517,14 +9595,16 @@ const API_VIDEO_MODEL_CAPS = {
         duration:{min:4, max:30, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        // 2026-10-27（用户反馈：参考图按实际数量提交）：官方参考素材上限 50（30图+10视频+10音频），不再钳 4 张。
+        modes:{frames:true, reference_image:30, reference_video:10, reference_audio:10},
         audio:true
     },
     'seedance': {
         duration:{min:4, max:15, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-        modes:{frames:true, reference_image:4, reference_video:0, reference_audio:0},
+        // 2026-10-27：Seedance 2.0 系列官方上限 15（9图+3视频+3音频），参考图 4 → 9。
+        modes:{frames:true, reference_image:9, reference_video:3, reference_audio:0},
         audio:true
     },
     'hailuo': {
@@ -15670,6 +15750,13 @@ function renderConnections(){
             : '';
         const isPendingLine = Boolean(pendingLineMode);
         const isSelectedLine = selectedConnIds.size > 0 && (selectedConnIds.has(item.from) || selectedConnIds.has(item.toId) || item.targets.some(t => selectedConnIds.has(t)));
+        // 2026-10-27（用户要求）：生成过程中连线也是蓝色——目标节点在跑（running/pending/队列）时
+        // 复用选中线的蓝渐变+流光；占位线（pendingLineMode）不重复套用。
+        // 2026-10-27（用户要求）：工作流组执行进度线（级联 active）同样改用蓝渐变+流光，替代旧彗星。
+        const isCascadeActive = isCascade && cascadeState === 'active';
+        const isGeneratingLine = !isHistory && !pendingLineMode
+            && item.targets.some(t => { const n = nodes.find(x => x.id === t); return n && smartNodeInFlight(n); });
+        const isActiveLine = isSelectedLine || isGeneratingLine || isCascadeActive;
         const fx = isHistory ? fr.x + fr.width / 2 : fr.x + fr.width;
         const fy = isHistory ? fr.y + fr.height : fr.y + fr.height / 2;
         const tx = isHistory ? tr.x + tr.width / 2 : tr.x;
@@ -15688,10 +15775,11 @@ function renderConnections(){
             isCascade && Boolean(cascadeState) && cascadeState !== 'done' ? 'conn-cascade-wait' : '',
             isCascade && cascadeState === 'active' ? 'conn-cascade-active' : '',
             isHistory ? 'conn-history' : '',
-            isSelectedLine ? 'conn-selected' : ''
+            isActiveLine ? 'conn-selected' : '',
+            isGeneratingLine ? 'conn-generating' : ''
         ].filter(Boolean).join(' ');
-        const selGradId = isSelectedLine ? `connSelGrad-${dataIndex}` : '';
-        const selFlowId = isSelectedLine ? `connFlowGrad-${dataIndex}` : '';
+        const selGradId = isActiveLine ? `connSelGrad-${dataIndex}` : '';
+        const selFlowId = isActiveLine ? `connFlowGrad-${dataIndex}` : '';
         if(selGradId){
             // 2026-10-27（用户反馈「选中后细线变蓝色，不是变亮」）：底线全蓝（不要白头）；
             // 亮白渐变单独给流光层用，滑过时才提亮。
@@ -15703,8 +15791,6 @@ function renderConnections(){
             ? 'rgba(170,170,170,0.78)'
             : pendingLineMode === 'replace'
             ? 'rgba(156,156,156,0.76)'
-            // 2026-10-11（用户要求）：级联进行中的连线由绿色改蓝色（#3b82f6）。
-            : isCascade && cascadeState === 'active' ? '#3b82f6'
             : isHistory ? 'rgba(140,140,140,0.26)'
             // 2026-10-27（用户确认 D2）：默认线降调成发丝线（配合 stroke-opacity .62 ≈ 12% 白），选中关系线才亮。
             : 'rgba(255,255,255,0.19)';
@@ -15713,15 +15799,12 @@ function renderConnections(){
         // 2026-10-12（用户要求「连线变粗一点」）：在 10-11 基础上再 ×1.4（1.56→2.2 / 1.37→1.9）。
         // 2026-10-27（用户确认 D2 参考向）：默认线整体降细（1.9→1.2 / 2.2→1.6），选中线走独立样式。
         const width = kind === 'input' ? '1.6' : '1.2';
-        // 2026-10-27（用户要求）：选中线动效改为「贯穿流光」——渐变光段沿线循环滑过（参考截图效果）；
-        // 彗星点保留给级联进行中的线（生成进度指示）。
-        const flowDot = (isCascade && cascadeState === 'active')
-            ? `<g class="conn-flow-dot"><path d="M-40 0 L8 0" stroke="url(#connCometGrad)" stroke-width="3.8" stroke-linecap="round" fill="none"/><circle cx="8" cy="0" r="2.8" fill="#e0f2fe"/><animateMotion dur="1.6s" begin="${(item.indices[0] % 5) * 0.24}s" repeatCount="indefinite" path="${curve}" rotate="auto"/></g>`
-            : '';
+        // 2026-10-27（用户要求）：执行进度线统一为「贯穿流光」（与选中线 D2 同语言），
+        // 旧「蓝色彗星点」（animateMotion）退役——群组执行、生成中都走同一套流光。
         const flowLine = selGradId
             ? `<path class="conn-flowline" d="${curve}" pathLength="100" stroke="url(#${selFlowId})" stroke-width="2" stroke-linecap="round" fill="none" stroke-dasharray="32 68"><animate attributeName="stroke-dashoffset" values="100;0" dur="1.6s" repeatCount="indefinite"/></path>`
             : '';
-        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowDot}${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
+        return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
     }).join('');
     const interactionStyles = `<style>.conn-path{stroke-opacity:.62!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke-opacity:.85!important;stroke-width:1.4!important}.conn-flowline{opacity:.95;filter:drop-shadow(0 0 2.5px rgba(186,230,253,.75)) drop-shadow(0 0 7px rgba(56,189,248,.4));pointer-events:none}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path:not(.conn-selected){stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.35!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
     return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${interactionStyles}<defs><linearGradient id="connCometGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset="0.45" stop-color="#3b82f6" stop-opacity="0.45"/><stop offset="0.8" stop-color="#93c5fd" stop-opacity="0.95"/><stop offset="1" stop-color="#e0f2fe" stop-opacity="1"/></linearGradient>${selGrads.join('')}</defs>${paths}</svg>`;
@@ -21514,10 +21597,18 @@ function syncSmartSelectionFrameDuringDrag(){
 function smartSelectionToolbarHtml(){
     const metrics = smartSelectionFrameMetrics();
     if(!metrics) return '';
+    // 2026-10-27（用户要求）：框选工具条加「下载」——把选中节点里的图像逐张下载（浏览器原生多文件下载，不打包 zip）。
+    // 只有选中内容里真的有图像才显示这个按钮；视频/音频素材不参与。
+    const selectedNodes = metrics.ids.map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const downloadCount = smartSelectionDownloadItems(selectedNodes).length;
+    // 2026-10-27（用户要求）：框选素材 ≥2 张才显示「宫格拼接」（与下载按钮同一套收集口径，去重后计）。
+    const gridCount = smartSelectionDownloadItems(selectedNodes).length;
     const actions = [
         {key:'arrange', icon:'layout-grid', label:'整理排列'},
         {key:'group', icon:'group', label:'成组'},
-        {key:'workflowGroup', icon:'box-select', label:'创建工作流组'}
+        {key:'workflowGroup', icon:'box-select', label:'创建工作流组'},
+        ...(gridCount > 1 ? [{key:'grid', icon:'grid-3x3', label:'宫格拼接'}] : []),
+        ...(downloadCount ? [{key:'download', icon:'download', label:`下载 ${downloadCount} 张图`}] : [])
     ];
     return `<div class="smart-selection-frame" style="left:${metrics.frameX}px;top:${metrics.frameY}px;width:${metrics.frameW}px;height:${metrics.frameH}px"></div>
         <div class="smart-selection-floating-menu" style="left:${metrics.left}px;top:${metrics.top}px">${actions.map(action => `
@@ -21610,6 +21701,40 @@ function beginBatchPortDragFromSelection(e){
     updatePortDragVisual();
     return true;
 }
+// 2026-10-27（用户要求）：框选工具条「下载」——收集选中节点的图像，逐张触发浏览器下载，不打包 zip。
+// 智能分组成员图已在 node.images 里，天然覆盖；工作流组不参与（框选框本身也把它排除在外）。
+function smartSelectionDownloadItems(selectedNodes){
+    const items = [];
+    const seenUrls = new Set();
+    (selectedNodes || []).forEach(node => {
+        (node?.images || []).forEach(item => {
+            if(!item || isVideoMediaItem(item) || isAudioMediaItem(item)) return;
+            const url = smartOriginalMediaUrl(item);
+            if(!url || seenUrls.has(url)) return;
+            seenUrls.add(url);
+            items.push({...item, url});
+        });
+    });
+    return items;
+}
+async function downloadSelectedNodeImages(){
+    const selectedNodes = selectedNodeIds().map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const items = smartSelectionDownloadItems(selectedNodes);
+    if(!items.length){ toast('选中的节点里没有可下载的图像'); return; }
+    // 逐张触发下载：走 /api/download-output 认证代理（同预览单图下载），间隔留给浏览器排队能弹多个保存任务。
+    items.forEach((item, index) => {
+        setTimeout(() => {
+            const name = downloadNameForMediaItem(item, 'image');
+            const link = document.createElement('a');
+            link.href = `/api/download-output?url=${encodeURIComponent(item.url)}&name=${encodeURIComponent(name)}`;
+            link.download = name;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }, index * 350);
+    });
+    toast(`已开始下载 ${items.length} 张图片`);
+}
 function bindSmartSelectionToolbar(){
     const frame = world.querySelector('.smart-selection-frame');
     if(frame && !frame._boundDrag){
@@ -21640,6 +21765,8 @@ function bindSmartSelectionToolbar(){
             if(action === 'arrange') arrangeSelectedSmartNodes(e.currentTarget);
             if(action === 'group') groupSelectedNodes();
             if(action === 'workflowGroup') createWorkflowGroupFromSelection();
+            if(action === 'download') downloadSelectedNodeImages();
+            if(action === 'grid') openSelectionGridJoin();
         });
     });
     world.querySelectorAll('[data-smart-selection-port]').forEach(port => {
@@ -21849,8 +21976,20 @@ function normalizePendingGroupNodeBoxes(){
     }
     return changed;
 }
+let smartPostRenderPassRaf = 0;
 function render(){
     smartVideoMountUsed = 0;   // 2026-10-10 视频懒挂载：每次全量渲染重新分配真 video 预算
+    // 2026-10-27：render 尾部的两个 pass（高清升级/图片测量）逐 img 读 getBoundingClientRect，
+    // 在 DOM 刚动过、布局脏的时点执行会强制回流（CPU profile 实测占 render 总耗时一半以上），
+    // 且结果晚一帧无感知差异 → 挪到本帧绘制后的 rAF 里执行（可合并，不叠加）。
+    if(!smartPostRenderPassRaf){
+        smartPostRenderPassRaf = requestAnimationFrame(() => {
+            smartPostRenderPassRaf = 0;
+            if(!world.isConnected) return;
+            syncSmartSelectedImageResolution(world);
+            measureSmartNodeImages();
+        });
+    }
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     rememberInlineVideoActivations();
     world.classList.toggle('smart-multi-selected', selectedNodeIds().length > 1);
@@ -21860,7 +21999,9 @@ function render(){
     // 移动 DOM 节点会打断输入法合成会话,导致输入中断(即使保留焦点描边也接不上)。
     const promptHadFocus = document.activeElement === promptInput;
     const reusableNodes = new Map();
+    const existingNodeEls = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
+        existingNodeEls.set(el.dataset.id, el);
         const node = nodes.find(n => n.id === el.dataset.id);
         if(smartNodeHasLiveMedia(node)) reusableNodes.set(node.id, el);
     });
@@ -21955,13 +22096,32 @@ function render(){
         return {node, html};
     });
     const tpl = document.createElement('template');
-    tpl.innerHTML = nodeHtmlEntries.map(entry => entry.html).join('');
+    // 2026-10-27（用户反馈：画布太卡）：全量重建 54 节点 ≈ 90-180ms，任何点选/状态变化都卡
+    // 0.1s+。这里做差量：生成的 HTML 串与现有元素上缓存的串一致、且节点对象引用没换的，
+    // 直接沿用旧 DOM（<video> 播放态、contenteditable 焦点、已绑事件原样保留），只重建有变化的节点。
+    // 节点对象引用必须参与判定：对象换了说明数据被整体重载，元素上闭包引用的旧对象必须随之作废。
     const renderedNodeEls = new Map();
+    const dirtyEntries = [];
     nodeHtmlEntries.forEach(entry => {
+        const el = existingNodeEls.get(entry.node.id);
+        if(el && el.__smartHtml === entry.html && el.__smartNodeRef === entry.node){
+            entry.reuseEl = el;
+            return;
+        }
+        dirtyEntries.push(entry);
+    });
+    tpl.innerHTML = dirtyEntries.map(entry => entry.html).join('');
+    dirtyEntries.forEach(entry => {
         const fresh = tpl.content.querySelector(`.image-node[data-id="${CSS.escape(entry.node.id)}"]`);
-        if(fresh) renderedNodeEls.set(entry.node.id, fresh);
+        if(fresh){
+            fresh.__smartHtml = entry.html;
+            fresh.__smartNodeRef = entry.node;
+            renderedNodeEls.set(entry.node.id, fresh);
+        }
     });
     const keepEls = new Set();
+    // 未变化的节点元素整体保留（不拆不重建）；待移植媒体的旧元素也先留住
+    nodeHtmlEntries.forEach(entry => { if(entry.reuseEl) keepEls.add(entry.reuseEl); });
     reusableNodes.forEach(el => keepEls.add(el));
     if(composerEl) keepEls.add(composerEl);
     if(promptLlmComposer) keepEls.add(promptLlmComposer);
@@ -21984,6 +22144,8 @@ function render(){
     // composer 已在 keepEls 中(未被移除),不重排也不影响显示(z-index 固定)。
     if(composerEl && !promptHadFocus) world.appendChild(composerEl);
     nodeHtmlEntries.forEach(entry => {
+        // 差量复用：appendChild 保序挪动（DOM 移动 ≠ 重建，播放态/焦点/监听全保留）
+        if(entry.reuseEl){ world.appendChild(entry.reuseEl); return; }
         const fresh = renderedNodeEls.get(entry.node.id);
         if(!fresh) return;
         world.appendChild(fresh);
@@ -22012,12 +22174,11 @@ function render(){
     renderSmartAgentContext();
     renderSmartAgentSelectedPreview();
     renderMinimap();
-    if(window.lucide) lucide.createIcons();
+    convertPendingLucideIcons(document);
     bindSmartPreviewImageFallbacks(world);
     bindSmartVideoPlaybackControls(world);
     bindSmartAudioPlaybackControls(world);
-    syncSmartSelectedImageResolution(world);
-    measureSmartNodeImages();
+    // syncSmartSelectedImageResolution / measureSmartNodeImages 已挪到函数开头的 rAF（见上）
     applySmartTransformDraftPreview();
     refreshRunTimerPills();
     updateSmartJunkClean();
@@ -23534,6 +23695,11 @@ function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
         const nodeForControls = nodes.find(n => n.id === id);
+        // 2026-10-27（配合差量渲染）：差量复用的元素事件已经绑过，重绑会给 addEventListener
+        // 系监听（缩略图拖拽排序/提示词控件等）叠加重复触发。节点对象没换就整体跳过；
+        // 对象换了（数据重载/撤销重做）说明旧闭包已过期，必须重绑。
+        if(nodeForControls && el.__smartBoundNode === nodeForControls) return;
+        el.__smartBoundNode = nodeForControls;
         bindImageThumbSorting(el, nodeForControls);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(isMinimaxH3Node(nodeForControls)) bindMinimaxH3NodeControls(el, nodeForControls);
@@ -24301,6 +24467,9 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                     url:node.images?.[imgIndex]?.url || '',
                     detachOnLeave:true
                 };
+                // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡内抓缩略图 = 拖整组。
+                // 脱离判定按「按下时的卡框快照」——否则组跟着指针走后，实时卡框永远罩住指针，拆图手势就死了。
+                if(isSmartGroupNode(node)) thumbDragState.sourceRect = nodeRect(node);
                 capturePendingUndo();
             });
         });
@@ -24497,6 +24666,20 @@ function restoreDraggedNodePosition(){
             n.y = item.oy;
         }
     });
+}
+// 2026-10-27：成组卡内抓缩略图的「整组跟随」是临时态——一旦手势最终变成「拆图」，
+// 组要回弹到按下前的位置，不能把跟随位移留下来。
+function restoreThumbGroupMove(state){
+    (state?.groupMove || []).forEach(item => {
+        const n = nodes.find(x => x.id === item.id);
+        if(n){
+            n.x = item.ox;
+            n.y = item.oy;
+            const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
+            if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
+        }
+    });
+    state.groupMoved = false;
 }
 function pruneSmartGroupMembershipsForNode(node){
     if(!node || !node.id) return false;
@@ -26441,6 +26624,19 @@ function gridSplitSettings(){
     return {rows:hLines + 1, cols:vLines + 1, gap:syncGridGapValue()};
 }
 function currentGridJoinItems(){
+    // 框选拼接：聚合框选的多个节点的图片（openSelectionGridJoin 写入 gridJoinSelectionRefs）。
+    if(gridJoinSelectionRefs.length){
+        const seen = new Set();
+        const items = [];
+        gridJoinSelectionRefs.forEach(ref => {
+            if(!ref?.item?.url || seen.has(ref.item.url)) return;
+            seen.add(ref.item.url);
+            if(mediaKindForItem(ref.item) === 'image'){
+                items.push({item:ref.item, source:ref.source, index:items.length});
+            }
+        });
+        if(items.length > 1) return items;
+    }
     // 分组拼接：聚合组内所有图片成员的图片，按阅读顺序给出连续索引（source 指向真实图片对象以写回自然尺寸）。
     if(gridJoinGroupId){
         const group = nodes.find(n => n.id === gridJoinGroupId && isSmartGroupNode(n));
@@ -26470,6 +26666,29 @@ function openGroupGridJoin(group){
 }
 function canGridJoinCurrentNode(){
     return currentGridJoinItems().length > 1;
+}
+// 2026-10-27（用户要求）：从框选工具条打开「宫格拼接」——把框选的多个节点的图片聚合成
+// 一个拼接数据源（与分组拼接同一条渲染/输出链路），锚定在第一张图片所在节点打开编辑器。
+function openSelectionGridJoin(){
+    const selectedNodes = selectedNodeIds().map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const refs = [];
+    const seen = new Set();
+    selectedNodes.forEach(node => {
+        (node?.images || []).forEach((img, index) => {
+            const item = imageForDisplay(img);
+            if(!item?.url || seen.has(item.url) || mediaKindForItem(item) !== 'image') return;
+            seen.add(item.url);
+            refs.push({nodeId:node.id, index, source:img, item});
+        });
+    });
+    if(refs.length <= 1){ toast('框选至少 2 张图片才能宫格拼接'); return; }
+    const first = refs[0];
+    openImageEditor(first.nodeId, first.index);
+    if(!imageEditModal.classList.contains('open')) return;
+    gridJoinGroupId = '';
+    gridJoinSelectionRefs = refs;
+    setImageEditMode('grid', true);
+    setGridOperationMode('join');
 }
 function gridJoinAutoDims(count){
     const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
@@ -27362,7 +27581,7 @@ function openImageEditor(nodeId, imageIndex=0){
     localEditRestoredRects = editorPlanSource ? (Array.isArray(node.localInpaintPlan.rects) && node.localInpaintPlan.rects.length ? node.localInpaintPlan.rects : (node.localInpaintPlan.rect ? [node.localInpaintPlan.rect] : [])) : [];
     const editorBaseImage = editorPlanSource ? {...image, url:editorPlanSource.url, name:editorPlanSource.name || image.name} : image;
     gridCustomMode = false; gridCustomLines = []; gridCustomHistory = []; gridCustomDrag = null; gridCustomOrientation = 'h';
-    gridOperationMode = 'split'; gridJoinLayout = null; gridJoinDrag = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridJoinGroupId = '';
+    gridOperationMode = 'split'; gridJoinLayout = null; gridJoinDrag = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridJoinGroupId = ''; gridJoinSelectionRefs = [];
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeShortEdge = 512; imageEditModeTouched = false;
     cropAspectPreset = 'free'; cropAspectRatio = null; syncCropRatioButtons();
     outpaintAspectPreset = 'free'; outpaintAspectRatio = null; syncOutpaintRatioButtons();
@@ -27464,7 +27683,7 @@ function closeImageEditor(){
         previewVideo.style.display = 'none';
     }
     clearEditDrawing(true);
-    cropState = null; cropDrag = null; editDrawState = null; resetEditDrawingHistory(); gridCustomDrag = null; gridJoinDrag = null; gridJoinLayout = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridOperationMode = 'split'; gridJoinGroupId = '';
+    cropState = null; cropDrag = null; editDrawState = null; resetEditDrawingHistory(); gridCustomDrag = null; gridJoinDrag = null; gridJoinLayout = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridOperationMode = 'split'; gridJoinGroupId = ''; gridJoinSelectionRefs = [];
     localEditReplaceImage = null; hideLocalReplaceMenu();
     previewNavState = {nodeId:'', index:0, count:0};
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeShortEdge = 512; imageEditModeTouched = false;
@@ -32058,6 +32277,7 @@ function openSlashMenu(query){
 }
 function closeSlashMenu(){
     const wasReplace = slashState.replaceChip;
+    hideSlashPeek();
     if(!slashState.open && !slashMenu.classList.contains('open')){ slashState.replaceChip = false; return; }
     slashState.open = false;
     slashState.query = '';
@@ -32069,6 +32289,8 @@ function closeSlashMenu(){
     if(wasReplace) promptInput?.focus?.();
 }
 function renderSlashMenu(){
+    // 重绘会换掉整片条目 DOM，先把预览卡收掉，避免指向已消失的行
+    hideSlashPeek();
     const query = slashState.query.trim().toLowerCase();
     const groups = slashGroups()
         .map(g => ({...g, items: g.items.filter(t => !query || promptTemplateSearchText(t).includes(query))}))
@@ -32110,6 +32332,7 @@ function renderSlashMenu(){
     refreshIcons();
     slashMenu.querySelectorAll('.slash-item').forEach(btn => {
         btn.addEventListener('mouseenter', () => setSlashActive(Number(btn.dataset.slashIndex)));
+        btn.addEventListener('mouseleave', scheduleHideSlashPeek);
         btn.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -32117,10 +32340,134 @@ function renderSlashMenu(){
         });
     });
 }
+// ===== 2026-10-27 slash 面板「悬停看效果图」：Hover Peek 预览卡 =====
+// 提示词条目的 preview（提示词库「效果图」）随 /api/prompt-libraries 一起下发，
+// hover 或 ↑↓ 高亮某条时，在面板外侧浮一张大图卡：先看效果，再决定插不插入。
+// 无 preview 的条目只出文字卡（不占媒体区），不弹空占位噪音。
+// （slashPeek / SLASH_PEEK_DELAY / slashPeekState 声明在文件顶部 DOM 常量区）
+
+function slashPeekImageUrl(tpl){
+    const raw = String(tpl?.preview || '').trim();
+    if(!raw) return '';
+    // 与后端 normalize_prompt_preview_url 同口径：相对站点路径或 http(s)，其它一律不认
+    if(/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw;
+    return '';
+}
+function slashPeekParamChips(tpl){
+    const params = tpl?.params;
+    if(!params || typeof params !== 'object') return [];
+    return Object.entries(params)
+        .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+        .slice(0, 3)
+        .map(([key, value]) => `${key} ${value}`);
+}
+function slashPeekCardHtml(tpl){
+    const img = slashPeekImageUrl(tpl);
+    const cat = slashCategoryColor(tpl.category);
+    const negative = String(tpl?.negative || '').trim();
+    const chips = slashPeekParamChips(tpl);
+    const meta = [
+        negative ? `<span class="m neg">${escapeHtml(tr('smart.slashPeekNegative'))} · ${escapeHtml(negative)}</span>` : '',
+        ...chips.map(chip => `<span class="m">${escapeHtml(chip)}</span>`)
+    ].filter(Boolean).join('');
+    return `${img ? `<div class="slash-peek-media"><img src="${escapeAttr(img)}" alt="" loading="lazy" decoding="async"></div>` : ''}
+        <div class="slash-peek-body">
+            <div class="slash-peek-title">
+                <span class="nm">${escapeHtml(promptTemplateName(tpl))}</span>
+                <span class="cat" style="color:${cat.fg};background:${cat.bg}">${escapeHtml(promptTemplateCategoryLabel(tpl.category || 'custom'))}</span>
+            </div>
+            <div class="slash-peek-scene">${escapeHtml(promptTemplateScene(tpl) || '')}</div>
+            <div class="slash-peek-prompt">${escapeHtml(String(tpl?.positive || '').trim())}</div>
+            ${meta ? `<div class="slash-peek-meta">${meta}</div>` : ''}
+            <div class="slash-peek-foot"><b>Enter</b>${escapeHtml(tr('smart.slashPeekInsert'))}<b>Esc</b>${escapeHtml(tr('smart.slashPeekClose'))}</div>
+        </div>`;
+}
+// 位置：默认贴面板右侧外、与高亮行垂直居中；右侧放不下翻左侧；越界收拢在视口内
+function positionSlashPeek(){
+    const btn = slashPeekState.btn;
+    if(!slashPeek || !btn || !btn.isConnected) return;
+    const menuRect = slashMenu.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const gap = 12;
+    const width = slashPeek.offsetWidth || 352;
+    const height = slashPeek.offsetHeight || 320;
+    let left = menuRect.right + gap;
+    if(left + width > vw - 8) left = menuRect.left - width - gap;
+    left = Math.max(8, Math.min(left, vw - width - 8));
+    let top = btnRect.top + btnRect.height / 2 - height / 2;
+    top = Math.max(8, Math.min(top, vh - height - 8));
+    slashPeek.style.left = `${Math.round(left)}px`;
+    slashPeek.style.top = `${Math.round(top)}px`;
+}
+function hideSlashPeek(){
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    slashPeekState.idx = -1;
+    if(!slashPeek) return;
+    slashPeek.classList.remove('show');
+    slashPeek.setAttribute('aria-hidden', 'true');
+}
+function showSlashPeek(idx){
+    const tpl = slashState.items[idx]?.tpl;
+    if(!tpl){ hideSlashPeek(); return; }
+    const btn = slashMenu.querySelector(`.slash-item[data-slash-index="${idx}"]`);
+    if(!btn){ hideSlashPeek(); return; }
+    if(slashPeekState.idx !== idx){
+        slashPeek.innerHTML = slashPeekCardHtml(tpl);
+        slashPeekState.idx = idx;
+        // 图挂了就退回文字卡，别留一块裂图
+        slashPeek.querySelectorAll('img').forEach(img => {
+            img.addEventListener('error', () => img.closest('.slash-peek-media')?.remove(), { once:true });
+        });
+    }
+    slashPeekState.btn = btn;
+    slashPeek.classList.add('show');
+    slashPeek.setAttribute('aria-hidden', 'false');
+    positionSlashPeek();
+}
+function scheduleSlashPeek(idx){
+    if(!slashState.items[idx]?.tpl){ hideSlashPeek(); return; }
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    // 卡已经开着（键盘连续换行）→ 立即换内容，不再等延迟
+    if(slashPeek?.classList.contains('show')){ showSlashPeek(idx); return; }
+    slashPeekState.timer = setTimeout(() => showSlashPeek(idx), SLASH_PEEK_DELAY);
+}
+function scheduleHideSlashPeek(){
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    // 留一点缓冲：鼠标从条目跨到卡上时会短暂离开条目
+    slashPeekState.hideTimer = setTimeout(hideSlashPeek, 140);
+}
+if(slashPeek){
+    slashPeek.addEventListener('mouseenter', () => {
+        clearTimeout(slashPeekState.hideTimer);
+    });
+    slashPeek.addEventListener('mouseleave', scheduleHideSlashPeek);
+    // 点卡＝插这条（mousedown 拦掉，别把输入框光标/选区抢走）
+    slashPeek.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+    slashPeek.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const entry = slashState.items[slashPeekState.idx];
+        if(entry) insertSlashTemplate(entry);
+    });
+}
+// 列表滚动 / 窗口尺寸变化时，卡跟着高亮行走
+slashMenu?.addEventListener('scroll', () => {
+    if(slashPeek?.classList.contains('show')) positionSlashPeek();
+}, true);
+window.addEventListener('resize', () => {
+    if(slashPeek?.classList.contains('show')) positionSlashPeek();
+});
+
 function setSlashActive(idx){
     slashState.active = idx;
     slashMenu.querySelectorAll('.slash-item').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.slashIndex) === idx));
     slashMenu.querySelector(`.slash-item[data-slash-index="${idx}"]`)?.scrollIntoView({block:'nearest'});
+    scheduleSlashPeek(idx);
 }
 function slashTabNextGroup(){
     const cur = slashState.items[slashState.active];
@@ -35296,7 +35643,10 @@ async function runGeneration(){
     const runLog = smartRunSnapshot(node, prompt, refs, logKind);
     rememberRecentSmartSettings(settings, node);
     const runLogStart = nowMs();
-    const appendOutputMode = (concurrentImageRun || smartAppendGenerationEnabled(settings, logKind)) && !audioApiRun;
+    // 2026-10-27（用户要求）：工作流组执行时生成图强制替换模式——组内节点不追加、覆盖上次结果；
+    // 只在「执行工作流组」链路生效（smartLoopContext 带 workflowGroupId），单节点手动运行的追加设置不受影响。
+    const inWorkflowGroupRun = Boolean(smartLoopContext?.workflowGroupId);
+    const appendOutputMode = !inWorkflowGroupRun && (concurrentImageRun || smartAppendGenerationEnabled(settings, logKind)) && !audioApiRun;
     const expectedCount = videoApiRun
         ? 1
         : audioApiRun
@@ -38181,7 +38531,7 @@ function drawPortNextMenuPreview(state=portNextMenuState){
 function defaultPortNextOptions(fromPort){
     if(fromPort === 'out') return [
         {action:'image', icon:'sparkles', title:'API生图', sub:''},
-        {action:'comfy', icon:'workflow', title:'comfyui生图', sub:''},
+        {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
         {action:'video', icon:'video', title:'API生视频', sub:''},
         {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
         {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
@@ -38201,7 +38551,7 @@ function portNextOptions(drag){
     if(drag.fromPort === 'out'){
         return [
             {action:'image', icon:'sparkles', title:'API生图', sub:''},
-            {action:'comfy', icon:'workflow', title:'comfyui生图', sub:''},
+            {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
             {action:'video', icon:'video', title:'API生视频', sub:''},
             {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
             {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
@@ -38293,7 +38643,9 @@ function createNodeFromPortNextAction(action){
         } else if(action === 'comfy') {
             created = createImageNodeAt(point, [], {select:true, skipUndo:true, skipRender:true, skipSave:true});
             const comfySettings = {...smartPanelSettingsForKind('comfy', created), engine:'comfy', apiKind:'image'};
-            comfySettings.comfyMode = comfySettings.comfyMode || 'text';
+            // 2026-10-27（用户要求）：拖线菜单入口由「comfyui生图」改为「comfyui工作流」，
+            // 建节点即工作流（custom）模式；renderComfyParams 本来就会强制 custom，这里对齐。
+            comfySettings.comfyMode = 'custom';
             clearMinimaxH3Settings(comfySettings);
             comfySettings.engine = 'comfy';
             comfySettings.apiKind = 'image';
@@ -38393,7 +38745,8 @@ function createNodeFromMenu(type){
     else if(type === 'comfy'){
         created = createImageNodeAt(p, [], {select:true, skipRender:true, skipSave:true});
         const comfySettings = {...smartPanelSettingsForKind('comfy', created), engine:'comfy', apiKind:'image'};
-        comfySettings.comfyMode = comfySettings.comfyMode || 'text';
+        // 2026-10-27（用户要求）：与拖线菜单对齐，双击菜单建 ComfyUI 节点也直接是工作流（custom）模式
+        comfySettings.comfyMode = 'custom';
         clearMinimaxH3Settings(comfySettings);
         created.runSettings = settingsForStorage(comfySettings);
         created.title = smartGenerationNodeTitle(created);
@@ -39003,13 +39356,40 @@ window.onmousemove = e => {
             if(!thumbDragState.detachOnLeave) return true;
             if(!source) return false;
             const point = screenToWorld(e);
-            const r = nodeRect(source);
+            // 2026-10-27：成组卡内拖动会让组跟随指针，实时卡框永远罩住指针——
+            // 有快照（成组）按快照判脱离，其余仍按实时框。
+            const r = thumbDragState.sourceRect || nodeRect(source);
             // 2026-10-12（用户要求：拖宫格组容易误触拖子图）：分离阈值 8 → 24，
             // 子图要拖出组框 24 世界像素才算「拆出」，路过边距带/贴边拖动不再瞬间分离。
             const pad = 24;
             return point.x < r.x - pad || point.x > r.x + r.width + pad || point.y < r.y - pad || point.y > r.y + r.height + pad;
         })();
         if(!thumbDragState.detached && movedFarEnough && source && !canLeaveDetach){
+            // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡片几乎整面都是缩略图，
+            // 原来卡内抓图只会尝试重排、组永远拖不动。现在成组卡内拖动 = 整组跟随指针；
+            // 拖出原卡快照范围仍拆图（组回弹原位），普通多图节点的重排行为不变。
+            if(isSmartGroupNode(source)){
+                if(!thumbDragState.groupMove){
+                    thumbDragState.groupMove = [source.id, ...smartGroupMembers(source).map(m => m.id)].map(gid => {
+                        const n = nodes.find(x => x.id === gid);
+                        return n ? { id:gid, ox:Number(n.x) || 0, oy:Number(n.y) || 0 } : null;
+                    }).filter(Boolean);
+                }
+                const gdx = (e.clientX - thumbDragState.startX) / viewport.scale;
+                const gdy = (e.clientY - thumbDragState.startY) / viewport.scale;
+                thumbDragState.groupMoved = true;
+                thumbDragState.groupMove.forEach(item => {
+                    const n = nodes.find(x => x.id === item.id);
+                    if(!n) return;
+                    n.x = item.ox + gdx;
+                    n.y = item.oy + gdy;
+                    n.posEditedAt = Date.now();
+                    const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
+                    if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
+                });
+                suppressImageClickUntil = Date.now() + 260;
+                return;
+            }
             const hit = document.elementFromPoint(e.clientX, e.clientY);
             const targetItem = hit?.closest?.('.thumb-item');
             const targetNodeEl = targetItem?.closest?.('.image-node');
@@ -39032,6 +39412,8 @@ window.onmousemove = e => {
             if(canDetachThumb){
                 const sourceImg = source.images[thumbDragState.imgIndex];
                 if(sourceImg){
+                    // 拆图手势成立：整组跟随是临时的，先把组回弹到按下前的位置
+                    if(thumbDragState.groupMoved) restoreThumbGroupMove(thumbDragState);
                     commitPendingUndo();
                     undoSuppressed = true;
                     const img = stripImageGenerationMeta({...sourceImg});
@@ -39331,8 +39713,14 @@ function handleCanvasMouseUp(e){
         return;
     }
     if(thumbDragState){
-        if(thumbDragState.reordered || thumbDragState.detached) commitPendingUndo();
+        // 2026-10-27：成组卡内拖动落定 = 位置真改了，提交撤销快照并落盘重绘；
+        // 拆图路径已在分离瞬间回弹过组，这里 groupMoved 已被清掉。
+        if(thumbDragState.reordered || thumbDragState.detached || thumbDragState.groupMoved) commitPendingUndo();
         else discardPendingUndo();
+        if(thumbDragState.groupMoved){
+            scheduleSave();
+            render();
+        }
         thumbDragState = null;
     }
     if(panState) {

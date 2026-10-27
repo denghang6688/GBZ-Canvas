@@ -159,6 +159,10 @@ body.smart-agent-open .preset-workflow-panel { inset:0 402px 0 72px; padding-rig
 .preset-workflow-info em { color:var(--muted); font-size:11px; line-height:1.35; font-style:normal; font-weight:720; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .preset-workflow-empty { grid-column:1/-1; min-height:260px; display:flex; align-items:center; justify-content:center; text-align:center; padding:18px; border:1px dashed var(--line); border-radius:16px; color:var(--muted); font-size:13px; font-weight:800; line-height:1.5; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:26px; background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; }
+/* 2026-10-27（用户反馈：画布太卡）：视口外节点跳过 layout/paint（浏览器按需渲染）。
+   节点自身有内联宽高，offscreen 不渲染内容也不影响占位；连线端点用的是节点数据坐标
+   （nodeRect 不读 DOM 内部矩形），不受影响。on-screen 节点渲染行为与原来完全一致。 */
+.image-node { content-visibility: auto; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-image-replace-drag * { user-select:none !important; }
 body.smart-image-replace-drag { cursor:copy; }
@@ -1277,7 +1281,9 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .connection-layer .conn-pending-append { stroke:rgba(170,170,170,.78) !important; filter:none; }
 .connection-layer .conn-cascade { filter:none; }
 .connection-layer .conn-cascade-wait { opacity:.58; }
-.connection-layer .conn-cascade-active { stroke:#3b82f6 !important; opacity:1; filter:drop-shadow(0 0 6px rgba(59,130,246,.65)); }
+/* 2026-10-27（用户要求）：级联/工作流组执行线改用选中线同款蓝渐变+流光（stroke 由 SVG 渐变注入，
+   不能再强制 #3b82f6 !important，否则盖掉渐变）；只保留不透明度与旧的宽线观感。 */
+.connection-layer .conn-cascade-active { opacity:1; }
 .connection-layer.conn-reduce-motion .conn-pending,
 .connection-layer.conn-reduce-motion .conn-cascade-active,
 .connection-layer.conn-reduce-motion .conn-flow-dot,
@@ -18748,3 +18754,41 @@ select.llm-rule-input option { background:#1f1f1f; color:#eee; }
 .dcap-run { flex:0 0 auto; height:34px; padding:0 18px; border-radius:10px; border:none; background:linear-gradient(135deg,#6c8cff,#8b6cff); color:#fff; font-size:12.5px; font-weight:800; cursor:pointer; transition:.14s; }
 .dcap-run:hover:not(:disabled) { filter:brightness(1.08); }
 .dcap-run:disabled { opacity:.55; cursor:default; }
+
+/* ===== 2026-10-27 slash 面板「悬停看效果图」预览卡（Hover Peek）=====
+   fixed 定位挂 body：不受 composer / 面板 overflow 裁剪影响；
+   内容来自提示词库条目的 preview 字段（无图则只出文字卡）。 */
+.slash-peek {
+    position:fixed; left:0; top:0; z-index:89; width:min(352px, calc(100vw - 24px));
+    background:var(--panel); border:1px solid var(--line); border-radius:15px;
+    box-shadow:0 30px 76px rgba(0,0,0,.72), 0 0 0 1px rgba(43,111,240,.20), 0 0 46px rgba(56,189,248,.18);
+    overflow:hidden; pointer-events:none; opacity:0; transform:translateY(4px) scale(.98);
+    transition:opacity .15s ease, transform .15s ease; backdrop-filter:blur(10px);
+}
+.slash-peek.show { opacity:1; transform:none; pointer-events:auto; }
+.slash-peek-media { position:relative; aspect-ratio:16/10; background:#0f0f10; overflow:hidden; }
+.slash-peek-media img { display:block; width:100%; height:100%; object-fit:cover; }
+.slash-peek-media::after { content:""; position:absolute; inset:0; pointer-events:none;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10), inset 0 -26px 30px -18px rgba(0,0,0,.55); }
+.slash-peek-body { padding:12px 14px 13px; }
+.slash-peek-title { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+.slash-peek-title .nm { min-width:0; font-size:14px; font-weight:700; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+.slash-peek-title .cat { flex:0 0 auto; padding:1.5px 8px; border-radius:10px; font-size:10px; font-weight:700; }
+.slash-peek-scene { margin-bottom:9px; min-height:18px; font-size:12px; line-height:1.55; color:var(--muted);
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.slash-peek-prompt { position:relative; padding:9px 10px; border-radius:9px; border:1px solid var(--line); background:var(--soft);
+    font-size:11.5px; line-height:1.66; color:var(--text); opacity:.92;
+    font-family:ui-monospace,Consolas,monospace;
+    display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
+.slash-peek-prompt::after { content:""; position:absolute; left:0; right:0; bottom:0; height:24px;
+    background:linear-gradient(transparent, var(--soft)); }
+.slash-peek-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.slash-peek-meta .m { max-width:150px; padding:2px 8px; border-radius:6px; border:1px solid var(--line);
+    background:var(--soft); font-size:10px; font-weight:600; color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.slash-peek-meta .m.neg { border-color:rgba(226,110,125,.30); background:rgba(226,110,125,.08); color:#e2a1a8; }
+.slash-peek-foot { display:flex; align-items:center; gap:7px; margin-top:10px; padding-top:9px;
+    border-top:1px solid var(--line); font-size:10px; font-weight:600; color:var(--faint); }
+.slash-peek-foot b { display:inline-block; padding:0 5px; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:4px; color:var(--muted); font-weight:700; font-family:ui-monospace,Consolas,monospace; font-size:9.5px; }
+.slash-peek-foot .peek-src { margin-left:auto; font-weight:600; }

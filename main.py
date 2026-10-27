@@ -28,6 +28,7 @@ import math
 import shlex
 import functools
 import html
+import concurrent.futures
 import socket
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
@@ -540,7 +541,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "V26.10.27.1"
+APP_VERSION = "V26.10.27.2"
 # === GBZ智能画布 更新源（发布地址绑定作者账号；换账号/仓库名只改这里） ===
 GITHUB_ACCOUNT = "denghang6688"      # 作者 GitHub 账号（2026-09-22 确认）
 GITHUB_REPO_NAME = "GBZ-Canvas"
@@ -7470,6 +7471,45 @@ def probe_local_video_duration_seconds(path: str) -> Optional[float]:
 
 VIDEO_TRIM_MIN_SECONDS = 0.5
 
+# ===== 2026-10-27（用户反馈：裁剪面板胶片条加载慢）=====
+# 优化 1：结果按 (文件, mtime, size, count, width) 进程内缓存 —— 重开面板秒出。
+# 优化 2：主路径改为「并行 fast-seek 逐帧抽帧」—— -ss 放在 -i 之前走关键帧寻址，
+#          每帧只解码极短一段，多线程并发；不再从头全量解码整条视频。
+#          兜底保留原单趟 fps 过滤器（个别封装对 -ss 输入寻址失效时）。
+_FILMSTRIP_CACHE: Dict[tuple, list] = {}
+_FILMSTRIP_CACHE_MAX = 48
+_FILMSTRIP_CACHE_LOCK = Lock()
+
+def _filmstrip_cache_key(path: str, count: int, width: int):
+    try:
+        st = os.stat(path)
+        return (os.path.abspath(path), st.st_mtime_ns, st.st_size, count, width)
+    except OSError:
+        return None
+
+def _ffmpeg_extract_one_frame(ffmpeg, path, t: float, width: int, out_dir: str, idx: int):
+    """fast-seek 抽单帧：成功返回 jpg 路径，失败返回 None。"""
+    fd, tmp = tempfile.mkstemp(prefix=f"fs_{idx:02d}_", suffix=".jpg", dir=out_dir)
+    os.close(fd)
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{t:.3f}", "-i", path,
+        "-frames:v", "1",
+        "-vf", f"scale='min({width},iw)':-2",
+        tmp,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            return tmp
+    except Exception:
+        pass
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return None
+
 @app.get("/api/video/filmstrip")
 async def video_filmstrip(url: str, count: int = 10, w: int = 160):
     """均匀抽取 N 帧缩略图（base64 JPEG 数组 + 视频总时长），给视频截取胶片条用。"""
@@ -7487,11 +7527,43 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
     if not ffmpeg:
         raise HTTPException(status_code=500, detail="未找到 ffmpeg")
 
-    def _build() -> list:
+    cache_key = _filmstrip_cache_key(path, count, width)
+    if cache_key:
+        with _FILMSTRIP_CACHE_LOCK:
+            cached = _FILMSTRIP_CACHE.get(cache_key)
+        if cached is not None:
+            return {"duration": duration, "frames": cached, "cached": True}
+
+    def _frames_from_files(file_list: list) -> list:
         frames = []
+        for fp in file_list:
+            if not fp:
+                frames.append(None)
+                continue
+            try:
+                with open(fp, "rb") as fh:
+                    frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
+            except OSError:
+                frames.append(None)
+        return frames
+
+    def _build() -> list:
         fd_base = tempfile.mkdtemp(prefix="filmstrip_")
         try:
-            # 单趟 fps 过滤器：每 D/N 秒出一帧，恰好 N 帧（比逐帧起 ffmpeg 快一个量级）
+            # 主路径：并行 fast-seek 逐帧（-ss 在 -i 前，关键帧寻址，长视频也秒级）
+            targets = [duration * (i + 0.5) / count for i in range(count)]
+            workers = min(6, count)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_ffmpeg_extract_one_frame, ffmpeg, path, t, width, fd_base, i)
+                    for i, t in enumerate(targets)
+                ]
+                files = [f.result() for f in futures]
+            frames = _frames_from_files(files)
+            frames = [f for f in frames if f]
+            if frames:
+                return frames
+            # 兜底：单趟 fps 过滤器（-ss 输入寻址对个别封装失效时）
             fps_expr = f"{count}/{duration:.6f}"
             cmd = [
                 ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -7503,14 +7575,8 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if proc.returncode == 0:
                 names = sorted(os.listdir(fd_base))
-                for name in names:
-                    fp = os.path.join(fd_base, name)
-                    try:
-                        if os.path.getsize(fp) > 0:
-                            with open(fp, "rb") as fh:
-                                frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
-                    except OSError:
-                        continue
+                frames = _frames_from_files([os.path.join(fd_base, n) for n in names])
+                frames = [f for f in frames if f]
         except Exception:
             pass
         finally:
@@ -7518,37 +7584,19 @@ async def video_filmstrip(url: str, count: int = 10, w: int = 160):
                 shutil.rmtree(fd_base, ignore_errors=True)
             except Exception:
                 pass
-        if not frames:
-            # 兜底：逐帧起 ffmpeg（fps 过滤器对个别封装失效时）
-            for i in range(count):
-                t = duration * (i + 0.5) / count
-                fd, tmp = tempfile.mkstemp(prefix="filmstrip_", suffix=".jpg")
-                os.close(fd)
-                try:
-                    cmd = [
-                        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                        "-ss", f"{t:.3f}", "-i", path,
-                        "-frames:v", "1",
-                        "-vf", f"scale='min({width},iw)':-2",
-                        tmp,
-                    ]
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                    if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
-                        with open(tmp, "rb") as fh:
-                            frames.append("data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii"))
-                except Exception:
-                    continue
-                finally:
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
         return frames
 
     frames = await asyncio.to_thread(_build)
     if not frames:
         raise HTTPException(status_code=415, detail="未能抽取视频帧")
-    return {"duration": duration, "frames": frames}
+    if cache_key:
+        with _FILMSTRIP_CACHE_LOCK:
+            if len(_FILMSTRIP_CACHE) >= _FILMSTRIP_CACHE_MAX:
+                # 简单 FIFO 淘汰，避免长会话内存膨胀
+                for k in list(_FILMSTRIP_CACHE.keys())[: len(_FILMSTRIP_CACHE) - _FILMSTRIP_CACHE_MAX + 1]:
+                    _FILMSTRIP_CACHE.pop(k, None)
+            _FILMSTRIP_CACHE[cache_key] = frames
+    return {"duration": duration, "frames": frames, "cached": False}
 
 class VideoTrimRequest(BaseModel):
     url: str
@@ -16749,7 +16797,8 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "duration": {"min": 4, "max": 30, "step": 1},
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
-        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        # 2026-10-27（用户反馈：参考图按实际数量提交）：官方参考素材上限 50（30图+10视频+10音频），不再钳 4 张。
+        "modes": {"frames": True, "reference_image": 30, "reference_video": 10, "reference_audio": 10},
         "audio": True,
     },
     "seedance": {
@@ -16757,7 +16806,8 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "duration": {"min": 4, "max": 15, "step": 1},
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
-        "modes": {"frames": True, "reference_image": 4, "reference_video": 0, "reference_audio": 0},
+        # 2026-10-27：Seedance 2.0 系列官方上限 15（9图+3视频+3音频），参考图 4 → 9（音频参考官方要求搭配图片/视频，仍不单独放开）。
+        "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 0},
         "audio": True,
     },
     "hailuo": {
@@ -17133,6 +17183,12 @@ async def canvas_video(payload: CanvasVideoRequest):
                     image_like_urls = set()
                     frame_roles_used = {"first_frame": False, "last_frame": False}
                     volc_video_count = 0
+                    # 2026-10-27：素材切片上限按模型能力档案动态取（Seedance 2.5=30图/10视频/10音频、
+                    # 2.0 系列=9图/3视频/3音频），不再写死 9/3/3；档案缺失时回落官方基础值。
+                    _volc_modes = video_model_caps(volc_model).get("modes") or {}
+                    volc_img_cap = max(1, int(_volc_modes.get("reference_image") or 9))
+                    volc_vid_cap = max(0, int(_volc_modes.get("reference_video") or 3))
+                    volc_aud_cap = max(0, int(_volc_modes.get("reference_audio") or 0))
 
                     def append_volcengine_image(url: str, role: str):
                         if role in {"first_frame", "last_frame"}:
@@ -17149,7 +17205,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         image_like_urls.add(url)
                         return True
 
-                    for ref in payload.images[:9]:
+                    for ref in payload.images[:volc_img_cap]:
                         url = await volcengine_normalize_reference_url_async(ref.url, max_image_size=1536)
                         if not url:
                             continue
@@ -17162,7 +17218,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         elif not frame_roles_used["first_frame"]:
                             # 普通图生视频没有显式 role 时，只取第一张作为首帧。
                             append_volcengine_image(url, "first_frame")
-                    for url in (payload.videos or [])[:3]:
+                    for url in (payload.videos or [])[:volc_vid_cap]:
                         text_url = str(url or "").strip()
                         if not text_url:
                             continue
@@ -17175,7 +17231,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                         video_items = await volcengine_video_reference_content_items(media_url)
                         body["content"].extend(video_items)
                         volc_video_count += 1
-                    for url in (payload.audios or [])[:3]:
+                    for url in (payload.audios or [])[:volc_aud_cap]:
                         duration = probe_local_audio_duration_seconds(url)
                         if duration is not None and (duration < 1.8 or duration > 15.2):
                             raise HTTPException(
@@ -21717,13 +21773,16 @@ WORKFLOW_CATEGORY_ALIASES = {
     "放大": "upscale", "放大扩图": "upscale", "扩图": "upscale",
     "其他": "other", "工具": "other",
 }
-# 名称关键词：优先级 upscale > edit > video > audio，命中即定（生图/编辑靠名字区分）。
+# 名称关键词：优先级 upscale > video > edit > audio，命中即定（生图/编辑靠名字区分）。
 # ⚠「扩图」必须先判，否则 FLUX2扩图 / F2K扩图 会被"图"字带进生图。
+# 2026-10-27（用户反馈：benini视频编辑 被归进图像编辑）：「视频编辑」同时命中 视频(video)
+# 与 编辑(edit)，edit 优先会误归 —— 名字里带 视频/video 的理应是生视频，video 提到 edit 前；
+# 纯图像编辑（F2K图像编辑/洗图等）名字不含视频字样，不受影响。
 _WORKFLOW_CATEGORY_NAME_MARKERS = (
     ("upscale", ("扩图", "放大", "超分", "upscale", "outpaint", "seedvr")),
+    ("video", ("视频", "video", "i2v", "t2v", "ref2va")),
     ("edit", ("编辑", "迁移", "融图", "洗图", "增强", "重绘", "修复", "换装", "换脸",
               "inpaint", "edit", "enhance", "retouch")),
-    ("video", ("视频", "video", "i2v", "t2v", "ref2va")),
     ("audio", ("音频", "配音", "声音克隆", "tts", "audio")),
 )
 # 节点判定：优先级 视频 > 音频 > 放大 > 图像编辑 > 生图。
