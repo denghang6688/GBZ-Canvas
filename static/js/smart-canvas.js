@@ -24309,6 +24309,9 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                     url:node.images?.[imgIndex]?.url || '',
                     detachOnLeave:true
                 };
+                // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡内抓缩略图 = 拖整组。
+                // 脱离判定按「按下时的卡框快照」——否则组跟着指针走后，实时卡框永远罩住指针，拆图手势就死了。
+                if(isSmartGroupNode(node)) thumbDragState.sourceRect = nodeRect(node);
                 capturePendingUndo();
             });
         });
@@ -24505,6 +24508,20 @@ function restoreDraggedNodePosition(){
             n.y = item.oy;
         }
     });
+}
+// 2026-10-27：成组卡内抓缩略图的「整组跟随」是临时态——一旦手势最终变成「拆图」，
+// 组要回弹到按下前的位置，不能把跟随位移留下来。
+function restoreThumbGroupMove(state){
+    (state?.groupMove || []).forEach(item => {
+        const n = nodes.find(x => x.id === item.id);
+        if(n){
+            n.x = item.ox;
+            n.y = item.oy;
+            const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
+            if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
+        }
+    });
+    state.groupMoved = false;
 }
 function pruneSmartGroupMembershipsForNode(node){
     if(!node || !node.id) return false;
@@ -39142,13 +39159,40 @@ window.onmousemove = e => {
             if(!thumbDragState.detachOnLeave) return true;
             if(!source) return false;
             const point = screenToWorld(e);
-            const r = nodeRect(source);
+            // 2026-10-27：成组卡内拖动会让组跟随指针，实时卡框永远罩住指针——
+            // 有快照（成组）按快照判脱离，其余仍按实时框。
+            const r = thumbDragState.sourceRect || nodeRect(source);
             // 2026-10-12（用户要求：拖宫格组容易误触拖子图）：分离阈值 8 → 24，
             // 子图要拖出组框 24 世界像素才算「拆出」，路过边距带/贴边拖动不再瞬间分离。
             const pad = 24;
             return point.x < r.x - pad || point.x > r.x + r.width + pad || point.y < r.y - pad || point.y > r.y + r.height + pad;
         })();
         if(!thumbDragState.detached && movedFarEnough && source && !canLeaveDetach){
+            // 2026-10-27（用户反馈「成组后不能单独拖动组」）：成组卡片几乎整面都是缩略图，
+            // 原来卡内抓图只会尝试重排、组永远拖不动。现在成组卡内拖动 = 整组跟随指针；
+            // 拖出原卡快照范围仍拆图（组回弹原位），普通多图节点的重排行为不变。
+            if(isSmartGroupNode(source)){
+                if(!thumbDragState.groupMove){
+                    thumbDragState.groupMove = [source.id, ...smartGroupMembers(source).map(m => m.id)].map(gid => {
+                        const n = nodes.find(x => x.id === gid);
+                        return n ? { id:gid, ox:Number(n.x) || 0, oy:Number(n.y) || 0 } : null;
+                    }).filter(Boolean);
+                }
+                const gdx = (e.clientX - thumbDragState.startX) / viewport.scale;
+                const gdy = (e.clientY - thumbDragState.startY) / viewport.scale;
+                thumbDragState.groupMoved = true;
+                thumbDragState.groupMove.forEach(item => {
+                    const n = nodes.find(x => x.id === item.id);
+                    if(!n) return;
+                    n.x = item.ox + gdx;
+                    n.y = item.oy + gdy;
+                    n.posEditedAt = Date.now();
+                    const gel = world.querySelector(`.image-node[data-id="${CSS.escape(item.id)}"]`);
+                    if(gel){ gel.style.left = `${n.x}px`; gel.style.top = `${n.y}px`; }
+                });
+                suppressImageClickUntil = Date.now() + 260;
+                return;
+            }
             const hit = document.elementFromPoint(e.clientX, e.clientY);
             const targetItem = hit?.closest?.('.thumb-item');
             const targetNodeEl = targetItem?.closest?.('.image-node');
@@ -39171,6 +39215,8 @@ window.onmousemove = e => {
             if(canDetachThumb){
                 const sourceImg = source.images[thumbDragState.imgIndex];
                 if(sourceImg){
+                    // 拆图手势成立：整组跟随是临时的，先把组回弹到按下前的位置
+                    if(thumbDragState.groupMoved) restoreThumbGroupMove(thumbDragState);
                     commitPendingUndo();
                     undoSuppressed = true;
                     const img = stripImageGenerationMeta({...sourceImg});
@@ -39470,8 +39516,14 @@ function handleCanvasMouseUp(e){
         return;
     }
     if(thumbDragState){
-        if(thumbDragState.reordered || thumbDragState.detached) commitPendingUndo();
+        // 2026-10-27：成组卡内拖动落定 = 位置真改了，提交撤销快照并落盘重绘；
+        // 拆图路径已在分离瞬间回弹过组，这里 groupMoved 已被清掉。
+        if(thumbDragState.reordered || thumbDragState.detached || thumbDragState.groupMoved) commitPendingUndo();
         else discardPendingUndo();
+        if(thumbDragState.groupMoved){
+            scheduleSave();
+            render();
+        }
         thumbDragState = null;
     }
     if(panState) {
