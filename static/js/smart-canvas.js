@@ -29,6 +29,11 @@ const portNextMenuSearch = document.getElementById('portNextMenuSearch');
 const promptInput = document.getElementById('promptInput');
 const mentionPicker = document.getElementById('mentionPicker');
 const slashMenu = document.getElementById('slashMenu');
+// slash 面板「悬停看效果图」预览卡（单例，fixed 挂 body）：声明放顶部，
+// 避免 closeFloatingCanvasPanels 等在脚本执行早期调用时踩 TDZ
+const slashPeek = document.getElementById('slashPeek');
+const SLASH_PEEK_DELAY = 180;
+const slashPeekState = { timer:0, hideTimer:0, idx:-1, btn:null };
 const mentionPreview = document.getElementById('mentionPreview');
 const engineSelect = document.getElementById('engineSelect');
 const composerPanelTitle = document.getElementById('composerPanelTitle');
@@ -32058,6 +32063,7 @@ function openSlashMenu(query){
 }
 function closeSlashMenu(){
     const wasReplace = slashState.replaceChip;
+    hideSlashPeek();
     if(!slashState.open && !slashMenu.classList.contains('open')){ slashState.replaceChip = false; return; }
     slashState.open = false;
     slashState.query = '';
@@ -32069,6 +32075,8 @@ function closeSlashMenu(){
     if(wasReplace) promptInput?.focus?.();
 }
 function renderSlashMenu(){
+    // 重绘会换掉整片条目 DOM，先把预览卡收掉，避免指向已消失的行
+    hideSlashPeek();
     const query = slashState.query.trim().toLowerCase();
     const groups = slashGroups()
         .map(g => ({...g, items: g.items.filter(t => !query || promptTemplateSearchText(t).includes(query))}))
@@ -32110,6 +32118,7 @@ function renderSlashMenu(){
     refreshIcons();
     slashMenu.querySelectorAll('.slash-item').forEach(btn => {
         btn.addEventListener('mouseenter', () => setSlashActive(Number(btn.dataset.slashIndex)));
+        btn.addEventListener('mouseleave', scheduleHideSlashPeek);
         btn.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -32117,10 +32126,134 @@ function renderSlashMenu(){
         });
     });
 }
+// ===== 2026-10-27 slash 面板「悬停看效果图」：Hover Peek 预览卡 =====
+// 提示词条目的 preview（提示词库「效果图」）随 /api/prompt-libraries 一起下发，
+// hover 或 ↑↓ 高亮某条时，在面板外侧浮一张大图卡：先看效果，再决定插不插入。
+// 无 preview 的条目只出文字卡（不占媒体区），不弹空占位噪音。
+// （slashPeek / SLASH_PEEK_DELAY / slashPeekState 声明在文件顶部 DOM 常量区）
+
+function slashPeekImageUrl(tpl){
+    const raw = String(tpl?.preview || '').trim();
+    if(!raw) return '';
+    // 与后端 normalize_prompt_preview_url 同口径：相对站点路径或 http(s)，其它一律不认
+    if(/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw;
+    return '';
+}
+function slashPeekParamChips(tpl){
+    const params = tpl?.params;
+    if(!params || typeof params !== 'object') return [];
+    return Object.entries(params)
+        .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+        .slice(0, 3)
+        .map(([key, value]) => `${key} ${value}`);
+}
+function slashPeekCardHtml(tpl){
+    const img = slashPeekImageUrl(tpl);
+    const cat = slashCategoryColor(tpl.category);
+    const negative = String(tpl?.negative || '').trim();
+    const chips = slashPeekParamChips(tpl);
+    const meta = [
+        negative ? `<span class="m neg">${escapeHtml(tr('smart.slashPeekNegative'))} · ${escapeHtml(negative)}</span>` : '',
+        ...chips.map(chip => `<span class="m">${escapeHtml(chip)}</span>`)
+    ].filter(Boolean).join('');
+    return `${img ? `<div class="slash-peek-media"><img src="${escapeAttr(img)}" alt="" loading="lazy" decoding="async"></div>` : ''}
+        <div class="slash-peek-body">
+            <div class="slash-peek-title">
+                <span class="nm">${escapeHtml(promptTemplateName(tpl))}</span>
+                <span class="cat" style="color:${cat.fg};background:${cat.bg}">${escapeHtml(promptTemplateCategoryLabel(tpl.category || 'custom'))}</span>
+            </div>
+            <div class="slash-peek-scene">${escapeHtml(promptTemplateScene(tpl) || '')}</div>
+            <div class="slash-peek-prompt">${escapeHtml(String(tpl?.positive || '').trim())}</div>
+            ${meta ? `<div class="slash-peek-meta">${meta}</div>` : ''}
+            <div class="slash-peek-foot"><b>Enter</b>${escapeHtml(tr('smart.slashPeekInsert'))}<b>Esc</b>${escapeHtml(tr('smart.slashPeekClose'))}</div>
+        </div>`;
+}
+// 位置：默认贴面板右侧外、与高亮行垂直居中；右侧放不下翻左侧；越界收拢在视口内
+function positionSlashPeek(){
+    const btn = slashPeekState.btn;
+    if(!slashPeek || !btn || !btn.isConnected) return;
+    const menuRect = slashMenu.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const gap = 12;
+    const width = slashPeek.offsetWidth || 352;
+    const height = slashPeek.offsetHeight || 320;
+    let left = menuRect.right + gap;
+    if(left + width > vw - 8) left = menuRect.left - width - gap;
+    left = Math.max(8, Math.min(left, vw - width - 8));
+    let top = btnRect.top + btnRect.height / 2 - height / 2;
+    top = Math.max(8, Math.min(top, vh - height - 8));
+    slashPeek.style.left = `${Math.round(left)}px`;
+    slashPeek.style.top = `${Math.round(top)}px`;
+}
+function hideSlashPeek(){
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    slashPeekState.idx = -1;
+    if(!slashPeek) return;
+    slashPeek.classList.remove('show');
+    slashPeek.setAttribute('aria-hidden', 'true');
+}
+function showSlashPeek(idx){
+    const tpl = slashState.items[idx]?.tpl;
+    if(!tpl){ hideSlashPeek(); return; }
+    const btn = slashMenu.querySelector(`.slash-item[data-slash-index="${idx}"]`);
+    if(!btn){ hideSlashPeek(); return; }
+    if(slashPeekState.idx !== idx){
+        slashPeek.innerHTML = slashPeekCardHtml(tpl);
+        slashPeekState.idx = idx;
+        // 图挂了就退回文字卡，别留一块裂图
+        slashPeek.querySelectorAll('img').forEach(img => {
+            img.addEventListener('error', () => img.closest('.slash-peek-media')?.remove(), { once:true });
+        });
+    }
+    slashPeekState.btn = btn;
+    slashPeek.classList.add('show');
+    slashPeek.setAttribute('aria-hidden', 'false');
+    positionSlashPeek();
+}
+function scheduleSlashPeek(idx){
+    if(!slashState.items[idx]?.tpl){ hideSlashPeek(); return; }
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    // 卡已经开着（键盘连续换行）→ 立即换内容，不再等延迟
+    if(slashPeek?.classList.contains('show')){ showSlashPeek(idx); return; }
+    slashPeekState.timer = setTimeout(() => showSlashPeek(idx), SLASH_PEEK_DELAY);
+}
+function scheduleHideSlashPeek(){
+    clearTimeout(slashPeekState.timer);
+    clearTimeout(slashPeekState.hideTimer);
+    // 留一点缓冲：鼠标从条目跨到卡上时会短暂离开条目
+    slashPeekState.hideTimer = setTimeout(hideSlashPeek, 140);
+}
+if(slashPeek){
+    slashPeek.addEventListener('mouseenter', () => {
+        clearTimeout(slashPeekState.hideTimer);
+    });
+    slashPeek.addEventListener('mouseleave', scheduleHideSlashPeek);
+    // 点卡＝插这条（mousedown 拦掉，别把输入框光标/选区抢走）
+    slashPeek.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+    slashPeek.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const entry = slashState.items[slashPeekState.idx];
+        if(entry) insertSlashTemplate(entry);
+    });
+}
+// 列表滚动 / 窗口尺寸变化时，卡跟着高亮行走
+slashMenu?.addEventListener('scroll', () => {
+    if(slashPeek?.classList.contains('show')) positionSlashPeek();
+}, true);
+window.addEventListener('resize', () => {
+    if(slashPeek?.classList.contains('show')) positionSlashPeek();
+});
+
 function setSlashActive(idx){
     slashState.active = idx;
     slashMenu.querySelectorAll('.slash-item').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.slashIndex) === idx));
     slashMenu.querySelector(`.slash-item[data-slash-index="${idx}"]`)?.scrollIntoView({block:'nearest'});
+    scheduleSlashPeek(idx);
 }
 function slashTabNextGroup(){
     const cur = slashState.items[slashState.active];
