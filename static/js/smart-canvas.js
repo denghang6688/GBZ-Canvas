@@ -38456,7 +38456,7 @@ function drawPortNextMenuPreview(state=portNextMenuState){
 function defaultPortNextOptions(fromPort){
     if(fromPort === 'out') return [
         {action:'image', icon:'sparkles', title:'API生图', sub:''},
-        {action:'comfy', icon:'workflow', title:'comfyui生图', sub:''},
+        {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
         {action:'video', icon:'video', title:'API生视频', sub:''},
         {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
         {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
@@ -38476,7 +38476,7 @@ function portNextOptions(drag){
     if(drag.fromPort === 'out'){
         return [
             {action:'image', icon:'sparkles', title:'API生图', sub:''},
-            {action:'comfy', icon:'workflow', title:'comfyui生图', sub:''},
+            {action:'comfy', icon:'workflow', title:'comfyui工作流', sub:'自定义工作流'},
             {action:'video', icon:'video', title:'API生视频', sub:''},
             {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
             {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
@@ -38568,7 +38568,9 @@ function createNodeFromPortNextAction(action){
         } else if(action === 'comfy') {
             created = createImageNodeAt(point, [], {select:true, skipUndo:true, skipRender:true, skipSave:true});
             const comfySettings = {...smartPanelSettingsForKind('comfy', created), engine:'comfy', apiKind:'image'};
-            comfySettings.comfyMode = comfySettings.comfyMode || 'text';
+            // 2026-10-27（用户要求）：拖线菜单入口由「comfyui生图」改为「comfyui工作流」，
+            // 建节点即工作流（custom）模式；renderComfyParams 本来就会强制 custom，这里对齐。
+            comfySettings.comfyMode = 'custom';
             clearMinimaxH3Settings(comfySettings);
             comfySettings.engine = 'comfy';
             comfySettings.apiKind = 'image';
@@ -38668,7 +38670,8 @@ function createNodeFromMenu(type){
     else if(type === 'comfy'){
         created = createImageNodeAt(p, [], {select:true, skipRender:true, skipSave:true});
         const comfySettings = {...smartPanelSettingsForKind('comfy', created), engine:'comfy', apiKind:'image'};
-        comfySettings.comfyMode = comfySettings.comfyMode || 'text';
+        // 2026-10-27（用户要求）：与拖线菜单对齐，双击菜单建 ComfyUI 节点也直接是工作流（custom）模式
+        comfySettings.comfyMode = 'custom';
         clearMinimaxH3Settings(comfySettings);
         created.runSettings = settingsForStorage(comfySettings);
         created.title = smartGenerationNodeTitle(created);
