@@ -7255,19 +7255,21 @@ async def media_preview(url: str, w: int = 512):
         raise HTTPException(status_code=404, detail="媒体文件不存在")
 
     width = max(64, min(2048, int(w or 512)))
-    webp_path, png_path = media_preview_cache_paths(path, width)
+    # 2026-10-27：构建过程 per-key 去重，同一文件同宽度的首次构建全画布只跑一个 ffmpeg
+    async with media_build_lock(f"preview:{os.path.abspath(path)}:{width}"):
+        webp_path, png_path = media_preview_cache_paths(path, width)
 
-    if os.path.exists(webp_path):
-        return FileResponse(webp_path, media_type="image/webp")
-    if os.path.exists(png_path):
-        return FileResponse(png_path, media_type="image/png")
+        if os.path.exists(webp_path):
+            return FileResponse(webp_path, media_type="image/webp")
+        if os.path.exists(png_path):
+            return FileResponse(png_path, media_type="image/png")
 
-    try:
-        # 同步 PIL 处理 + 落盘，放到线程里执行，避免阻塞事件循环（几十张首次生成会卡死整个 loop → 缩略图全空白）
-        out_path, media_type = await asyncio.to_thread(build_media_preview_sync, path, width)
-        return FileResponse(out_path, media_type=media_type)
-    except Exception as exc:
-        raise HTTPException(status_code=415, detail=f"无法生成预览图：{exc}") from exc
+        try:
+            # 同步 PIL 处理 + 落盘，放到线程里执行，避免阻塞事件循环（几十张首次生成会卡死整个 loop → 缩略图全空白）
+            out_path, media_type = await asyncio.to_thread(build_media_preview_sync, path, width)
+            return FileResponse(out_path, media_type=media_type)
+        except Exception as exc:
+            raise HTTPException(status_code=415, detail=f"无法生成预览图：{exc}") from exc
 
 def playable_video_cache_path(path: str) -> Tuple[str, str]:
     stat = os.stat(path)
@@ -7376,6 +7378,39 @@ def prewarm_playable_video(path: str) -> bool:
         return False
 
 
+async def prewarm_video_caches_async(path: str) -> None:
+    """视频落盘后后台预热海报(512/768)与 faststart 缓存，失败静默。
+    2026-10-27（用户反馈：API 生成/拖入的视频显示很慢）：此前只有「上传」路径有预热，
+    API 生成与 ComfyUI 工作流产物落盘后不预热——用户看到节点时才现场 ffmpeg，
+    生成完成到画面可看之间是一段黑格子。生成落盘后立即预热，把这段等待提前消化掉。"""
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        await asyncio.to_thread(prewarm_media_previews, path)
+    except Exception:
+        pass
+    try:
+        await asyncio.to_thread(prewarm_playable_video, path)
+    except Exception:
+        pass
+
+
+# 2026-10-27（用户反馈：视频显示很慢）：画布会反复重渲染，同一个未缓存的媒体 URL
+# 会在短时间内收到多个请求；此前每次缓存 miss 都各自起一个 ffmpeg，互相抢 CPU/磁盘
+# 越抢越慢（实测同一海报 URL 一秒内被请求 13 次）。给「预览图 / faststart 转封装」
+# 的构建过程加 per-key 并发去重：同一文件的构建同时只跑一个，其余请求等同一个结果。
+_MEDIA_BUILD_LOCKS: Dict[str, asyncio.Lock] = {}
+_MEDIA_BUILD_LOCKS_GUARD = threading.Lock()
+
+def media_build_lock(key: str) -> asyncio.Lock:
+    with _MEDIA_BUILD_LOCKS_GUARD:
+        lock = _MEDIA_BUILD_LOCKS.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _MEDIA_BUILD_LOCKS[key] = lock
+        return lock
+
+
 
 @app.api_route("/api/playable-video", methods=["GET", "HEAD"])
 async def playable_video(url: str):
@@ -7385,23 +7420,30 @@ async def playable_video(url: str):
     if not is_faststart_video_source(path):
         return FileResponse(path, media_type=content_type_for_path(path))
 
-    cache_path, public_url = playable_video_cache_path(path)
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-        return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
+    # 2026-10-27：构建 per-key 去重——转封装进行中时，同一视频的其余请求等同一个结果，
+    # 不再各自再起一个 ffmpeg（画布重渲染会让同一 URL 短时间内来多个请求）。
+    async with media_build_lock(f"playable:{os.path.abspath(path)}"):
+        cache_path, public_url = playable_video_cache_path(path)
+        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+            return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
 
-    # 2026-10-24：已是 faststart 的 mp4 直接 307 到原始文件，跳过 ffmpeg 转封装。
-    # 此前首次访问要现场转封装（大文件几秒到几十秒），期间视频元数据拿不到——
-    # 前端播放条时长一直 0:00、画面出不来（预热是响应返回后才跑，赶不上前端立刻切 URL）。
-    if is_already_faststart(path):
-        original_url = original_public_url_for(path)
-        if original_url:
-            return Response(status_code=307, headers={"Location": original_url, "Cache-Control": "no-store"})
+        # 2026-10-24：已是 faststart 的 mp4 直接 307 到原始文件，跳过 ffmpeg 转封装。
+        # 此前首次访问要现场转封装（大文件几秒到几十秒），期间视频元数据拿不到——
+        # 前端播放条时长一直 0:00、画面出不来（预热是响应返回后才跑，赶不上前端立刻切 URL）。
+        if is_already_faststart(path):
+            original_url = original_public_url_for(path)
+            if original_url:
+                # 2026-10-27（用户反馈：拖入的视频一直黑屏）：uploads 目录名可能是中文
+                # （如 Amazon.com_Harvopu_适用于_iPad…），Location 响应头必须 latin-1 可编码，
+                # 中文原样放进头会 UnicodeEncodeError → 500，视频永远加载不出来。
+                # Location 一律百分号编码（浏览器会正确解码回原路径）。
+                return Response(status_code=307, headers={"Location": urllib.parse.quote(original_url, safe="/:?=&"), "Cache-Control": "no-store"})
 
-    try:
-        await asyncio.to_thread(build_playable_video_sync, path)
-        return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
-    except Exception as exc:
-        raise HTTPException(status_code=415, detail=f"无法生成可播放视频：{exc}") from exc
+        try:
+            await asyncio.to_thread(build_playable_video_sync, path)
+            return Response(status_code=307, headers={"Location": public_url, "Cache-Control": "no-store"})
+        except Exception as exc:
+            raise HTTPException(status_code=415, detail=f"无法生成可播放视频：{exc}") from exc
 
 # ===== 2026-10-22（用户要求：视频截取片段，右侧连出新节点）=====
 # 胶片条：均匀抽 N 帧 base64 JPEG（前端截取编辑器用）；截取：ffmpeg 流复制裁剪，
@@ -10574,6 +10616,12 @@ async def save_remote_video_to_output(url, prefix="video_", category="output"):
                 f.write(response.content)
             if os.path.getsize(path) <= 0:
                 raise RuntimeError("empty video response")
+            # 2026-10-27（用户反馈：生成的视频显示很慢）：落盘即后台预热海报 + faststart，
+            # 节点切正式 URL 时缓存已就绪，不再现场 ffmpeg（上传路径早有此预热，生成路径漏了）。
+            try:
+                asyncio.create_task(prewarm_video_caches_async(path))
+            except Exception:
+                pass
             return output_url_for(filename, category)
     except Exception as e:
         print(f"保存上游视频失败: {e}")
@@ -21512,6 +21560,16 @@ def generate(req: GenerateRequest, progress_callback=None):
                 local_texts.append(local_path)
                 local_items.append(entry)
                 local_urls.append(local_path)
+
+            # 2026-10-27（用户反馈：生成的视频显示很慢）：ComfyUI 工作流的视频产物落盘后
+            # 立即后台预热海报 + faststart（与上传/API 生成路径同口径），节点渲染时缓存已就绪。
+            for _video_url in local_videos:
+                try:
+                    _video_path = output_file_from_url(_video_url)
+                    if _video_path and os.path.isfile(_video_path):
+                        asyncio.create_task(prewarm_video_caches_async(_video_path))
+                except Exception:
+                    pass
 
         result = {
             "prompt": req.prompt if req.prompt else "Detail Enhance",

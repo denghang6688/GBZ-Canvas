@@ -33287,6 +33287,12 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
         });
     };
     const imgs = dedupeImgsByUrl(stripTextArtifactsFromVideoMedia(rawImgs) || rawImgs);
+    // 2026-10-27（用户反馈：生成的视频显示很慢）：生成完成的视频与拖入/上传一视同仁
+    // 标记进 fresh 窗口 —— 节点直接挂 <video preload="metadata"> 由浏览器自己解首帧，
+    // 不等服务端抽帧海报 / faststart 首次构建（首次请求现场 ffmpeg，期间是黑格子）。
+    (imgs || []).forEach(img => {
+        if(mediaKindForItem(img) === 'video') markSmartFreshUploadedVideo(img);
+    });
     // 2026-10-11（用户要求）：视频也走追加——appendPendingOutput 对 video 同样生效，
     // 新视频追加进节点，不再替换上一个视频（与等待态的「旧视频+占位格」预览一致）。
     const appendOutput = Boolean(pendingNode.appendPendingOutput);
