@@ -665,6 +665,9 @@ let gridJoinOutputSize = 2048;
 let gridJoinCustomRatio = '';
 // 非空时表示当前宫格拼接的数据源是整个分组（聚合组内所有图片成员），而不是单个节点。
 let gridJoinGroupId = '';
+// 2026-10-27（用户要求）：框选工具条「宫格拼接」的数据源——非空时表示当前拼接素材来自
+// 框选的多个节点（而非某个分组/单节点），编辑器关闭时随 gridJoinGroupId 一并清空。
+let gridJoinSelectionRefs = [];
 let imageEditZoom = 1.0;
 let imageEditBaseW = 0;
 let imageEditBaseH = 0;
@@ -21528,10 +21531,13 @@ function smartSelectionToolbarHtml(){
     // 只有选中内容里真的有图像才显示这个按钮；视频/音频素材不参与。
     const selectedNodes = metrics.ids.map(id => nodes.find(node => node.id === id)).filter(Boolean);
     const downloadCount = smartSelectionDownloadItems(selectedNodes).length;
+    // 2026-10-27（用户要求）：框选素材 ≥2 张才显示「宫格拼接」（与下载按钮同一套收集口径，去重后计）。
+    const gridCount = smartSelectionDownloadItems(selectedNodes).length;
     const actions = [
         {key:'arrange', icon:'layout-grid', label:'整理排列'},
         {key:'group', icon:'group', label:'成组'},
         {key:'workflowGroup', icon:'box-select', label:'创建工作流组'},
+        ...(gridCount > 1 ? [{key:'grid', icon:'grid-3x3', label:'宫格拼接'}] : []),
         ...(downloadCount ? [{key:'download', icon:'download', label:`下载 ${downloadCount} 张图`}] : [])
     ];
     return `<div class="smart-selection-frame" style="left:${metrics.frameX}px;top:${metrics.frameY}px;width:${metrics.frameW}px;height:${metrics.frameH}px"></div>
@@ -21690,6 +21696,7 @@ function bindSmartSelectionToolbar(){
             if(action === 'group') groupSelectedNodes();
             if(action === 'workflowGroup') createWorkflowGroupFromSelection();
             if(action === 'download') downloadSelectedNodeImages();
+            if(action === 'grid') openSelectionGridJoin();
         });
     });
     world.querySelectorAll('[data-smart-selection-port]').forEach(port => {
@@ -26508,6 +26515,19 @@ function gridSplitSettings(){
     return {rows:hLines + 1, cols:vLines + 1, gap:syncGridGapValue()};
 }
 function currentGridJoinItems(){
+    // 框选拼接：聚合框选的多个节点的图片（openSelectionGridJoin 写入 gridJoinSelectionRefs）。
+    if(gridJoinSelectionRefs.length){
+        const seen = new Set();
+        const items = [];
+        gridJoinSelectionRefs.forEach(ref => {
+            if(!ref?.item?.url || seen.has(ref.item.url)) return;
+            seen.add(ref.item.url);
+            if(mediaKindForItem(ref.item) === 'image'){
+                items.push({item:ref.item, source:ref.source, index:items.length});
+            }
+        });
+        if(items.length > 1) return items;
+    }
     // 分组拼接：聚合组内所有图片成员的图片，按阅读顺序给出连续索引（source 指向真实图片对象以写回自然尺寸）。
     if(gridJoinGroupId){
         const group = nodes.find(n => n.id === gridJoinGroupId && isSmartGroupNode(n));
@@ -26537,6 +26557,29 @@ function openGroupGridJoin(group){
 }
 function canGridJoinCurrentNode(){
     return currentGridJoinItems().length > 1;
+}
+// 2026-10-27（用户要求）：从框选工具条打开「宫格拼接」——把框选的多个节点的图片聚合成
+// 一个拼接数据源（与分组拼接同一条渲染/输出链路），锚定在第一张图片所在节点打开编辑器。
+function openSelectionGridJoin(){
+    const selectedNodes = selectedNodeIds().map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    const refs = [];
+    const seen = new Set();
+    selectedNodes.forEach(node => {
+        (node?.images || []).forEach((img, index) => {
+            const item = imageForDisplay(img);
+            if(!item?.url || seen.has(item.url) || mediaKindForItem(item) !== 'image') return;
+            seen.add(item.url);
+            refs.push({nodeId:node.id, index, source:img, item});
+        });
+    });
+    if(refs.length <= 1){ toast('框选至少 2 张图片才能宫格拼接'); return; }
+    const first = refs[0];
+    openImageEditor(first.nodeId, first.index);
+    if(!imageEditModal.classList.contains('open')) return;
+    gridJoinGroupId = '';
+    gridJoinSelectionRefs = refs;
+    setImageEditMode('grid', true);
+    setGridOperationMode('join');
 }
 function gridJoinAutoDims(count){
     const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
@@ -27429,7 +27472,7 @@ function openImageEditor(nodeId, imageIndex=0){
     localEditRestoredRects = editorPlanSource ? (Array.isArray(node.localInpaintPlan.rects) && node.localInpaintPlan.rects.length ? node.localInpaintPlan.rects : (node.localInpaintPlan.rect ? [node.localInpaintPlan.rect] : [])) : [];
     const editorBaseImage = editorPlanSource ? {...image, url:editorPlanSource.url, name:editorPlanSource.name || image.name} : image;
     gridCustomMode = false; gridCustomLines = []; gridCustomHistory = []; gridCustomDrag = null; gridCustomOrientation = 'h';
-    gridOperationMode = 'split'; gridJoinLayout = null; gridJoinDrag = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridJoinGroupId = '';
+    gridOperationMode = 'split'; gridJoinLayout = null; gridJoinDrag = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridJoinGroupId = ''; gridJoinSelectionRefs = [];
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeShortEdge = 512; imageEditModeTouched = false;
     cropAspectPreset = 'free'; cropAspectRatio = null; syncCropRatioButtons();
     outpaintAspectPreset = 'free'; outpaintAspectRatio = null; syncOutpaintRatioButtons();
@@ -27531,7 +27574,7 @@ function closeImageEditor(){
         previewVideo.style.display = 'none';
     }
     clearEditDrawing(true);
-    cropState = null; cropDrag = null; editDrawState = null; resetEditDrawingHistory(); gridCustomDrag = null; gridJoinDrag = null; gridJoinLayout = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridOperationMode = 'split'; gridJoinGroupId = '';
+    cropState = null; cropDrag = null; editDrawState = null; resetEditDrawingHistory(); gridCustomDrag = null; gridJoinDrag = null; gridJoinLayout = null; gridJoinImageCache = new Map(); gridJoinUserMoved = false; gridJoinCustomRatio = ''; gridOperationMode = 'split'; gridJoinGroupId = ''; gridJoinSelectionRefs = [];
     localEditReplaceImage = null; hideLocalReplaceMenu();
     previewNavState = {nodeId:'', index:0, count:0};
     imageEditZoom = 1.0; imageEditBaseW = 0; imageEditBaseH = 0; imageResizeShortEdge = 512; imageEditModeTouched = false;
