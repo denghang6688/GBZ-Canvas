@@ -3122,7 +3122,8 @@ select {
    （删除/改尺寸/预览/宫格拼接/批量下载/解散分组）整个裁掉——这是「成组后组顶部按钮不见了」的根因。
    圆角裁切由 .smart-group-card 承担。 */
 .smart-group-node .node-body { width:100%; height:100%; min-height:0; padding:0; align-items:stretch; justify-content:stretch; box-sizing:border-box; }
-.theme-dark .smart-group-node { background:rgba(16,16,16,.28); border-color:rgba(154,154,154,.28); }
+/* 2026-10-28（用户参考外部产品截图）：工作流组面板比画布底色浅一档（白色低透明叠加） */
+.theme-dark .smart-group-node { background:rgba(255,255,255,.055); border-color:rgba(154,154,154,.28); }
 .smart-group-node:hover { border-color:var(--strong); box-shadow:0 10px 30px rgba(16,16,16,.08); }
 .smart-group-node.selected { border-color:var(--strong); box-shadow:0 0 0 1px var(--strong), 0 14px 36px var(--shadow); }
 /* 鍥剧墖缃戞牸/鍗曞浘涓嶈琚?node-body 鐨?stretch 绾靛悜鎷夋弧鈥斺€斿惁鍒欓珮搴︽伆濂界瓑浜庡唴瀹规椂涔熶細瑙﹀彂婊氬姩鏉°€?   璁╁畠浠寜鍐呭鑷€傚簲锛堢敱 thumb-grid 鐨?max-height 鍐冲畾鏄惁婊氬姩锛夛紝鍙湁瓒呰繃 4 鎺掓墠鍑虹幇涓嬫媺鏉°€?*/
