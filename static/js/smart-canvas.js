@@ -15455,15 +15455,16 @@ function setSmartFrameOpacity(value, options={}){
 }
 setSmartFrameOpacity(smartFrameOpacity, {render:false, force:true});
 const WORKFLOW_GROUP_COLOR_PRESETS = [
-    {key:'default', label:'石墨', bg:'rgba(54,54,50,.7)', border:'rgba(194,190,174,.74)', dot:'rgba(194,190,174,0)', swatch:'#b9b29d'},
-    {key:'clay', label:'陶土', bg:'rgba(82,43,34,.7)', border:'rgba(230,129,96,.78)', dot:'rgba(230,129,96,0)', swatch:'#e48160'},
-    {key:'rose', label:'玫瑰', bg:'rgba(84,34,52,.7)', border:'rgba(226,105,142,.78)', dot:'rgba(226,105,142,0)', swatch:'#e2698e'},
-    {key:'sand', label:'琥珀', bg:'rgba(82,63,25,.7)', border:'rgba(232,184,78,.78)', dot:'rgba(232,184,78,0)', swatch:'#e8b84e'},
-    {key:'sage', label:'青绿', bg:'rgba(35,72,44,.7)', border:'rgba(113,197,124,.78)', dot:'rgba(113,197,124,0)', swatch:'#71c57c'},
-    {key:'teal', label:'松石', bg:'rgba(22,76,82,.7)', border:'rgba(80,202,211,.78)', dot:'rgba(80,202,211,0)', swatch:'#50cad3'},
-    {key:'mistblue', label:'钢蓝', bg:'rgba(34,57,92,.7)', border:'rgba(103,151,231,.78)', dot:'rgba(103,151,231,0)', swatch:'#6797e7'},
-    {key:'iris', label:'鸢尾', bg:'rgba(58,42,92,.7)', border:'rgba(166,119,230,.78)', dot:'rgba(166,119,230,0)', swatch:'#a677e6'},
-    {key:'mauve', label:'梅紫', bg:'rgba(74,38,67,.7)', border:'rgba(211,111,183,.78)', dot:'rgba(211,111,183,0)', swatch:'#d36fb7'}
+    // 2026-10-28（用户要求）：默认改纯灰（原石墨带暖黄调）；彩色预设统一降饱和约 50%。
+    {key:'default', label:'石墨', bg:'rgba(52,52,52,.7)', border:'rgba(150,150,150,.6)', dot:'rgba(150,150,150,0)', swatch:'#9a9a9a'},
+    {key:'clay', label:'陶土', bg:'rgba(70,51,46,.7)', border:'rgba(196,146,129,.78)', dot:'rgba(196,146,129,0)', swatch:'#c39181'},
+    {key:'rose', label:'玫瑰', bg:'rgba(71,46,55,.7)', border:'rgba(195,135,153,.78)', dot:'rgba(195,135,153,0)', swatch:'#c38799'},
+    {key:'sand', label:'琥珀', bg:'rgba(68,58,39,.7)', border:'rgba(193,169,116,.78)', dot:'rgba(193,169,116,0)', swatch:'#c1a974'},
+    {key:'sage', label:'青绿', bg:'rgba(44,62,48,.7)', border:'rgba(134,176,139,.78)', dot:'rgba(134,176,139,0)', swatch:'#86b08b'},
+    {key:'teal', label:'松石', bg:'rgba(37,64,67,.7)', border:'rgba(112,173,178,.78)', dot:'rgba(112,173,178,0)', swatch:'#70adb2'},
+    {key:'mistblue', label:'钢蓝', bg:'rgba(48,60,77,.7)', border:'rgba(135,159,199,.78)', dot:'rgba(135,159,199,0)', swatch:'#879fc7'},
+    {key:'iris', label:'鸢尾', bg:'rgba(62,54,79,.7)', border:'rgba(170,146,202,.78)', dot:'rgba(170,146,202,0)', swatch:'#aa92ca'},
+    {key:'mauve', label:'梅紫', bg:'rgba(65,47,61,.7)', border:'rgba(186,136,172,.78)', dot:'rgba(186,136,172,0)', swatch:'#ba88ac'}
 ];
 function workflowGroupColorPreset(key){
     return WORKFLOW_GROUP_COLOR_PRESETS.find(item => item.key === key) || WORKFLOW_GROUP_COLOR_PRESETS[0];
