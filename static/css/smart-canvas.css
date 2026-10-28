@@ -5,12 +5,12 @@
     --shadow:rgba(16,16,16,.08); --strong:#111111; --strong-text:#fff;
 }
 .theme-dark {
-    --page:#050505; --grid:rgba(150,150,150,.08); --panel:rgba(18,18,18,.94); --card:#151515;
+    --page:#2a2a2a; --grid:rgba(150,150,150,.08); --panel:rgba(18,18,18,.94); --card:#151515;
     --text:#f1f1f1; --muted:#a6a6a6; --faint:#747474; --line:#2b2b2b; --soft:#101010;
     --shadow:rgba(0,0,0,.46); --strong:#f2f2f2; --strong-text:#080808;
 }
 .theme-custom {
-    --page:#050505;
+    --page:#2a2a2a;
     --grid:rgba(150,150,150,.12);
     --panel:rgba(18,18,18,.94);
     --card:#151515;
@@ -2747,8 +2747,8 @@ body.storyboard-script-open .smart-agent-fab {
 :root,
 .theme-dark,
 .theme-custom {
-    --page:#050505;
-    --grid:rgba(160,160,160,.055);
+    --page:#2a2a2a;
+    --grid:rgba(190,190,190,.10);
     --panel:#141414;
     --card:#1a1a1a;
     --text:#f2f2f2;
@@ -2816,8 +2816,8 @@ select {
 :root,
 .theme-dark,
 .theme-custom {
-    --page:#050505;
-    --grid:rgba(160,160,160,.055);
+    --page:#2a2a2a;
+    --grid:rgba(190,190,190,.10);
     --panel:#141414;
     --card:#1f1f1f;
     --text:#f2f2f2;
@@ -3153,8 +3153,8 @@ body.theme-dark,
 .theme-dark.theme-custom,
 html.theme-dark.theme-custom body,
 body.theme-dark.theme-custom {
-    --page:#050505;
-    --grid:rgba(160,160,160,.055);
+    --page:#2a2a2a;
+    --grid:rgba(190,190,190,.10);
     --panel:rgba(18,18,18,.94);
     --card:#151515;
     --text:#f2f2f2;
@@ -3171,7 +3171,7 @@ body.theme-dark.theme-custom {
 .theme-dark.shell,
 .theme-dark .shell {
     background-color:#050505;
-    background-image:radial-gradient(rgba(160,160,160,.055) 1px, transparent 1px);
+    background-image:radial-gradient(rgba(190,190,190,.10) 1px, transparent 1px);
 }
 
 .theme-dark .smart-back,
@@ -6511,7 +6511,7 @@ html.theme-dark,
 body.theme-dark,
 html.theme-custom,
 body.theme-custom {
-    --page:#050505 !important;
+    --page:#2a2a2a !important;
     --bg:#050505 !important;
     --panel:#141414 !important;
     --panel-solid:#141414 !important;
@@ -8427,8 +8427,8 @@ html.theme-dark,
 body.theme-dark,
 html.theme-custom,
 body.theme-custom {
-    --page:#101010 !important;
-    --bg:#101010 !important;
+    --page:#2a2a2a !important;
+    --bg:#2a2a2a !important;
     --grid:rgba(255,255,255,.115) !important;
     --smart-grid-dot:rgba(255,255,255,.115) !important;
 }
@@ -8442,14 +8442,14 @@ body.studio-theme-dark,
 html.studio-theme-dark body,
 html.theme-dark body .shell,
 html.studio-theme-dark body .shell {
-    background-color:#101010 !important;
+    background-color:#2a2a2a !important;
 }
 
 .shell,
 body.theme-dark .shell,
 html.theme-dark body .shell,
 html.studio-theme-dark body .shell {
-    background-color:#101010 !important;
+    background-color:#2a2a2a !important;
     background-image:radial-gradient(circle at center, var(--smart-grid-dot, rgba(255,255,255,.115)) 0 1px, transparent 1px) !important;
 }
 
@@ -8638,8 +8638,8 @@ html.theme-dark,
 body.theme-dark,
 html.theme-custom,
 body.theme-custom {
-    --smart-canvas-surface:#101010 !important;
-    --smart-canvas-rail:#101010 !important;
+    --smart-canvas-surface:#2a2a2a !important;
+    --smart-canvas-rail:#2a2a2a !important;
     --smart-canvas-control:#1a1a1a !important;
     --smart-canvas-control-hover:#222222 !important;
     --smart-canvas-control-active:#2a2a2a !important;
@@ -10876,7 +10876,7 @@ body.smart-agent-open {
 :root,
 .theme-dark,
 .theme-custom {
-    --page:#0d0d0d;
+    --page:#2a2a2a;
     --grid:rgba(140,140,140,.07);
     --panel:rgba(17,17,17,.94);
     --panel-solid:#121212;
