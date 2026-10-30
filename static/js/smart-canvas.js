@@ -353,6 +353,9 @@ let portDragState = null;
 let idlePortMagnetState = null;
 let saveTimer = null;
 let apiProviders = [];
+// 2026-10-30：设置中心「全测」的探测结果。不可用（无权限/不存在/超时）的 chat 模型
+// 从这里被过滤掉，画布节点模型、智能体模型、H3 优化模型的下拉都共用这一份。
+let modelProbeCache = {};
 let comfyWorkflows = [];
 // 2026-10-22（用户要求）ComfyUI 工作流分 6 类：生图 / 图像编辑 / 生视频 / 音频 / 放大扩图 / 工具。
 // 分类值来自后端（工作流 .config.json 里手写的 category，或后端按名称关键词 + 输出节点推断的 category），
@@ -7718,7 +7721,15 @@ function resolveChatProviderId(providerId=''){
 }
 function providerChatModels(providerId){
     const provider = chatApiProviders().find(p => p.id === providerId);
-    return [...new Set(provider?.chat_models || [])];
+    const all = [...new Set(provider?.chat_models || [])];
+    const kept = all.filter(model => !isProbeHiddenChatModel(providerId, model));
+    // 全被判定不可用时保底返回原列表，避免下拉整个空掉、连手选的机会都没有
+    return kept.length ? kept : all;
+}
+const PROBE_HIDDEN_REASONS = ['denied', 'notfound', 'incompatible'];
+function isProbeHiddenChatModel(providerId, model){
+    const entry = modelProbeCache?.[providerId]?.entries?.[model];
+    return !!(entry && !entry.ok && PROBE_HIDDEN_REASONS.includes(entry.reason || ''));
 }
 function resolveChatModel(model='', providerId=''){
     const models = providerChatModels(resolveChatProviderId(providerId));
@@ -12918,7 +12929,11 @@ function bindDynamicParams(){
 }
 async function loadConfig(){
     try {
-        const cfg = await fetch('/api/config').then(r => r.json());
+        const [cfg, probe] = await Promise.all([
+            fetch('/api/config').then(r => r.json()),
+            fetch('/api/providers/model-probe-cache', {cache:'no-store'}).then(r => r.json()).catch(() => null),
+        ]);
+        if(probe && probe.providers && typeof probe.providers === 'object') modelProbeCache = probe.providers;
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
         comfyInstanceCount = Math.max(1, (Array.isArray(cfg.comfy_instances) ? cfg.comfy_instances : []).filter(Boolean).length || 1);
         // 提供商配置已就绪即先渲染参数面板，避免等工作流/RunningHub 预取完成后参数才「突然刷新出来」。

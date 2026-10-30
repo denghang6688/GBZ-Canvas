@@ -96,11 +96,40 @@
         /* 多了一个测试按钮后，这一行的控件总宽刚好超出 54%，会把"清除"挤到第二行；
            单独给这行多一点空间并禁止换行，窄屏仍由下面的媒体查询接管 */
         @media (min-width:761px) {
-            #translateModelCard .row-act { max-width:58%; flex-wrap:nowrap; }
+            #translateModelCard .row-act { max-width:62%; flex-wrap:nowrap; }
             #translateModelCard .row-act .select { min-width:0; }
             #translateModelCard #translateProviderSelect { flex:0 1 108px; }
-            #translateModelCard #translateModelSelect { flex:1 1 160px; max-width:200px; }
+            #translateModelCard #translateModelSelect { flex:1 1 160px; max-width:190px; }
         }
+        .mini-btn--primary { border-color:var(--settings-text); }
+        /* 全测进度条：贴在卡片底边，2px，不占布局 */
+        #translateModelCard { position:relative; overflow:hidden; }
+        .probe-bar { position:absolute; left:0; right:0; bottom:0; height:2px; display:none; background:var(--settings-line); }
+        .probe-bar.show { display:block; }
+        .probe-bar > i { display:block; height:2px; width:0; background:var(--settings-text); transition:width .2s ease; }
+        .probe-link { border:0; background:transparent; padding:0; font:inherit; font-size:11.5px; color:var(--settings-text); text-decoration:underline; cursor:pointer; }
+        /* 详情可能有几十行，卡片限高 + 内层滚动，避免把整页撑长 */
+        .probe-details {
+            background:var(--settings-card); border:1px solid var(--settings-line); border-radius:12px;
+            padding:12px 14px; font-size:11.5px; color:var(--settings-muted);
+            display:flex; flex-direction:column; max-height:360px;
+        }
+        .probe-details-body { overflow-y:auto; flex:1 1 auto; min-height:0; margin-top:4px; padding-right:4px; }
+        .probe-details-body::-webkit-scrollbar { width:6px; }
+        .probe-details-body::-webkit-scrollbar-thumb { background:rgba(128,128,128,.35); border-radius:3px; }
+        .probe-details[hidden] { display:none; }
+        .probe-details-head { display:flex; align-items:center; gap:8px; color:var(--settings-text); }
+        .probe-details-head strong { font-size:12.5px; font-weight:800; }
+        .probe-details-head .probe-actions { margin-left:auto; display:flex; gap:6px; }
+        .probe-details-head .mini-btn { height:24px; padding:0 9px; font-size:11px; }
+        .probe-group { margin-top:12px; }
+        .probe-group-title { display:flex; align-items:center; gap:6px; font-size:11px; letter-spacing:.04em; font-weight:800; color:var(--settings-muted); }
+        .probe-row { display:flex; align-items:center; gap:8px; padding:3px 0; min-width:0; }
+        .probe-row .probe-x { color:#ff7b72; flex:0 0 auto; }
+        html:not(.theme-dark):not(.theme-custom) .probe-row .probe-x { color:#c0392b; }
+        .probe-row .probe-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--settings-text); }
+        .probe-row .probe-why { flex:0 0 auto; font-size:11px; color:var(--settings-muted); }
+        .probe-foot { margin-top:12px; padding-top:10px; border-top:1px solid var(--settings-line); font-size:11px; line-height:1.6; color:var(--settings-muted); }
 
         .row-act { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; max-width:54%; }
         .row-go { display:inline-flex; align-items:center; gap:5px; color:var(--settings-muted); font-size:12px; font-weight:750; white-space:nowrap; }
@@ -194,8 +223,13 @@
                         <select id="translateProviderSelect" class="select" style="min-width:112px" aria-label="翻译平台"></select>
                         <select id="translateModelSelect" class="select" style="min-width:150px" aria-label="翻译模型"></select>
                         <button id="translateModelTestBtn" class="mini-btn" type="button" title="发一次最小请求，确认该模型当前可用"><i data-lucide="zap"></i><span>测试</span></button>
+                        <button id="translateModelProbeBtn" class="mini-btn mini-btn--primary" type="button" title="检测该平台全部模型：隐藏用不了的，并自动换到可用的"><i data-lucide="radar"></i><span>全测</span></button>
                         <button id="translateModelClearBtn" class="mini-btn" type="button"><i data-lucide="rotate-ccw"></i><span>清除</span></button>
                     </span>
+                    <span id="translateProbeBar" class="probe-bar" aria-hidden="true"><i></i></span>
+                </div>
+
+                <div id="translateProbeDetails" class="probe-details" hidden></div>
                 </div>
             </div>
         </section>
@@ -409,11 +443,13 @@
             if(!translateModelSelect || !translateProviderSelect) return;
             const providerId = translateProviderSelect.value;
             const provider = translateChatProviders().find(p => p.id === providerId);
-            const models = [...new Set((provider?.chat_models || []).filter(Boolean))];
+            const all = [...new Set((provider?.chat_models || []).filter(Boolean))];
             const saved = localStorage.getItem(TRANSLATE_MODEL_KEY) || '';
+            // 探测判定用不了的默认不出现在下拉里；但当前选中的那个仍保留，避免"看不见却在用"
+            const models = all.filter(m => m === saved || !isModelHidden(providerId, m));
             const selected = models.includes(saved) ? saved : (models[0] || '');
             translateModelSelect.innerHTML = models.map(m =>
-                `<option value="${m}" ${m === selected ? 'selected' : ''}>${m}</option>`
+                `<option value="${m}" ${m === selected ? 'selected' : ''}>${m}${isModelHidden(providerId, m) ? '（不可用）' : ''}</option>`
             ).join('');
             updateTranslateModelState();
         }
@@ -422,10 +458,12 @@
             const providerId = translateProviderSelect?.value || '';
             const model = translateModelSelect?.value || '';
             const provider = translateChatProviders().find(p => p.id === providerId);
+            const hidden = hiddenModelCount(providerId);
+            const tail = hidden ? ` · 已隐藏 ${hidden} 个不可用` : '';
             if(providerId && model){
-                translateModelState.textContent = `当前：${provider?.name || providerId} · ${model}`;
+                translateModelState.textContent = `当前：${provider?.name || providerId} · ${model}${tail}`;
             } else {
-                translateModelState.textContent = '未设置，使用节点默认模型';
+                translateModelState.textContent = `未设置，使用节点默认模型${tail}`;
             }
         }
         function saveTranslateModel(){
@@ -435,7 +473,7 @@
             if(model) localStorage.setItem(TRANSLATE_MODEL_KEY, model);
             updateTranslateModelState();
         }
-        translateProviderSelect?.addEventListener('change', () => { renderTranslateModelOptions(); saveTranslateModel(); resetTranslateTest(); });
+        translateProviderSelect?.addEventListener('change', () => { renderTranslateModelOptions(); saveTranslateModel(); resetTranslateTest(); renderProbeDetails(); });
         translateModelSelect?.addEventListener('change', () => { saveTranslateModel(); resetTranslateTest(); });
         translateModelClearBtn?.addEventListener('click', () => {
             localStorage.removeItem(TRANSLATE_PROVIDER_KEY);
@@ -530,6 +568,319 @@
                 if(label) label.textContent = prevLabel || '测试';
             }
         });
+
+        // ===== 全测：逐个探活 → 隐藏用不了的 → 必要时自动换模型 =====
+        const translateModelProbeBtn = document.getElementById('translateModelProbeBtn');
+        const translateProbeBar = document.getElementById('translateProbeBar');
+        const translateProbeDetails = document.getElementById('translateProbeDetails');
+        let probeRunning = false;
+        let probeCancel = false;
+        let probeCache = {};
+        // 只隐藏「确定用不了」的；超时多半是平台限流，误判一次就把模型全删了，保留待复查
+        const PROBE_HIDDEN_REASONS = new Set(['denied', 'notfound', 'incompatible']);
+        const PROBE_REASON_LABELS = { denied:'无权限/未开通', notfound:'模型不存在', incompatible:'不支持文本对话', timeout:'超时', limited:'限流未判定', auth:'Key 无效', blocked:'账号欠费/风控', error:'其他错误', unsupported:'不支持探测' };
+        const PROBE_REASON_ORDER = ['denied', 'notfound', 'incompatible', 'timeout', 'limited', 'blocked', 'auth', 'error', 'unsupported'];
+
+        function escapeHtml(text){
+            return String(text == null ? '' : text).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+        }
+        function probeEntry(providerId, model){
+            const entries = probeCache?.[providerId]?.entries;
+            return entries && entries[model] ? entries[model] : null;
+        }
+        function isModelHidden(providerId, model){
+            if(!providerId || !model) return false;
+            const entry = probeEntry(providerId, model);
+            return !!(entry && !entry.ok && PROBE_HIDDEN_REASONS.has(entry.reason || ''));
+        }
+        function hiddenModelCount(providerId){
+            const provider = translateChatProviders().find(p => p.id === providerId);
+            return (provider?.chat_models || []).filter(m => isModelHidden(providerId, m)).length;
+        }
+        async function loadProbeCache(){
+            try {
+                const data = await fetch('/api/providers/model-probe-cache', {cache:'no-store'}).then(r => r.json());
+                probeCache = (data && data.providers) || {};
+            } catch(e) { probeCache = {}; }
+            renderTranslateModelOptions();
+            renderProbeDetails();
+        }
+        function setProbeProgress(done, total){
+            if(!translateProbeBar) return;
+            const on = probeRunning && total > 0;
+            translateProbeBar.classList.toggle('show', on);
+            const fill = translateProbeBar.querySelector('i');
+            if(fill) fill.style.width = on ? `${Math.min(100, Math.round(done / total * 100))}%` : '0%';
+        }
+        // 选「能用且适合翻译」的：先排除测试/内部模型和专用模型（vl/coder/omni…），
+        // 通用对话类（flash/chat/turbo/plus…）优先，最后才比延迟
+        const PROBE_BAD_NAME = /(test|sre|auto-handle|debug|bench|internal|demo|sandbox)/i;
+        // 含 mt（翻译专用）、coder、vl 等：能调用但不适合做通用改写/润色，自动切换时排后面
+        const PROBE_SPECIAL_NAME = /(coder|vl|vision|ocr|omni|reason|audio|asr|tts|embed|rerank|math|image|video)|(^|[-_\/])mt([-_\/]|$)/i;
+        // 主力通用模型（各家最常用来做改写/润色的那一档）优先，其它通用模型次之
+        const PROBE_GOOD_NAME = /(qwen[-.]?(plus|flash|max|turbo)|gpt-4o|gpt-4\.1|gpt-5|claude|gemini.*flash|deepseek-(chat|v3)|glm-4|kimi-k2|doubao|hunyuan|chat)/i;
+        const PROBE_OK_NAME = /(flash|turbo|mini|plus|instruct|air|general|max)/i;
+        function probeModelScore(name, ms){
+            let score = 0;
+            if(PROBE_BAD_NAME.test(name)) score += 1e7;
+            if(PROBE_SPECIAL_NAME.test(name)) score += 1e6;
+            if(PROBE_GOOD_NAME.test(name)) score += 0;
+            else score += PROBE_OK_NAME.test(name) ? 3e5 : 6e5;
+            return score + (ms || 0);
+        }
+        function pickBestModel(providerId, models){
+            const okList = models
+                .map(model => ({ model, entry: probeEntry(providerId, model) }))
+                .filter(item => item.entry && item.entry.ok);
+            if(!okList.length) return null;
+            okList.sort((a, b) => probeModelScore(a.model, a.entry.ms) - probeModelScore(b.model, b.entry.ms));
+            return okList[0];
+        }
+        function appendProbeDetailsLink(){
+            if(!translateTestState) return;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'probe-link';
+            btn.textContent = '查看详情';
+            btn.addEventListener('click', () => {
+                if(!translateProbeDetails) return;
+                translateProbeDetails.hidden = !translateProbeDetails.hidden;
+                if(!translateProbeDetails.hidden) renderProbeDetails();
+            });
+            translateTestState.appendChild(document.createTextNode(' · '));
+            translateTestState.appendChild(btn);
+        }
+        function shortProbeDetail(item){
+            if(item.reason === 'timeout') return `超时 · ${item.ms || 0}ms`;
+            const detail = String(item.detail || '');
+            const hit = detail.match(/"code"\s*:\s*"([^"]+)"/) || detail.match(/"type"\s*:\s*"([^"]+)"/);
+            const tag = hit ? hit[1] : (PROBE_REASON_LABELS[item.reason] || '');
+            return `${tag}${item.ms ? ` · ${item.ms}ms` : ''}`.trim();
+        }
+        async function runProbeAll(){
+            const providerId = translateProviderSelect?.value || '';
+            const provider = translateChatProviders().find(p => p.id === providerId);
+            const all = [...new Set((provider?.chat_models || []).filter(Boolean))];
+            if(!providerId || !all.length){ setTranslateTest('该平台没有可检测的对话模型', 'is-fail'); return; }
+            probeRunning = true;
+            probeCancel = false;
+            const label = translateModelProbeBtn?.querySelector('span');
+            const prevLabel = label ? label.textContent : '全测';
+            if(label) label.textContent = '取消';
+            if(translateModelProbeBtn){
+                translateModelProbeBtn.classList.add('is-testing');
+                translateModelProbeBtn.style.pointerEvents = 'auto';
+            }
+            if(translateProviderSelect) translateProviderSelect.disabled = true;
+            if(translateModelSelect) translateModelSelect.disabled = true;
+            const total = all.length;
+            let done = 0, ok = 0, bad = 0, unknown = 0;
+            let earlyStop = '';
+            let untrusted = false;
+            const batchSize = 30;
+            const startedAll = performance.now();
+            try {
+                for(let i = 0; i < all.length; i += batchSize){
+                    if(probeCancel) break;
+                    const batch = all.slice(i, i + batchSize);
+                    let payload = null;
+                    const ctrl = new AbortController();
+                    const kill = setTimeout(() => ctrl.abort(), 90000);
+                    try {
+                        payload = await fetch('/api/providers/probe-chat-models', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            signal: ctrl.signal,
+                            body: JSON.stringify({ provider: providerId, models: batch, concurrency: 6 })
+                        }).then(r => r.json());
+                    } catch(e){
+                        const why = e?.name === 'AbortError' ? '这一批 90 秒没有返回' : (e.message || '请求失败');
+                        setTranslateTest(`✕ 检测中断 · 已测 ${done} / ${total} · ${firstSentence(why)}`, 'is-fail');
+                        return;
+                    } finally {
+                        clearTimeout(kill);
+                    }
+                    const results = (payload && payload.results) || [];
+                    let poisoned = 0;
+                    results.forEach(item => {
+                        done++;
+                        if(item.ok) ok++;
+                        else if(PROBE_HIDDEN_REASONS.has(item.reason || '')) bad++;
+                        else unknown++;
+                        if(item.reason === 'auth' || item.reason === 'blocked') poisoned++;
+                    });
+                    setProbeProgress(done, total);
+                    const usedSec = Math.round((performance.now() - startedAll) / 1000);
+                    setTranslateTest(`检测中 ${done} / ${total} · 可用 ${ok} · 不可用 ${bad} · 未判定 ${unknown} · 已用 ${usedSec}s`, 'is-pending');
+                    // Key 失效 / 账号被风控：这类失败是"账号层面"的，继续测只会把整个列表判成不可用
+                    if(results.length && poisoned * 2 >= results.length){
+                        untrusted = true;
+                        earlyStop = poisoned === results.length
+                            ? '全部返回鉴权失败，Key 可能无效'
+                            : '账号欠费或被风控，多数模型被拒';
+                        setTranslateTest(`检测中止 · ${earlyStop}`, 'is-fail');
+                        break;
+                    }
+                    // 一批里过半超时 = 上游开始限流，继续测只会更慢，先停并把结论说清楚
+                    const timeouts = results.filter(item => item.reason === 'timeout').length;
+                    if(results.length && timeouts * 2 >= results.length && done < total){
+                        earlyStop = `上游限流，提前结束（只测了 ${done} / ${total}）`;
+                        setTranslateTest(`检测暂停 · ${earlyStop}`, 'is-pending');
+                        break;
+                    }
+                }
+                if(untrusted){
+                    // 这一轮的结果会把正常模型也标成不可用，干脆丢弃，别污染下拉列表
+                    try {
+                        await fetch('/api/providers/model-probe-cache/clear', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({ provider: providerId, models: [] })
+                        });
+                    } catch(e) {}
+                    probeCache = {};
+                    renderTranslateModelOptions();
+                    if(translateProbeDetails){ translateProbeDetails.hidden = true; translateProbeDetails.innerHTML = ''; }
+                    setTranslateTest(`✕ 检测中止 · ${earlyStop}；本轮结果已丢弃，稍后重试`, 'is-fail');
+                    return;
+                }
+                // 一个都没通：大概率是平台地址/接入点/Key 配错，不是 151 个模型全挂了。
+                // 这种情况不写入结果，避免把整个列表清空。
+                if(!probeCancel && ok === 0){
+                    try {
+                        await fetch('/api/providers/model-probe-cache/clear', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({ provider: providerId, models: [] })
+                        });
+                    } catch(e) {}
+                    probeCache = {};
+                    renderTranslateModelOptions();
+                    if(translateProbeDetails){ translateProbeDetails.hidden = true; translateProbeDetails.innerHTML = ''; }
+                    setTranslateTest('✕ 全部失败（0 个可用）· 更像平台地址/接入点配错了，未做任何隐藏 · 请先到 API 设置核对', 'is-fail');
+                    return;
+                }
+                await loadProbeCache();
+                if(probeCancel){
+                    setTranslateTest(`已取消 · 检测了 ${done} / ${total} · 可用 ${ok} · 不可用 ${bad}`, 'is-pending');
+                } else {
+                    const fastest = pickBestModel(providerId, all);
+                    const current = localStorage.getItem(TRANSLATE_MODEL_KEY) || translateModelSelect?.value || '';
+                    let switchedTo = '';
+                    if(fastest && (!current || isModelHidden(providerId, current))){
+                        localStorage.setItem(TRANSLATE_PROVIDER_KEY, providerId);
+                        localStorage.setItem(TRANSLATE_MODEL_KEY, fastest.model);
+                        switchedTo = fastest.model;
+                    }
+                    renderTranslateModelOptions();
+                    saveTranslateModel();
+                    const secs = ((performance.now() - startedAll) / 1000).toFixed(1);
+                    const head = switchedTo
+                        ? `✓ 已自动切换为 ${switchedTo}${fastest?.entry?.ms ? ` · ${fastest.entry.ms}ms` : ''}`
+                        : (fastest ? '✓ 当前模型可用，未切换' : '✕ 没有可用模型');
+                    const tailNote = earlyStop ? ` · ${earlyStop}` : '';
+                    setTranslateTest(`${head} · ${done} / ${total} 个：可用 ${ok} · 不可用 ${bad} · 未判定 ${unknown} · 用时 ${secs}s${tailNote}`, fastest ? 'is-ok' : 'is-fail');
+                    appendProbeDetailsLink();
+                    renderProbeDetails();
+                    if(bad && translateProbeDetails) translateProbeDetails.hidden = false;
+                }
+            } finally {
+                probeRunning = false;
+                if(label) label.textContent = prevLabel || '全测';
+                if(translateModelProbeBtn){
+                    translateModelProbeBtn.classList.remove('is-testing');
+                    translateModelProbeBtn.style.pointerEvents = '';
+                }
+                if(translateProviderSelect) translateProviderSelect.disabled = false;
+                if(translateModelSelect) translateModelSelect.disabled = false;
+                setProbeProgress(0, 0);
+                updateTranslateModelState();
+            }
+        }
+        function renderProbeDetails(){
+            if(!translateProbeDetails) return;
+            const providerId = translateProviderSelect?.value || '';
+            const provider = translateChatProviders().find(p => p.id === providerId);
+            const entries = probeCache?.[providerId]?.entries || {};
+            const checkedAt = probeCache?.[providerId]?.checked_at || '';
+            const models = Object.keys(entries);
+            if(!models.length){
+                translateProbeDetails.hidden = true;
+                translateProbeDetails.innerHTML = '';
+                return;
+            }
+            const groups = {};
+            models.forEach(model => {
+                const entry = entries[model];
+                if(!entry || entry.ok) return;
+                const reason = entry.reason || 'error';
+                (groups[reason] = groups[reason] || []).push({ model, ...entry });
+            });
+            const okCount = models.filter(m => entries[m] && entries[m].ok).length;
+            const timeText = checkedAt ? checkedAt.replace('T', ' ').slice(5, 16) : '';
+            const body = PROBE_REASON_ORDER.filter(reason => groups[reason]).map(reason => {
+                const items = groups[reason].slice().sort((a, b) => (a.ms || 0) - (b.ms || 0));
+                const rows = items.map(item => `
+                    <div class="probe-row">
+                        <span class="probe-x">✕</span>
+                        <span class="probe-name" title="${escapeHtml(item.model)}">${escapeHtml(item.model)}</span>
+                        <span class="probe-why">${escapeHtml(shortProbeDetail(item))}</span>
+                        <button class="probe-link" type="button" data-restore="${escapeHtml(item.model)}">恢复</button>
+                    </div>`).join('');
+                return `<div class="probe-group"><div class="probe-group-title">${escapeHtml(PROBE_REASON_LABELS[reason] || reason)} · ${items.length}</div>${rows}</div>`;
+            }).join('');
+            translateProbeDetails.innerHTML = `
+                <div class="probe-details-head">
+                    <strong>检测详情</strong>
+                    <span>${escapeHtml(provider?.name || providerId)} · ${models.length} 个模型${timeText ? ` · ${escapeHtml(timeText)}` : ''} · 可用 ${okCount}</span>
+                    <span class="probe-actions">
+                        <button class="mini-btn" type="button" data-probe-rerun><i data-lucide="radar"></i><span>重测</span></button>
+                        <button class="mini-btn" type="button" data-probe-clear><i data-lucide="eraser"></i><span>清空记录</span></button>
+                        <button class="mini-btn" type="button" data-probe-close><span>收起</span></button>
+                    </span>
+                </div>
+                <div class="probe-details-body">${body || '<div class="probe-group"><div class="probe-group-title">全部模型都可用</div></div>'}</div>
+                <div class="probe-foot">不可用模型只在本机过滤，不会改动 API 设置里的模型清单。限流、Key 无效这类「未判定」会保留，稍后重测即可。</div>`;
+            translateProbeDetails.querySelectorAll('[data-restore]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const model = btn.dataset.restore;
+                    try {
+                        const res = await fetch('/api/providers/model-probe-cache/restore', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({ provider: providerId, models: [model] })
+                        }).then(r => r.json());
+                        probeCache = (res && res.providers) || probeCache;
+                        renderTranslateModelOptions();
+                        renderProbeDetails();
+                    } catch(e) { /* 网络失败就保持原样 */ }
+                });
+            });
+            const rerunBtn = translateProbeDetails.querySelector('[data-probe-rerun]');
+            if(rerunBtn) rerunBtn.addEventListener('click', () => { if(!probeRunning) runProbeAll(); });
+            const clearBtn = translateProbeDetails.querySelector('[data-probe-clear]');
+            if(clearBtn) clearBtn.addEventListener('click', async () => {
+                try {
+                    const res = await fetch('/api/providers/model-probe-cache/clear', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({ provider: providerId, models: [] })
+                    }).then(r => r.json());
+                    probeCache = (res && res.providers) || {};
+                } catch(e) { probeCache = {}; }
+                renderTranslateModelOptions();
+                renderProbeDetails();
+                setTranslateTest('已清空探测记录，所有模型恢复显示', 'is-ok');
+            });
+            const closeBtn = translateProbeDetails.querySelector('[data-probe-close]');
+            if(closeBtn) closeBtn.addEventListener('click', () => { translateProbeDetails.hidden = true; });
+            if(window.lucide) lucide.createIcons();
+        }
+        translateModelProbeBtn?.addEventListener('click', () => {
+            if(probeRunning){ probeCancel = true; setTranslateTest('正在取消…', 'is-pending'); return; }
+            runProbeAll();
+        });
+
         async function loadTranslateProviders(){
             try {
                 const cfg = await fetch('/api/config', {cache:'no-store'}).then(r => r.json());
@@ -539,7 +890,7 @@
                 if(translateModelState) translateModelState.textContent = '加载平台列表失败，请刷新重试';
             }
         }
-        loadTranslateProviders();
+        loadTranslateProviders().then(() => loadProbeCache());
 
         if(window.lucide) lucide.createIcons();
     </script>

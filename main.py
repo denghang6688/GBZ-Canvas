@@ -14784,6 +14784,179 @@ async def test_provider_connection(payload: TestConnectionPayload):
                 pass
         return {"ok": False, "status": 0, "message": friendly_connect_error_detail(e, url)}
 
+# ===== 2026-10-30 批量模型连通性探测（设置中心「全测」）=====
+# 每个模型发一次最小请求（max_tokens=1），前端分批调用拿进度；结果落盘，
+# 所有模型下拉（设置页 / 画布节点 / 智能体）统一按这份缓存过滤。
+PROBE_CACHE_FILE = os.path.join(DATA_DIR, "model-probe-cache.json")
+PROBE_TIMEOUT_SECONDS = 8.0
+# 只有这三类算「真用不了」→ 从下拉隐藏；限流、鉴权、网络抖动不算模型坏，保留待复查。
+PROBE_HIDDEN_REASONS = ("denied", "notfound", "incompatible")
+
+
+def load_model_probe_cache() -> Dict[str, Any]:
+    try:
+        with open(PROBE_CACHE_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def save_model_probe_cache(cache: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = PROBE_CACHE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, PROBE_CACHE_FILE)
+    except OSError:
+        pass
+
+
+def classify_probe_failure(text: str) -> str:
+    low = str(text or "").lower()
+    # 账号级风控：短时间猛发请求会被平台判成"账号状态异常"，此时几乎所有模型都会失败，
+    # 不能当成"模型不可用"来隐藏，否则一次误判就把整个列表删空。
+    if "in good standing" in low or "account has been" in low and "denied" in low:
+        return "blocked"
+    if ("accessdenied.unpurchased" in low or "access to model denied" in low
+            or "product is not activated" in low or "does not support http call" in low
+            or "access denied" in low):
+        return "denied"
+    if "unsupported_format" in low or "format is empty" in low:
+        return "incompatible"
+    if ("model_not_found" in low or "model not exist" in low or "model not found" in low
+            or "does not exist or you do not have access" in low or "invalidendpointormodel" in low
+            or "已下架" in str(text or "") or "下线" in str(text or "")):
+        return "notfound"
+    if "rate limit" in low or "429" in low or "too many requests" in low:
+        return "limited"
+    if ("invalid_api_key" in low or "incorrect api key" in low or "unauthorized" in low or "401" in low
+            or "authentication failed" in low or "invalid token" in low):
+        return "auth"
+    return "error"
+
+
+class ProbeChatModelsPayload(BaseModel):
+    provider: str = ""
+    models: List[str] = []
+    concurrency: int = 4
+
+
+@app.post("/api/providers/probe-chat-models")
+async def probe_chat_models(payload: ProbeChatModelsPayload):
+    """探测一批 chat 模型是否真的能回话。单批最多 40 个，前端循环调用以拿到进度。"""
+    provider_id = (payload.provider or "").strip()
+    if not provider_id:
+        raise HTTPException(status_code=400, detail="缺少平台 id")
+    models = [str(m).strip() for m in (payload.models or []) if str(m or "").strip()][:40]
+    if not models:
+        return {"results": [], "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    concurrency = max(1, min(8, int(payload.concurrency or 4)))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def probe_one(model: str, client: httpx.AsyncClient) -> Dict[str, Any]:
+        async with semaphore:
+            started = time.perf_counter()
+            # realtime / omni-realtime 这类走 WebSocket 流式，HTTP 对话接口要么拒绝、要么一直推流不结束，
+            # 直接判"不支持文本对话"更准，也避免把一个批次拖住。
+            if re.search(r"realtime|-audio|/audio|(^|[-_/])(asr|tts)([-_/]|$)|embedding|rerank|cosyvoice|sambert|whisper|paraformer|sensevoice", model, re.I):
+                return {"model": model, "ok": False, "ms": 0, "reason": "incompatible",
+                        "detail": "实时/音频模型，不走文本对话接口"}
+            try:
+                ms_model = model if provider_id == "modelscope" else ""
+                base, headers, real_model = resolve_chat_provider(provider_id, model, ms_model)
+            except HTTPException as exc:
+                return {"model": model, "ok": False, "ms": 0, "reason": "unsupported",
+                        "detail": str(exc.detail or "")[:160]}
+            except Exception as exc:
+                return {"model": model, "ok": False, "ms": 0, "reason": "error", "detail": str(exc)[:160]}
+            url = f"{base}/chat/completions"
+
+            async def send(max_tokens: int):
+                body = {
+                    "model": real_model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0,
+                    "stream": False,
+                }
+                # wait_for 兜住"上游持续推流、httpx 读超时被不断重置"导致的不返回
+                return await asyncio.wait_for(
+                    client.post(url, headers=headers, json=body),
+                    timeout=PROBE_TIMEOUT_SECONDS + 3,
+                )
+
+            try:
+                resp = await send(1)
+                # 个别模型对 max_tokens 有下限（服务端报 Range of max_tokens），放宽后重试一次
+                if resp.status_code >= 400 and "max_tokens" in (resp.text or "").lower():
+                    resp = await send(32)
+                elapsed = int((time.perf_counter() - started) * 1000)
+                if resp.status_code < 400:
+                    return {"model": model, "ok": True, "ms": elapsed}
+                return {"model": model, "ok": False, "ms": elapsed,
+                        "reason": classify_probe_failure(resp.text), "detail": (resp.text or "")[:200]}
+            except (httpx.TimeoutException, asyncio.TimeoutError):
+                return {"model": model, "ok": False,
+                        "ms": int((time.perf_counter() - started) * 1000),
+                        "reason": "timeout", "detail": f"{int(PROBE_TIMEOUT_SECONDS)} 秒无响应"}
+            except Exception as exc:
+                return {"model": model, "ok": False,
+                        "ms": int((time.perf_counter() - started) * 1000),
+                        "reason": "error", "detail": str(exc)[:160]}
+
+    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
+        results = await asyncio.gather(*[probe_one(model, client) for model in models])
+
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    cache = load_model_probe_cache()
+    entry = cache.get(provider_id) if isinstance(cache.get(provider_id), dict) else {}
+    entries = entry.get("entries") if isinstance(entry.get("entries"), dict) else {}
+    for item in results:
+        entries[item["model"]] = {
+            "ok": bool(item.get("ok")),
+            "ms": int(item.get("ms") or 0),
+            "reason": item.get("reason") or "",
+            "detail": str(item.get("detail") or "")[:200],
+            "at": checked_at,
+        }
+    cache[provider_id] = {"checked_at": checked_at, "entries": entries}
+    save_model_probe_cache(cache)
+    return {"results": results, "checked_at": checked_at}
+
+
+@app.get("/api/providers/model-probe-cache")
+async def get_model_probe_cache():
+    return {"providers": load_model_probe_cache()}
+
+
+@app.post("/api/providers/model-probe-cache/restore")
+async def restore_probed_model(payload: ProbeChatModelsPayload):
+    """把某个模型从「不可用」里放回来（平台后来开通了，或本来就误判）。"""
+    provider_id = (payload.provider or "").strip()
+    model = (payload.models or [""])[0] if payload.models else ""
+    cache = load_model_probe_cache()
+    entry = cache.get(provider_id)
+    if isinstance(entry, dict) and isinstance(entry.get("entries"), dict) and model in entry["entries"]:
+        entry["entries"].pop(model, None)
+        save_model_probe_cache(cache)
+    return {"ok": True, "providers": cache}
+
+
+@app.post("/api/providers/model-probe-cache/clear")
+async def clear_probe_cache(payload: ProbeChatModelsPayload):
+    """清空某个平台（不传 provider 则全清）的探测结果，等于恢复所有模型。"""
+    provider_id = (payload.provider or "").strip()
+    cache = load_model_probe_cache()
+    if provider_id:
+        cache.pop(provider_id, None)
+    else:
+        cache = {}
+    save_model_probe_cache(cache)
+    return {"ok": True, "providers": cache}
+
+
 @app.post("/api/providers/probe-async")
 async def probe_async_endpoint(payload: TestConnectionPayload):
     """验证异步协议：用假 task_id 请求 GET /v1/tasks/{fake_id}。
