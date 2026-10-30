@@ -7734,6 +7734,261 @@ async def video_trim(payload: VideoTrimRequest):
         "duration": round(trim_duration, 3),
     }
 
+# ===== Topaz 视频放大（本机 Topaz Video AI CLI，GPU 并发 1 排队）=====
+
+TOPAZ_FFMPEG_CANDIDATES = [
+    r"G:\ffmpeg.exe",
+    r"G:\Topaz Video\ffmpeg.exe",
+    r"C:\Topaz Video\ffmpeg.exe",
+    r"D:\Topaz Video\ffmpeg.exe",
+    r"E:\Topaz Video\ffmpeg.exe",
+    r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe",
+]
+TOPAZ_MODEL_DIR_CANDIDATES = [
+    r"C:\ProgramData\Topaz Labs LLC\Topaz Video\models",
+    r"D:\ProgramData\Topaz Labs LLC\Topaz Video\models",
+]
+# regular=Proteus 通用增强（对标第三方平台 Topazlabs 档）；star=Starlight Mini 扩散放大（画质最好、更慢）
+TOPAZ_MODEL_KEYS = {"regular": "prob-4", "star": "slm-1"}
+_topaz_lock = threading.Lock()
+_topaz_jobs: Dict[str, Dict[str, Any]] = {}
+_topaz_queue: List[str] = []
+_topaz_worker_thread: Optional[threading.Thread] = None
+
+def _find_topaz_ffmpeg():
+    for cand in TOPAZ_FFMPEG_CANDIDATES:
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+def _find_topaz_model_dir():
+    for cand in TOPAZ_MODEL_DIR_CANDIDATES:
+        if os.path.isdir(cand):
+            return cand
+    return None
+
+def _topaz_friendly_error(stderr_tail: str) -> str:
+    low = (stderr_tail or "").lower()
+    if "model not found" in low:
+        return "Topaz 模型不存在或未下载，打开一次 Topaz Video 界面后再试"
+    if "license" in low or "activat" in low or "not authorized" in low or "not signed in" in low:
+        return "Topaz 未激活：请先打开 Topaz Video 程序登录一次"
+    if "out of memory" in low or "vram" in low or "cuda_error_out_of_memory" in low:
+        return "显存不足：试试 2x 而不是 4x，或暂停 ComfyUI 等占用显卡的任务"
+    if "cuda" in low and ("error" in low or "fail" in low) or "no capable devices" in low:
+        return "GPU 被占用或驱动异常：暂停其他显卡任务后重试"
+    detail = (stderr_tail or "").strip().splitlines()
+    tail = detail[-1].strip() if detail else ""
+    return f"Topaz 处理失败：{tail[:200] or '未知错误'}"
+
+class TopazUpscaleRequest(BaseModel):
+    url: str
+    model: str = "regular"
+    scale: int = 2
+
+@app.post("/api/topaz/upscale")
+async def topaz_upscale(payload: TopazUpscaleRequest):
+    """Topaz 本地放大：建任务入队（GPU 并发 1），前端轮询 /api/topaz/status 取进度。"""
+    payload.model = str(payload.model or "regular").lower()
+    if payload.model not in TOPAZ_MODEL_KEYS:
+        raise HTTPException(status_code=400, detail="放大模型只支持 regular（常规模型）或 star（星光模型）")
+    try:
+        payload.scale = int(payload.scale)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="放大倍数只支持 2 或 4")
+    if payload.scale not in (2, 4):
+        raise HTTPException(status_code=400, detail="放大倍数只支持 2 或 4")
+    ffmpeg = _find_topaz_ffmpeg()
+    if not ffmpeg:
+        raise HTTPException(status_code=500, detail="未找到 Topaz 版 ffmpeg（G:\\Topaz Video\\ffmpeg.exe），请确认 Topaz Video 安装位置")
+    if not _find_topaz_model_dir():
+        raise HTTPException(status_code=500, detail="未找到 Topaz 模型目录（C:\\ProgramData\\Topaz Labs LLC\\Topaz Video\\models）")
+    path = output_file_from_url(payload.url)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    if not is_video_preview_file(path):
+        raise HTTPException(status_code=415, detail="不支持的文件格式")
+    duration = await asyncio.to_thread(probe_local_video_duration_seconds, path) or 0.0
+    if duration < 0.5:
+        raise HTTPException(status_code=400, detail="视频太短（少于 0.5 秒）")
+
+    task_id = uuid.uuid4().hex[:16]
+    model_name = TOPAZ_MODEL_KEYS[payload.model]
+    job = {
+        "task_id": task_id, "status": "queued", "model": payload.model,
+        "model_name": model_name, "scale": payload.scale,
+        "src_path": path, "src_url": payload.url, "duration": duration,
+        "progress": 0.0, "out_time": 0.0, "error": "", "url": "",
+        "created": time.time(),
+    }
+    out_name = f"topaz_{model_name.replace('-', '')}_{payload.scale}x_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.mp4"
+    job["out_path"] = os.path.join(OUTPUT_OUTPUT_DIR, out_name)
+    os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
+    with _topaz_lock:
+        _topaz_jobs[task_id] = job
+        _topaz_queue.append(task_id)
+    _kick_topaz_worker()
+    with _topaz_lock:
+        # 排队位置 = 正在运行的任务数 + 队列中排在它前面的任务数 + 1
+        running_cnt = sum(1 for j in _topaz_jobs.values() if j.get("status") == "running")
+        idx = _topaz_queue.index(task_id) if task_id in _topaz_queue else 0
+        pos = running_cnt + idx + 1
+    return {"task_id": task_id, "status": "queued", "queue_position": pos, "duration": round(duration, 3), "model": model_name, "scale": payload.scale}
+
+def _topaz_job_public(job: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "task_id": job["task_id"], "status": job["status"], "model": job["model_name"],
+        "scale": job["scale"], "progress": round(float(job.get("progress") or 0), 1),
+        "out_time": round(float(job.get("out_time") or 0), 1), "duration": round(float(job.get("duration") or 0), 1),
+        "error": job.get("error", ""), "url": job.get("url", ""),
+    }
+
+@app.get("/api/topaz/status")
+def topaz_status(task_id: str):
+    with _topaz_lock:
+        job = _topaz_jobs.get(task_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="任务不存在或已清理")
+        if job["status"] == "queued":
+            running_cnt = sum(1 for j in _topaz_jobs.values() if j.get("status") == "running")
+            idx = _topaz_queue.index(task_id) if task_id in _topaz_queue else 0
+            pub = _topaz_job_public(job); pub["queue_position"] = running_cnt + idx + 1
+            return pub
+        return _topaz_job_public(job)
+
+@app.post("/api/topaz/cancel")
+def topaz_cancel(payload: dict):
+    task_id = str(payload.get("task_id") or "")
+    with _topaz_lock:
+        job = _topaz_jobs.get(task_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="任务不存在或已清理")
+        if job["status"] in ("done", "error", "cancelled"):
+            return {"ok": True, "status": job["status"]}
+        job["status"] = "cancelled"
+        if task_id in _topaz_queue:
+            _topaz_queue.remove(task_id)
+        proc = job.get("_proc")
+    if proc and proc.poll() is None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    return {"ok": True, "status": "cancelled"}
+
+def _kick_topaz_worker():
+    global _topaz_worker_thread
+    with _topaz_lock:
+        if _topaz_worker_thread and _topaz_worker_thread.is_alive():
+            return
+        _topaz_worker_thread = threading.Thread(target=_topaz_worker_loop, daemon=True, name="topaz-upscale")
+        _topaz_worker_thread.start()
+
+_TOPAZ_TIME_RE = re.compile(r"out_time_us=(\d+)")
+
+def _topaz_worker_loop():
+    while True:
+        with _topaz_lock:
+            task_id = next((t for t in _topaz_queue if _topaz_jobs.get(t, {}).get("status") == "queued"), None)
+            if not task_id:
+                # 队列没有可跑的任务：只清掉已完成/已取消的残留 id（线程退出，下次入队会重新拉起）
+                for t in [t for t in _topaz_queue if _topaz_jobs.get(t, {}).get("status") != "queued"]:
+                    _topaz_queue.remove(t)
+                return
+            _topaz_queue.remove(task_id)
+            job = _topaz_jobs[task_id]
+            if job["status"] != "queued":
+                continue
+            job["status"] = "running"
+        _run_topaz_job(job)
+
+def _run_topaz_job(job: Dict[str, Any]):
+    ffmpeg = _find_topaz_ffmpeg()
+    model_dir = _find_topaz_model_dir()
+    task_id = job["task_id"]
+    cmd = [
+        ffmpeg, "-hide_banner", "-nostats", "-y",
+        "-i", job["src_path"],
+        "-filter:v", f"tvai_up=model={job['model_name']}:scale={job['scale']}",
+        "-progress", "pipe:1",
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-pix_fmt", "yuv420p", "-c:v", "h264_nvenc", "-b:v", "24M",
+        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+        job["out_path"],
+    ]
+    env = dict(os.environ)
+    if model_dir:
+        env["TVAI_MODEL_DIR"] = model_dir
+    stderr_tail = ""
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env)
+        with _topaz_lock:
+            job["_proc"] = proc
+        # stdout: -progress 键值对流；stderr 收尾读
+        total = max(0.1, float(job.get("duration") or 0))
+        import queue as _q
+        err_q: "_q.Queue[str]" = _q.Queue()
+        def _drain_err():
+            try:
+                for line in proc.stderr:
+                    err_q.put(line)
+            except Exception:
+                pass
+        threading.Thread(target=_drain_err, daemon=True).start()
+        out_us = 0
+        cancelled = False
+        for line in proc.stdout:
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key == "out_time_us":
+                try:
+                    out_us = int(val)
+                except ValueError:
+                    continue
+                with _topaz_lock:
+                    if job["status"] == "cancelled":
+                        cancelled = True
+                        break
+                    job["out_time"] = out_us / 1_000_000.0
+                    job["progress"] = min(99.0, out_us / 1_000_000.0 / total * 100.0)
+        while not err_q.empty():
+            stderr_tail += err_q.get_nowait()
+        ret = proc.wait(timeout=60)
+        while not err_q.empty():
+            stderr_tail += err_q.get_nowait()
+        with _topaz_lock:
+            cancelled = cancelled or job["status"] == "cancelled"
+        if cancelled:
+            job["status"] = "cancelled"
+            _cleanup_topaz_output(job)
+            return
+        ok = ret == 0 and os.path.isfile(job["out_path"]) and os.path.getsize(job["out_path"]) > 0
+        if ok:
+            job["status"] = "done"
+            job["progress"] = 100.0
+            job["url"] = f"/assets/output/{os.path.basename(job['out_path'])}"
+        else:
+            job["status"] = "error"
+            job["error"] = _topaz_friendly_error(stderr_tail)
+            _cleanup_topaz_output(job)
+    except Exception as exc:
+        job["status"] = "error"
+        job["error"] = f"Topaz 任务异常：{exc}"[:300]
+        _cleanup_topaz_output(job)
+    finally:
+        with _topaz_lock:
+            job.pop("_proc", None)
+
+def _cleanup_topaz_output(job: Dict[str, Any]):
+    try:
+        p = job.get("out_path")
+        if p and os.path.isfile(p) and os.path.getsize(p) == 0:
+            os.remove(p)
+    except OSError:
+        pass
+
 @app.get("/api/image-jpeg")
 async def image_jpeg(url: str, w: int = 0):
     """把任意图片转成 JPEG 返回（带缓存）。给不支持 WebP 等格式显示的客户端（PS UXP）用。

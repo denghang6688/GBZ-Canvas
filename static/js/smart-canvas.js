@@ -21315,6 +21315,8 @@ function smartNodeToolbarHtml(node){
         actions = [
             ...(node.uploadEntry === true ? [] : [{key:'preview', icon:'maximize-2', label:'放大', enabled:true}]),
             {key:'trim', icon:'scissors', label:'截取片段', enabled:true},
+            // 2026-10-30 Topaz 视频放大（本机 Topaz Video AI CLI，上传/结果/参考视频都可用）
+            {key:'topaz', icon:'wand-2', label:'Topaz 放大', enabled:true},
             {key:'depth', icon:'layers', label:'深度捕捉', enabled:true},
             {key:'download', icon:'download', label:'下载', enabled:true}
         ];
@@ -21616,6 +21618,19 @@ function runSmartNodeToolbarAction(nodeId, action){
         const depthUrl = item?.url || '';
         if(!depthUrl){ toast('视频地址缺失，无法深度捕捉'); return; }
         openSmartDepthCapturePanel(depthUrl, nodeId);
+        return;
+    }
+    if(action === 'topaz'){
+        // 2026-10-30 Topaz 视频放大：仅支持画布内的本地视频文件（/assets /output），
+        // 远程 http 视频需要先转存到画布。
+        const topazUrl = item?.url || '';
+        if(!topazUrl){ toast('视频地址缺失，无法放大'); return; }
+        const rawTopazUrl = smartOriginalMediaUrl(topazUrl) || topazUrl;
+        if(!/^\/(assets|output)\//.test(String(rawTopazUrl).split('?')[0]) && !/^https?:\/\/(127\.0\.0\.1|localhost)/.test(rawTopazUrl)){
+            toast('仅支持画布内的本地视频（远程视频请先上传到画布）');
+            return;
+        }
+        openSmartTopazPanel(topazUrl, nodeId);
         return;
     }
     if(action === 'download'){
@@ -43868,4 +43883,212 @@ function openSmartDepthCapturePanel(url, nodeId){
             runBtn.disabled = true;
         }
     })();
+}
+
+// ===== 2026-10-30 Topaz 视频放大（本机 Topaz Video AI CLI，GPU 并发 1 排队）=====
+let smartTopazPanelState = null;
+const SMART_TOPAZ_MODELS = {
+    regular: { name: 'prob-4', label: '常规模型', desc: '通用增强放大，速度均衡', badge: '默认' },
+    star:    { name: 'slm-1',  label: '星光模型', desc: '画质最好，更慢、更吃显存', badge: '' },
+};
+
+function closeSmartTopazPanel(){
+    const st = smartTopazPanelState;
+    smartTopazPanelState = null;
+    if(st){
+        clearInterval(st.pollTimer);
+        window.removeEventListener('keydown', st.onKey, true);
+        st.overlay?.remove();
+    }
+}
+
+function smartTopazNextTitle(scale){
+    const base = `Topaz ${scale}x 放大`;
+    let n = 1;
+    const used = new Set(nodes.map(node => String(node?.title || '').trim()));
+    while(used.has(`${base}${n > 1 ? ` ${n}` : ''}`)) n += 1;
+    return `${base}${n > 1 ? ` ${n}` : ''}`;
+}
+
+function smartTopazCreateResultNode(outputUrl, nodeId, info){
+    if(!outputUrl){ toast('放大结果地址缺失'); return; }
+    const srcNode = nodes.find(n => n.id === nodeId) || null;
+    const name = decodeURIComponent(String(outputUrl).split('/').pop().split('?')[0]) || 'topaz.mp4';
+    const title = smartTopazNextTitle(info?.scale || 2);
+    // topazResult:true —— Topaz 放大产物标记（与剪辑片段/深度视频区分，@ 候选过滤用）
+    const item = { url: outputUrl, kind: 'video', name, generatedResult: true, topazResult: true, topazScale: info?.scale || 2, topazModel: info?.model || '' };
+    let x, y;
+    const rect = srcNode ? nodeRect(srcNode) : null;
+    if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
+    else { const c = viewportCenter(); x = c.x; y = c.y; }
+    pushUndo();
+    const node = createNode(x, y, [item], { skipUndo: true });
+    if(node){
+        node.title = title;
+        if(srcNode) connectInputNode(srcNode.id, node.id);
+        scheduleSave();
+        render();
+        toast(`已生成「${title}」节点（原片保留，可继续操作）`);
+    } else {
+        scheduleSave();
+        toast('放大已完成，但节点创建失败，可在 assets/output 里找到输出文件');
+    }
+}
+
+// 节点上的进度/排队/错误覆盖层：轮询器直接操作 DOM，不进 render 循环（render 重建后下轮重插）
+function smartTopazNodeOverlay(nodeId){
+    const el = Array.from(document.querySelectorAll('.image-node')).find(n => n.dataset.id === nodeId);
+    if(!el) return null;
+    let ov = el.querySelector(':scope > .topaz-node-overlay');
+    if(!ov){
+        ov = document.createElement('div');
+        ov.className = 'topaz-node-overlay';
+        el.appendChild(ov);
+    }
+    return ov;
+}
+function smartTopazSetOverlay(nodeId, html){
+    const ov = smartTopazNodeOverlay(nodeId);
+    if(ov) ov.innerHTML = html;
+}
+function smartTopazClearOverlay(nodeId){
+    const el = Array.from(document.querySelectorAll('.image-node')).find(n => n.dataset.id === nodeId);
+    el?.querySelector(':scope > .topaz-node-overlay')?.remove();
+}
+
+function smartTopazPollTask(taskId, nodeId, info){
+    const poll = async () => {
+        try {
+            const res = await fetch(`/api/topaz/status?task_id=${encodeURIComponent(taskId)}`);
+            if(!res.ok){ return; }
+            const data = await res.json();
+            if(data.status === 'queued'){
+                smartTopazSetOverlay(nodeId, `<div class="tn-queue">排队中 · 第 ${data.queue_position || 1} 个</div><div class="tn-sub">${data.model || ''} ${data.scale}x</div>`);
+            } else if(data.status === 'running'){
+                const pct = Math.max(2, Math.min(99, Number(data.progress) || 2));
+                smartTopazSetOverlay(nodeId, `<div class="tn-row"><span class="tn-spin"></span>Topaz 放大中 · ${data.scale}x<span class="tn-pct">${pct.toFixed(0)}%</span></div><div class="tn-bar"><i style="width:${pct}%"></i></div><div class="tn-sub">${(Number(data.duration)||0).toFixed(1)}s 视频 · ${data.model || ''}</div>`);
+            } else if(data.status === 'done'){
+                clearInterval(timer);
+                smartTopazClearOverlay(nodeId);
+                smartTopazCreateResultNode(data.url, nodeId, info);
+            } else if(data.status === 'error'){
+                clearInterval(timer);
+                smartTopazSetOverlay(nodeId, `<div class="tn-err">${escapeHtml(data.error || '放大失败')}</div>`);
+                toast(`Topaz 放大失败：${data.error || '未知错误'}`);
+                setTimeout(() => smartTopazClearOverlay(nodeId), 6000);
+            } else if(data.status === 'cancelled'){
+                clearInterval(timer);
+                smartTopazClearOverlay(nodeId);
+            }
+        } catch(e) { /* 网络抖动下一轮重试 */ }
+    };
+    const timer = setInterval(poll, 1000);
+    poll();
+    return timer;
+}
+
+function openSmartTopazPanel(url, nodeId){
+    closeSmartTopazPanel();
+    // 记忆上次选择（模型/倍数），下次打开不用重选
+    const last = window.__smartTopazLastChoice || { model: 'regular', scale: 2 };
+    const overlay = document.createElement('div');
+    overlay.id = 'topazOverlay';
+    overlay.className = 'vtm-overlay topaz-overlay';
+    overlay.innerHTML = `
+        <div class="vtm-bar topaz-bar" role="dialog" aria-label="Topaz 视频放大">
+            <div class="topaz-head">
+                <div class="topaz-logo">TV</div>
+                <div>
+                    <div class="topaz-title">Topaz 视频放大</div>
+                    <div class="topaz-sub">本机 GPU 处理 · 不消耗平台次数</div>
+                </div>
+                <button type="button" class="vtm-x topaz-x" title="关闭">✕</button>
+            </div>
+            <div class="topaz-field">放大模型</div>
+            <div class="topaz-models" id="topazModels">
+                ${Object.entries(SMART_TOPAZ_MODELS).map(([key, m]) => `
+                    <button type="button" class="topaz-model-card ${key === last.model ? 'on' : ''}" data-v="${key}">
+                        <span class="tm-name">${escapeHtml(m.label)}${m.badge ? `<i class="tm-tag">${escapeHtml(m.badge)}</i>` : ''}</span>
+                        <span class="tm-desc">${escapeHtml(m.desc)}</span>
+                    </button>
+                `).join('')}
+            </div>
+            <div class="topaz-field">放大倍数</div>
+            <div class="topaz-seg" id="topazSegScale">
+                <button type="button" class="${Number(last.scale) === 2 ? 'active' : ''}" data-v="2">2x（1080P → 4K）</button>
+                <button type="button" class="${Number(last.scale) === 4 ? 'active' : ''}" data-v="4">4x</button>
+            </div>
+            <div class="topaz-hint">⚠ 放大期间显卡将被占用，建议暂停 ComfyUI 生图 / 生视频任务</div>
+            <div class="topaz-foot">
+                <button type="button" class="topaz-run" id="topazRun">开始放大</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    const state = { url, nodeId, overlay, pollTimer: null, onKey: null, busy: false };
+    smartTopazPanelState = state;
+
+    const segVal = sel => overlay.querySelector(`${sel} button.active`)?.dataset.v || '';
+    overlay.querySelector('#topazModels')?.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-v]');
+        if(!btn) return;
+        overlay.querySelectorAll('#topazModels .topaz-model-card').forEach(b => b.classList.toggle('on', b === btn));
+    });
+    overlay.querySelector('#topazSegScale')?.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-v]');
+        if(!btn) return;
+        overlay.querySelectorAll('#topazSegScale button').forEach(b => b.classList.toggle('active', b === btn));
+    });
+
+    const runBtn = overlay.querySelector('#topazRun');
+    runBtn.addEventListener('click', async () => {
+        if(state.busy) return;
+        state.busy = true;
+        const model = segVal('#topazModels') || 'regular';
+        const scale = Number(segVal('#topazSegScale') || 2);
+        window.__smartTopazLastChoice = { model, scale };
+        runBtn.disabled = true;
+        runBtn.textContent = '提交中…';
+        try {
+            const res = await fetch('/api/topaz/upscale', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, model, scale }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+            closeSmartTopazPanel();
+            toast(scale >= 4 ? '已提交 4x 放大（显存压力大，建议暂停其他显卡任务）' : '已提交 Topaz 放大任务');
+            smartTopazPollTask(data.task_id, nodeId, { model, scale });
+        } catch(err) {
+            state.busy = false;
+            runBtn.disabled = false;
+            runBtn.textContent = '开始放大';
+            toast(`提交失败：${err.message || '未知错误'}`);
+        }
+    });
+
+    overlay.querySelector('.topaz-x').addEventListener('click', () => closeSmartTopazPanel());
+    overlay.addEventListener('mousedown', e => { if(e.target === overlay) closeSmartTopazPanel(); });
+    state.onKey = e => { if(e.key === 'Escape'){ e.stopPropagation(); closeSmartTopazPanel(); } };
+    window.addEventListener('keydown', state.onKey, true);
+
+    // 面板定位在节点卡下方居中（与深度捕捉面板一致）
+    requestAnimationFrame(() => {
+        const bar = overlay.querySelector('.topaz-bar');
+        if(!bar?.isConnected) return;
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const rect = nodeEl?.getBoundingClientRect();
+        const barW = bar.offsetWidth || 360;
+        const barH = bar.offsetHeight || 380;
+        const center = rect
+            ? Math.max(barW / 2 + 12, Math.min(window.innerWidth - barW / 2 - 12, rect.left + rect.width / 2))
+            : window.innerWidth / 2;
+        const top = rect
+            ? Math.max(8, Math.min(window.innerHeight - barH - 12, rect.bottom + 10))
+            : Math.max(8, (window.innerHeight - barH) / 2);
+        bar.style.left = `${center}px`;
+        bar.style.top = `${top}px`;
+        bar.style.transform = 'translateX(-50%)';
+    });
 }
