@@ -2321,3 +2321,102 @@ html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact
 html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more .snm-lbl {
     display: none !important;
 }
+
+/* ===== 2026-10-30 晚（用户要求）组节点工具条补上中文名 =====
+   智能分组 / 工作流组 / 宫格分组 / 多图组 之前是纯图标，这几处漏了。
+   现在与普通节点同款：面板 40、按钮 32、图标 16、文字 12.5，
+   高频 3 键外露，其余收进「更多」下拉（弹层同样 port 到 body）。
+   旧规则用后代选择器 `... button`（26px / 11px 字号）压着，这里用更高特异度整段覆盖。 */
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-group-menu.snm-labeled,
+html body .world .image-node.image-node > .smart-node-floating-menu.workflow-group-menu.snm-labeled,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.smart-group-menu.snm-labeled {
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+    padding: 4px 10px !important;
+    gap: 4px !important;
+    border-radius: 14px !important;
+    overflow: visible !important;
+    align-items: center !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-group-menu.snm-labeled > button,
+html body .world .image-node.image-node > .smart-node-floating-menu.workflow-group-menu.snm-labeled > button,
+html body .world .image-node.image-node > .smart-node-floating-menu.snm-labeled .snm-more > button,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.smart-group-menu.snm-labeled > button,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.snm-labeled .snm-more > button {
+    width: auto !important;
+    min-width: 30px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 10px !important;
+    gap: 6px !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    border-radius: 10px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+    transform: none !important;
+}
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-group-menu.snm-labeled > button i,
+html body .world .image-node.image-node > .smart-node-floating-menu.smart-group-menu.snm-labeled > button svg,
+html body .world .image-node.image-node > .smart-node-floating-menu.workflow-group-menu.snm-labeled > button i,
+html body .world .image-node.image-node > .smart-node-floating-menu.workflow-group-menu.snm-labeled > button svg,
+html body .world .image-node.image-node > .smart-node-floating-menu.snm-labeled .snm-more > button > i:not(.snm-chev),
+html body .world .image-node.image-node > .smart-node-floating-menu.snm-labeled .snm-more > button > svg,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.snm-labeled > button i,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.snm-labeled > button svg,
+html body .world .image-node.grid-split-node > .smart-node-floating-menu.snm-labeled .snm-more > button > i:not(.snm-chev) {
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2.1 !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+}
+/* 组菜单里的文字节点：旧规则把字号压到 11，这里抬回 12.5 并强制显示 */
+html body .world .image-node .smart-node-floating-menu.snm-labeled .snm-lbl {
+    display: inline !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+}
+html body .world .image-node .smart-node-floating-menu.snm-labeled .snm-more {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    position: relative;
+}
+html body .world .image-node .smart-node-floating-menu.snm-labeled .snm-more .snm-chev {
+    width: 11px !important;
+    height: 11px !important;
+    margin-left: -1px !important;
+    stroke-width: 2.4 !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+    opacity: .72;
+}
+/* 组菜单里颜色触发键与文字键同高（旧规则 26px） */
+html body .world .image-node.image-node > .smart-node-floating-menu.snm-labeled .workflow-group-color-trigger {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    border-radius: 10px !important;
+}
+/* 小缩放（<35%）：文字与箭头回收，「更多」收成 32 方键 */
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.snm-labeled > button,
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.snm-labeled .snm-more > button {
+    width: 32px !important;
+    min-width: 32px !important;
+    padding: 0 !important;
+    gap: 0 !important;
+}
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.snm-labeled .snm-lbl {
+    display: none !important;
+}
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.snm-labeled .snm-more .snm-chev {
+    display: none !important;
+}

@@ -21327,12 +21327,12 @@ function smartNodeToolbarHtml(node){
         // 删除 / 改尺寸 / 预览 / 宫格拼接 / 批量下载 / 解开组件 + 背景颜色，
         // 不再放裁剪/扩图/局部编辑/画笔/标注/旋转镜像/整理排列这些编辑键。
         actions = [
-            {key:'delete', icon:'trash-2', label:'删除', enabled:true},
-            {key:'resize-batch', icon:'ruler', label:'改尺寸', enabled:imageCount > 0},
             {key:'preview', icon:'eye', label:'预览', enabled:mediaCount > 0},
             {key:'grid', icon:'grid-3x3', label:'宫格拼接', enabled:imageCount > 1},
             {key:'download-all', icon:'archive', label:'批量下载', enabled:mediaCount > 0},
-            {key:'ungroup', icon:'ungroup', label:'解开组件', enabled:mediaCount > 1}
+            {key:'resize-batch', icon:'ruler', label:'改尺寸', enabled:imageCount > 0},
+            {key:'ungroup', icon:'ungroup', label:'解开组件', enabled:mediaCount > 1},
+            {key:'delete', icon:'trash-2', label:'删除', enabled:true}
         ];
     } else if(kind === 'image' && lpPlanForNode(node)){
         // 2026-10-18（用户要求）遮罩工作台精简版：不要保存按钮（色块=选区，自动落盘）、
@@ -21381,27 +21381,32 @@ function smartNodeToolbarHtml(node){
     })() : '';
     // 2026-10-30（用户要求）工具条显示名称：图标 + 中文名并排（参考 LiblibAI 画布）。
     // 视频节点除下载外全外露带文字；图片节点 11 键只外露 4 个高频操作，其余收进「更多」下拉；
-    // 多图 Group（自带文字版式）与遮罩工作台（按钮文字是长说明）维持纯图标。
+    // 2026-10-30 晚（用户要求）多图组不再例外：与图片节点同款「4 键外露 + 更多」。
+    // 只有遮罩工作台维持纯图标（按钮文字是长说明）。
     const menuBtnHtml = (action, withLabel) => `
         <button type="button" class="${action.active ? 'active' : ''}" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i>${withLabel ? `<span class="snm-lbl">${escapeHtml(action.label)}</span>` : ''}
         </button>`;
     let menuInner = '';
-    let menuLabeled = false;   // 2026-10-30 带文字模式：皮肤 CSS 的 36px 定宽图标规则要绕开
-    if(!isMultiImageGroup && !lpPlanForBar && kind === 'video'){
+    let menuLabeled = false;   // 2026-10-30 带文字模式：皮肤 CSS 的定宽图标规则要绕开
+    if(!lpPlanForBar && kind === 'video'){
         const tail = actions.filter(a => a.key === 'download');
         const main = actions.filter(a => a.key !== 'download');
         menuLabeled = true;
         menuInner = main.map(a => menuBtnHtml(a, true)).join('')
             + (tail.length ? `<span class="snm-sep"></span>${tail.map(a => menuBtnHtml(a, false)).join('')}` : '');
-    } else if(!isMultiImageGroup && !lpPlanForBar && kind === 'image'){
-        // 高频 4 键外露；其余收「更多」。宽度约 380px（全展开会超 900px）。
+    } else if(!lpPlanForBar && kind === 'image'){
+        menuLabeled = true;
+        if(isMultiImageGroup){
+            // 2026-10-30 晚（用户要求）多图组与分组一致：全部平铺显示，不显示「更多」
+            menuInner = actions.map(a => menuBtnHtml(a, true)).join('');
+        } else {
+        // 高频键外露，其余收「更多」。单图节点：预览/裁剪/扩图/局部编辑（4 键，全展开会超 900px）。
         const SMM_EXPOSED = ['preview', 'crop', 'outpaint', 'local'];
         const SMM_MORE = ['resize', 'brush', 'annotate', 'transform', 'grid', 'clear-output'];
         const main = actions.filter(a => SMM_EXPOSED.includes(a.key));
         const more = actions.filter(a => SMM_MORE.includes(a.key));
         const tail = actions.filter(a => a.key === 'download');
-        menuLabeled = true;
         menuInner = main.map(a => menuBtnHtml(a, true)).join('')
             + (more.length ? `
             <div class="snm-more">
@@ -21411,6 +21416,7 @@ function smartNodeToolbarHtml(node){
                 <div class="snm-more-pop">${more.map(a => menuBtnHtml(a, true)).join('')}</div>
             </div>` : '')
             + (tail.length ? `<span class="snm-sep"></span>${tail.map(a => menuBtnHtml(a, false)).join('')}` : '');
+        }
     } else {
         menuInner = actions.map(a => menuBtnHtml(a, false)).join('');
     }
@@ -21431,16 +21437,18 @@ function gridSplitGroupToolbarHtml(node){
             `).join('')}
         </div>
     </div>`;
+    const gsid = escapeAttr(node.id);
+    // 2026-10-30 晚（用户要求）宫格分组同步「中文名」版式，不显示「更多」，全部平铺
+    const sBtn = (key, icon, label, enabled, extraClass = '') => `<button class="${extraClass}" type="button" data-smart-node-action="${key}" data-node-id="${gsid}" ${enabled ? '' : 'disabled'} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><i data-lucide="${icon}"></i><span class="snm-lbl">${escapeHtml(label)}</span></button>`;
     const buttons = [
-        `<button class="node-delete" type="button" data-node-id="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i><span>删除</span></button>`,
-        `<button type="button" data-smart-node-action="resize-batch" data-node-id="${escapeAttr(node.id)}" ${imageCount > 0 ? '' : 'disabled'} title="改尺寸"><i data-lucide="ruler"></i><span>改尺寸</span></button>`,
-        `<button type="button" data-smart-node-action="preview" data-node-id="${escapeAttr(node.id)}" ${imageCount > 0 ? '' : 'disabled'} title="预览"><i data-lucide="eye"></i><span>预览</span></button>`,
-        `<button type="button" data-smart-node-action="grid" data-node-id="${escapeAttr(node.id)}" ${imageCount > 1 ? '' : 'disabled'} title="宫格拼接"><i data-lucide="grid-3x3"></i><span>宫格拼接</span></button>`,
-        `<button type="button" data-smart-node-action="download-all" data-node-id="${escapeAttr(node.id)}" ${mediaCount > 0 ? '' : 'disabled'} title="批量下载"><i data-lucide="archive"></i><span>批量下载</span></button>`,
-        `<button type="button" data-smart-node-action="ungroup" data-node-id="${escapeAttr(node.id)}" ${mediaCount > 1 ? '' : 'disabled'} title="解散分组"><i data-lucide="ungroup"></i><span>解散分组</span></button>`,
-        colorPicker
-    ];
-    return `<div class="smart-node-floating-menu smart-group-menu grid-split-group-menu" data-grid-split-group-menu="1">${buttons.join('')}</div>`;
+        sBtn('preview', 'eye', '预览', imageCount > 0),
+        sBtn('grid', 'grid-3x3', '宫格拼接', imageCount > 1),
+        sBtn('download-all', 'archive', '批量下载', mediaCount > 0),
+        sBtn('resize-batch', 'ruler', '改尺寸', imageCount > 0),
+        sBtn('ungroup', 'ungroup', '解散分组', mediaCount > 1),
+        `<button class="node-delete" type="button" data-node-id="${gsid}" title="${escapeHtml(tr('smart.deleteNode'))}" aria-label="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i><span class="snm-lbl">${escapeHtml(tr('smart.deleteNode'))}</span></button>`
+    ].join('');
+    return `<div class="smart-node-floating-menu smart-group-menu grid-split-group-menu snm-labeled" data-grid-split-group-menu="1">${buttons}<span class="snm-sep"></span>${colorPicker}</div>`;
 }
 function duplicateSmartNodeMediaToCanvas(node, imageIndex){
     const source = node?.images?.[imageIndex];
@@ -21779,17 +21787,18 @@ function smartGroupToolbarHtml(node){
             `).join('')}
         </div>
     </div>`;
+    const gid = escapeAttr(node.id);
+    // 2026-10-30 晚（用户要求）智能分组也走「中文名」版式，且不显示「更多」，全部平铺
+    const gBtn = (key, icon, label, enabled) => `<button type="button" data-smart-group-action="${key}" data-node-id="${gid}" ${enabled ? '' : 'disabled'} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><i data-lucide="${icon}"></i><span class="snm-lbl">${escapeHtml(label)}</span></button>`;
     const buttons = [
-        `<button type="button" data-smart-group-action="delete" data-node-id="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.deleteNode'))}" aria-label="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`,
-        `<button type="button" data-smart-group-action="resize-batch" data-node-id="${escapeAttr(node.id)}" ${imageCount > 0 ? '' : 'disabled'} title="改尺寸" aria-label="改尺寸"><i data-lucide="ruler"></i></button>`,
-        arrangePicker,
-        `<button type="button" data-smart-group-action="preview" data-node-id="${escapeAttr(node.id)}" ${imageCount > 0 ? '' : 'disabled'} title="预览" aria-label="预览"><i data-lucide="eye"></i></button>`,
-        `<button type="button" data-smart-group-action="grid" data-node-id="${escapeAttr(node.id)}" ${imageCount > 1 ? '' : 'disabled'} title="宫格拼接" aria-label="宫格拼接"><i data-lucide="grid-3x3"></i></button>`,
-        `<button type="button" data-smart-group-action="download" data-node-id="${escapeAttr(node.id)}" ${imageCount > 0 ? '' : 'disabled'} title="批量下载" aria-label="批量下载"><i data-lucide="archive"></i></button>`,
-        `<button type="button" data-smart-group-action="ungroup" data-node-id="${escapeAttr(node.id)}" title="解散分组" aria-label="解散分组"><i data-lucide="ungroup"></i></button>`,
-        colorPicker
-    ];
-    return `<div class="smart-node-floating-menu smart-group-menu" data-smart-group-menu="1">${buttons.join('')}</div>`;
+        gBtn('preview', 'eye', '预览', imageCount > 0),
+        gBtn('grid', 'grid-3x3', '宫格拼接', imageCount > 1),
+        gBtn('download', 'archive', '批量下载', imageCount > 0),
+        gBtn('resize-batch', 'ruler', '改尺寸', imageCount > 0),
+        gBtn('ungroup', 'ungroup', '解散分组', true),
+        gBtn('delete', 'trash-2', tr('smart.deleteNode'), true)
+    ].join('');
+    return `<div class="smart-node-floating-menu smart-group-menu snm-labeled" data-smart-group-menu="1">${buttons}<span class="snm-sep"></span>${colorPicker}</div>`;
 }
 function groupColorPickerKey(kind, nodeId){
     return `${kind || 'group'}:${nodeId || ''}`;
@@ -22137,13 +22146,13 @@ function workflowGroupToolbarHtml(node){
             `).join('')}
         </div>
     </div>`;
-    return `<div class="smart-node-floating-menu workflow-group-menu" data-workflow-group-menu="1">${actions.slice(0, 2).map(action => `
-        <button type="button" data-workflow-group-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
-            <i data-lucide="${escapeAttr(action.icon)}"></i>
-        </button>`).join('')}${colorPicker}${actions.slice(2).map(action => `
-        <button type="button" data-workflow-group-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
-            <i data-lucide="${escapeAttr(action.icon)}"></i>
-        </button>`).join('')}</div>`;
+    const wid = escapeAttr(node.id);
+    // 2026-10-30 晚（用户要求）工作流组改为「中文名」版式，不显示「更多」，全部平铺
+    const wBtn = (action) => `<button type="button" data-workflow-group-action="${escapeAttr(action.key)}" data-node-id="${wid}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}"><i data-lucide="${escapeAttr(action.icon)}"></i><span class="snm-lbl">${escapeHtml(action.label)}</span></button>`;
+    const W_ORDER = ['run', 'edit', 'download-all', 'ungroup', 'createAsset', 'copyGroup', 'delete'];
+    const ordered = W_ORDER.map(k => actions.find(a => a.key === k)).filter(Boolean);
+    const buttons = ordered.map(wBtn).join('');
+    return `<div class="smart-node-floating-menu workflow-group-menu snm-labeled" data-workflow-group-menu="1">${buttons}<span class="snm-sep"></span>${colorPicker}</div>`;
 }
 function setWorkflowGroupColor(nodeId, colorKey){
     const group = nodes.find(n => n.id === nodeId);
