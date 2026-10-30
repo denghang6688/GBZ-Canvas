@@ -7841,6 +7841,43 @@ def _topaz_job_public(job: Dict[str, Any]) -> Dict[str, Any]:
         "scale": job["scale"], "progress": round(float(job.get("progress") or 0), 1),
         "out_time": round(float(job.get("out_time") or 0), 1), "duration": round(float(job.get("duration") or 0), 1),
         "error": job.get("error", ""), "url": job.get("url", ""),
+        "watermark": bool(job.get("watermark")),
+    }
+
+# 授权状态缓存：None=未知；True=已激活；False=未激活（输出会带试用水印）
+_topaz_license_state: Dict[str, Any] = {"activated": None}
+
+def _topaz_license_file_activated():
+    """按授权文件判断 Topaz 是否已激活。
+    真正激活后 Topaz 会把授权写到 Roaming Auth Path: Topaz.lic；未激活时该文件缺失，
+    或只剩全零 akey 的伪造/占位文件（这类文件不会生效，输出仍带试用水印）。"""
+    roaming = os.path.join(os.environ.get("APPDATA", ""), "Topaz Labs LLC", "Topaz Video", "Topaz.lic")
+    model_lic = os.path.join(r"C:\ProgramData\Topaz Labs LLC\Topaz Video\models", "Topaz.lic")
+    for path in (roaming, model_lic):
+        try:
+            if not os.path.isfile(path):
+                continue
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                body = fh.read(4000)
+            low = body.lower()
+            if "akey=0000-0000-0000-0000-0000" in low or 'sig="00"' in low:
+                continue  # 伪造/占位授权，视为未激活
+            if "topazlabs" in low:
+                return True
+        except OSError:
+            continue
+    return False
+
+@app.get("/api/topaz/license")
+def topaz_license():
+    """返回 Topaz 激活状态：未激活时输出会带试用水印，前端据此提前预警。"""
+    activated = _topaz_license_state["activated"]
+    if activated is None:
+        activated = _topaz_license_file_activated()
+        _topaz_license_state["activated"] = activated
+    return {
+        "activated": activated,
+        "hint": "" if activated else "Topaz 未激活：输出会带试用水印。在 Topaz Video 里登录账号激活后重跑即可去除水印",
     }
 
 @app.get("/api/topaz/status")
@@ -7934,7 +7971,8 @@ def _run_topaz_job(job: Dict[str, Any]):
                     err_q.put(line)
             except Exception:
                 pass
-        threading.Thread(target=_drain_err, daemon=True).start()
+        err_thread = threading.Thread(target=_drain_err, daemon=True)
+        err_thread.start()
         out_us = 0
         cancelled = False
         for line in proc.stdout:
@@ -7956,6 +7994,13 @@ def _run_topaz_job(job: Dict[str, Any]):
         while not err_q.empty():
             stderr_tail += err_q.get_nowait()
         ret = proc.wait(timeout=60)
+        # 等 stderr 收集线程把最后几行（含授权日志）送进队列再读，避免漏判水印
+        for _ in range(20):
+            while not err_q.empty():
+                stderr_tail += err_q.get_nowait()
+            if not (err_thread.is_alive() and err_q.empty()):
+                break
+            time.sleep(0.05)
         while not err_q.empty():
             stderr_tail += err_q.get_nowait()
         with _topaz_lock:
@@ -7965,6 +8010,15 @@ def _run_topaz_job(job: Dict[str, Any]):
             _cleanup_topaz_output(job)
             return
         ok = ret == 0 and os.path.isfile(job["out_path"]) and os.path.getsize(job["out_path"]) > 0
+        # 授权判定：未登录激活时 CLI 会打印 "[TopazAuthManager]parseAuth got detailsnull"，
+        # 输出带试用水印。仅用于预警（提示用户去 Topaz Video 登录），不做任何绕过。
+        low_err = (stderr_tail or "").lower()
+        compact_err = re.sub(r"\s+", "", low_err)
+        if "parseauthgotdetailsnull" in compact_err:
+            _topaz_license_state["activated"] = False
+            job["watermark"] = True
+        elif "topazauthmanager" in low_err:
+            _topaz_license_state["activated"] = True
         if ok:
             job["status"] = "done"
             job["progress"] = 100.0

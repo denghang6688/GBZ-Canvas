@@ -43916,7 +43916,7 @@ function smartTopazCreateResultNode(outputUrl, nodeId, info){
     const name = decodeURIComponent(String(outputUrl).split('/').pop().split('?')[0]) || 'topaz.mp4';
     const title = smartTopazNextTitle(info?.scale || 2);
     // topazResult:true —— Topaz 放大产物标记（与剪辑片段/深度视频区分，@ 候选过滤用）
-    const item = { url: outputUrl, kind: 'video', name, generatedResult: true, topazResult: true, topazScale: info?.scale || 2, topazModel: info?.model || '' };
+    const item = { url: outputUrl, kind: 'video', name, generatedResult: true, topazResult: true, topazScale: info?.scale || 2, topazModel: info?.model || '', topazWatermark: Boolean(info?.watermark) };
     let x, y;
     const rect = srcNode ? nodeRect(srcNode) : null;
     if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
@@ -43970,7 +43970,10 @@ function smartTopazPollTask(taskId, nodeId, info){
             } else if(data.status === 'done'){
                 clearInterval(timer);
                 smartTopazClearOverlay(nodeId);
-                smartTopazCreateResultNode(data.url, nodeId, info);
+                if(data.watermark){
+                    toast('放大完成，但 Topaz 未激活：输出带试用水印（在 Topaz Video 登录后重跑可去掉）');
+                }
+                smartTopazCreateResultNode(data.url, nodeId, { ...info, watermark: Boolean(data.watermark) });
             } else if(data.status === 'error'){
                 clearInterval(timer);
                 smartTopazSetOverlay(nodeId, `<div class="tn-err">${escapeHtml(data.error || '放大失败')}</div>`);
@@ -44019,6 +44022,7 @@ function openSmartTopazPanel(url, nodeId){
                 <button type="button" class="${Number(last.scale) === 4 ? 'active' : ''}" data-v="4">4x</button>
             </div>
             <div class="topaz-hint">⚠ 放大期间显卡将被占用，建议暂停 ComfyUI 生图 / 生视频任务</div>
+            <div class="topaz-warn" id="topazWarn" hidden></div>
             <div class="topaz-foot">
                 <button type="button" class="topaz-run" id="topazRun">开始放大</button>
             </div>
@@ -44072,6 +44076,20 @@ function openSmartTopazPanel(url, nodeId){
     overlay.addEventListener('mousedown', e => { if(e.target === overlay) closeSmartTopazPanel(); });
     state.onKey = e => { if(e.key === 'Escape'){ e.stopPropagation(); closeSmartTopazPanel(); } };
     window.addEventListener('keydown', state.onKey, true);
+
+    // 授权预警：Topaz 未激活时输出会带试用水印，提前告知，别等长任务跑完才发现
+    (async () => {
+        try {
+            const res = await fetch('/api/topaz/license');
+            if(!res.ok) return;
+            const data = await res.json();
+            const warn = overlay.querySelector('#topazWarn');
+            if(warn && data.activated === false){
+                warn.hidden = false;
+                warn.textContent = data.hint || 'Topaz 未激活：输出会带试用水印，请在 Topaz Video 里登录账号后再放大';
+            }
+        } catch(e) {}
+    })();
 
     // 面板定位在节点卡下方居中（与深度捕捉面板一致）
     requestAnimationFrame(() => {
