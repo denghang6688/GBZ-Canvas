@@ -377,7 +377,8 @@ let comfyWorkflowCategory = (() => {
     catch(e){ return ''; }
 })();
 let comfyInstanceCount = 1;
-let smartAgentOpen = true;
+// 2026-10-30（用户要求）：打开画布默认不展开 AI 助手，改为点右下角悬浮按钮/快捷键再打开。
+let smartAgentOpen = false;
 let smartAgentConversationId = '';
 let smartAgentBusy = false;
 let smartAgentMessagesState = [];
@@ -43304,7 +43305,8 @@ window.onload = async () => {
     initSmartVersionUpdater();
     refreshComfyQuickStatus();
     setInterval(refreshComfyQuickStatus, 10000);
-    setSmartAgentOpen(true);
+    // 2026-10-30：默认收起（仍会点亮右下角悬浮按钮），避免一进画布就遮挡右侧画布区域。
+    setSmartAgentOpen(smartAgentOpen);
 };
 
 // === 余额统计 ===
