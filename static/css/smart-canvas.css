@@ -20489,16 +20489,16 @@ html body #composer .composer-card {
 }
 
 /* ===== 2026-10-30 四角缺口再收一档（用户二次反馈「四边又出现黑色的角」）=====
-   原因链：卡片是不透明的 #262626，圆角之外、border-box 之内（每角一个 8×8 的三角）
+   原因链：卡片是不透明的 #262626，圆角之外、border-box 之内（每角一个三角）
    会露出画布；画布本身是深色渐变，于是那四个三角读作"黑色的角"。
-   8px → 3px 后缺口缩到 3×3，肉眼基本不可见；仍然保留一点圆角带来的柔化。
-   另加一层很轻的投影：面板浮在深色画布上，边缘本来没有分离度，投影能把残留的
-   1~2px 接缝盖成渐隐过渡，不会像"缺口"。 */
+   当时先用 3px 把缺口缩到肉眼不可见。
+   2026-10-30 晚用户要求「输入框改成 4 个圆角，8PX」→ 圆角回到 8px，
+   真正压住缺口的是下面这层投影（把 1~2px 的接缝盖成渐隐），肉眼不再读成黑角。 */
 html body #composer .composer-card {
-    border-radius: 3px !important;
+    border-radius: 8px !important;
     box-shadow: 0 14px 34px rgba(0, 0, 0, .40) !important;
 }
-/* 展开态压在整屏遮罩上、背后是均匀色，不需要跟着收到 3px；10px 保持大面板的柔和感 */
+/* 展开态压在整屏遮罩上、背后是均匀色，不需要跟着卡片走；10px 保持大面板的柔和感 */
 html body #composer.prompt-expanded .composer-card {
     border-radius: 10px !important;
 }
