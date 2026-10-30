@@ -11031,6 +11031,21 @@ def friendly_chat_error_detail(text, model="", provider=None):
         return "API Key 无效或已过期，请到「API 设置」检查 Key。"
     if "rate limit" in lower_text or "429" in lower_text:
         return "请求过于频繁，已被上游限流，请稍后再试。"
+    # 2026-10-30：模型层面的失败最常见（配了平台但该模型没开通 / 名字写错），
+    # 上游回的是整段 JSON，直接抛给用户没法读，这里翻成一句能下手的话。
+    if "accessdenied.unpurchased" in code_lc or "access to model denied" in message_lc:
+        return (
+            f"当前账号没有模型「{model_name or '未指定'}」的调用权限，"
+            f"可能需要先在平台控制台开通，或换一个已开通的模型。"
+        )
+    if code_lc in {"model_not_found", "invalidmodel", "model_not_exist"} or "model not exist" in message_lc or "model not found" in message_lc:
+        return f"模型「{model_name or '未指定'}」在该平台不存在或未开通，请换一个可用模型后重试。"
+    if "does not exist or you do not have access" in message_lc:
+        return f"平台找不到模型「{model_name or '未指定'}」，或当前 Key 无权访问它。"
+    if "insufficient_quota" in lower_text or "insufficient balance" in lower_text or "exceeded your current quota" in lower_text or "余额不足" in raw_text:
+        return "账号余额或额度不足，请到平台控制台充值后再试。"
+    if "invalid_api_key" in lower_text or "incorrect api key" in lower_text or "invalid key" in lower_text:
+        return "API Key 无效，请到「API 设置」重新填写并保存。"
     return ""
 
 async def generate_modelscope_provider_image(prompt, size, model, reference_images=None, provider=None):

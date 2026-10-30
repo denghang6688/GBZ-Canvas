@@ -83,6 +83,24 @@
         .row-text strong { font-size:13.5px; font-weight:800; color:var(--settings-text); line-height:1.35; }
         .row-text em { font-style:normal; font-size:12.5px; font-weight:600; line-height:1.66; color:var(--settings-muted); }
         .row-text .state { font-size:11.5px; line-height:1.5; min-height:16px; color:var(--settings-muted); }
+        /* 连通性测试结果：只在测过之后占位，避免默认多出一行空白 */
+        .row-text .state.test-state { display:none; font-variant-numeric:tabular-nums; }
+        .row-text .state.test-state.show { display:block; }
+        .state.test-state.is-pending { color:var(--settings-muted); }
+        .state.test-state.is-ok { color:var(--settings-text); }
+        .state.test-state.is-fail { color:#ff7b72; }
+        html:not(.theme-dark):not(.theme-custom) .state.test-state.is-fail { color:#c0392b; }
+        .mini-btn.is-testing { pointer-events:none; opacity:.62; }
+        .mini-btn.is-testing svg { animation:settings-spin .9s linear infinite; }
+        @keyframes settings-spin { to { transform:rotate(360deg); } }
+        /* 多了一个测试按钮后，这一行的控件总宽刚好超出 54%，会把"清除"挤到第二行；
+           单独给这行多一点空间并禁止换行，窄屏仍由下面的媒体查询接管 */
+        @media (min-width:761px) {
+            #translateModelCard .row-act { max-width:58%; flex-wrap:nowrap; }
+            #translateModelCard .row-act .select { min-width:0; }
+            #translateModelCard #translateProviderSelect { flex:0 1 108px; }
+            #translateModelCard #translateModelSelect { flex:1 1 160px; max-width:200px; }
+        }
 
         .row-act { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; max-width:54%; }
         .row-go { display:inline-flex; align-items:center; gap:5px; color:var(--settings-muted); font-size:12px; font-weight:750; white-space:nowrap; }
@@ -170,10 +188,12 @@
                         <strong>默认翻译大模型</strong>
                         <em>手写节点点击"文A"翻译时，优先使用此处选择的 API 大模型；未设置则沿用节点自身模型。</em>
                         <em id="translateModelState" class="state">未设置，使用节点默认模型</em>
+                        <em id="translateTestState" class="state test-state" role="status" aria-live="polite"></em>
                     </span>
                     <span class="row-act">
                         <select id="translateProviderSelect" class="select" style="min-width:112px" aria-label="翻译平台"></select>
                         <select id="translateModelSelect" class="select" style="min-width:150px" aria-label="翻译模型"></select>
+                        <button id="translateModelTestBtn" class="mini-btn" type="button" title="发一次最小请求，确认该模型当前可用"><i data-lucide="zap"></i><span>测试</span></button>
                         <button id="translateModelClearBtn" class="mini-btn" type="button"><i data-lucide="rotate-ccw"></i><span>清除</span></button>
                     </span>
                 </div>
@@ -415,12 +435,100 @@
             if(model) localStorage.setItem(TRANSLATE_MODEL_KEY, model);
             updateTranslateModelState();
         }
-        translateProviderSelect?.addEventListener('change', () => { renderTranslateModelOptions(); saveTranslateModel(); });
-        translateModelSelect?.addEventListener('change', saveTranslateModel);
+        translateProviderSelect?.addEventListener('change', () => { renderTranslateModelOptions(); saveTranslateModel(); resetTranslateTest(); });
+        translateModelSelect?.addEventListener('change', () => { saveTranslateModel(); resetTranslateTest(); });
         translateModelClearBtn?.addEventListener('click', () => {
             localStorage.removeItem(TRANSLATE_PROVIDER_KEY);
             localStorage.removeItem(TRANSLATE_MODEL_KEY);
             renderTranslateProviderOptions();
+            resetTranslateTest();
+        });
+
+        // ===== 一键测试连通性：用选中的平台+模型发一次最小请求，量往返耗时 =====
+        const translateModelTestBtn = document.getElementById('translateModelTestBtn');
+        const translateTestState = document.getElementById('translateTestState');
+        function setTranslateTest(text, kind, full){
+            if(!translateTestState) return;
+            translateTestState.textContent = text || '';
+            translateTestState.title = full || text || '';
+            translateTestState.classList.toggle('show', !!text);
+            translateTestState.classList.remove('is-ok', 'is-fail', 'is-pending');
+            if(text && kind) translateTestState.classList.add(kind);
+        }
+        function resetTranslateTest(){ setTranslateTest(''); }
+        // 失败时只占一行半：取第一句，完整原因放 title 里，避免把这一行撑成四行高
+        function firstSentence(text){
+            const s = String(text || '').trim();
+            const m = s.match(/^[\s\S]*?[。；;!！?？]/);
+            const one = (m ? m[0] : s).trim();
+            return one.length > 64 ? one.slice(0, 64) + '…' : one;
+        }
+        function formatLatency(ms){
+            return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+        }
+        // 上游把错误包成整段 JSON 直接透传时，抽出一句话来显示（后端已翻译常见错误，这里只兜底）
+        function humanizeUpstreamError(raw){
+            let s = String(raw || '').trim().replace(/^上游接口错误：/, '');
+            if(s.startsWith('{"error"') || s.startsWith('{ "error"')){
+                try {
+                    const o = JSON.parse(s);
+                    const msg = o?.error?.message || o?.message || '';
+                    const code = o?.error?.code || o?.code || '';
+                    if(msg) return code ? `${msg}（${code}）` : msg;
+                } catch(e) {}
+            }
+            return s;
+        }
+        translateModelTestBtn?.addEventListener('click', async () => {
+            const providerId = translateProviderSelect?.value || '';
+            const model = translateModelSelect?.value || '';
+            if(!providerId || !model){
+                setTranslateTest('请先选择平台和模型', 'is-fail');
+                return;
+            }
+            if(translateModelTestBtn.disabled) return;
+            const label = translateModelTestBtn.querySelector('span');
+            const prevLabel = label ? label.textContent : '';
+            translateModelTestBtn.disabled = true;
+            translateModelTestBtn.classList.add('is-testing');
+            if(label) label.textContent = '测试中';
+            setTranslateTest(`正在测试 ${model} …`, 'is-pending');
+            const started = performance.now();
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 45000);
+            try {
+                const res = await fetch('/api/llm/canvas', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        message:'只回复两个字：可用',
+                        messages:[], images:[], videos:[], files:[],
+                        model,
+                        provider: providerId,
+                        ms_model: providerId === 'modelscope' ? model : '',
+                        system_prompt:'你是连通性检测助手。只输出“可用”两个字，不要任何解释、标点或换行。'
+                    })
+                });
+                const elapsed = performance.now() - started;
+                let data = null;
+                try { data = await res.json(); } catch(e) {}
+                if(!res.ok){
+                    const detail = (data && (data.detail || data.message)) || `HTTP ${res.status}`;
+                    throw new Error(String(detail));
+                }
+                const echo = String((data && data.text) || '').replace(/\s+/g, ' ').trim();
+                setTranslateTest(`✓ 连通正常 · ${formatLatency(elapsed)}${echo ? ` · 回包「${echo.slice(0, 16)}」` : ''}`, 'is-ok');
+            } catch(err) {
+                const elapsed = performance.now() - started;
+                const raw = err?.name === 'AbortError' ? '请求超时（45 秒无响应）' : humanizeUpstreamError(err?.message || '请求失败');
+                setTranslateTest(`✕ 无法连通 · ${formatLatency(elapsed)} · ${firstSentence(raw)}`, 'is-fail', raw);
+            } finally {
+                clearTimeout(timer);
+                translateModelTestBtn.disabled = false;
+                translateModelTestBtn.classList.remove('is-testing');
+                if(label) label.textContent = prevLabel || '测试';
+            }
         });
         async function loadTranslateProviders(){
             try {
