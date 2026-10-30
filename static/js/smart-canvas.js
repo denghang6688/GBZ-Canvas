@@ -4942,15 +4942,18 @@ const MEDIA_GROUP_MAX_VISIBLE_ROWS = 3;
 const MEDIA_SINGLE_IMAGE_DEFAULT_EDGE = 280;
 // 智能分组卡片内的图片网格：超过这么多排就出现纵向滚动（区别于多图节点的 3 排）。
 const SMART_GROUP_MAX_VISIBLE_ROWS = 4;
-// 2026-10-10（用户要求：对齐 3000 端口「AI无限智能画布」的生成排列逻辑）：
-// 多图统一按「近方形宫格」排列 —— 2 张 = 2 列 1 行，3~4 张 = 2 列 2 行（3 张空 1 格），
-// 5~9 张 = 3 列，10 张以上 = 4 列，最多 4 列。生成中占位、完成后结果、追加结果都用它。
+// 2026-10-30（用户要求：生图组去掉「固定一行 4 个」，改为宫格自动换行）：
+// 多图统一按「近方形宫格」排 —— 列数 = ceil(√N)，末行只剩 1 个时列数 +1 避免孤行。
+// 4 张从「一行 4 个横条」变成 2×2，5 张 3+2，6 张 3+3，7 张 4+3（不是 3+3+1），
+// 8 张 3+3+2，9 张 3×3；2/3/10~12/16 张与旧口径一致。
+// 生成完成、等待占位框、loading 骨架、追加生成、3000 口径全都走它，改这里即全域生效。
 function smartGridColsForCount(count){
     const c = Math.max(1, Number(count) || 1);
-    // 2026-10-12（用户要求：输出多图默认一行 4 个横排，超过再换行；4 个以内不换行）：
-    // 列数 = min(4, 张数)，替换原 √N 口径（3~4 张 2×2 → 现在 3 张一行 3、4 张一行 4）。
     if(c <= 1) return 1;
-    return Math.min(4, c);
+    let cols = Math.ceil(Math.sqrt(c));
+    // 防孤行：末行只落 1 个格子时（7 张 → 3+3+1、13 张 → 4+4+4+1）多开一列，改成 4+3 / 5+5+3。
+    if(c % cols === 1) cols += 1;
+    return Math.min(c, cols);
 }
 const EMPTY_UPLOAD_NODE_WIDTH = 280;
 const EMPTY_UPLOAD_NODE_HEIGHT = 280;
@@ -5613,7 +5616,7 @@ function refitSmartGroupFrameAfterImageDelete(group, previousLayout=null){
     const edge = Math.max(28, Math.round(Number(previousLayout?.appendLongEdge || previousLayout?.thumb) || 0));
     if(!(edge > 0)) return false;
     // 2026-10-10（用户要求：删除后外框四周留白统一）——列数必须与渲染布局同源
-    // （smartGridColsForCount：2→2 列、3~4→2 列、5~9→3 列、10+→4 列）。
+    // （smartGridColsForCount：宫格 ceil(√N) + 防孤行，末行不会只剩 1 个）。
     // 旧的 min(4,count) 会把 3 张排 3 列、5 张排 4 列，与实际渲染的宫格列数不一致，
     // 反推出的组框尺寸错位 → 四周留白忽宽忽窄甚至裁图。
     const cols = smartGridColsForCount(count);
@@ -5670,7 +5673,7 @@ function refitAppendGeneratedFrameAfterImageDelete(node, previous=null){
     // 旧节点：与 imageLayout 显式组框分支保持一致（gap=8、PAD=32，
     // 高度 = rows×(edge+8)-8+32），四周留白均为 16px。
     // 列数同样走宫格规则：旧版 min(4,count) 会把 3 张排 3 列、5 张排 4 列，
-    // 与渲染实际列数（smartGridColsForCount：3 张→2 列、5 张→3 列）不一致，
+    // 与渲染实际列数（smartGridColsForCount：宫格 ceil(√N)）不一致，
     // 反推出的外框错位 → 四周留白忽宽忽窄甚至裁图。
     const gap = 8;
     const pad = 32;
@@ -5976,8 +5979,8 @@ function appendGeneratedImageGroupLayout(images=[], scale=1, options={}){
             ))));
             fitted = {cols, rows, visibleRows, thumb};
         } else {
-            // 2026-10-10（用户要求）：宫格排列 —— 3~4 张 2 列 2 行、5 张起 3 列，最多 4 列；
-            // thumb 只受宽度约束，高度随行数自动增长。
+            // 2026-10-30（用户要求）：宫格排列 —— 列数 = smartGridColsForCount（ceil(√N) + 防孤行），
+            // 不再「一行最多 4 个」；thumb 只受宽度约束，高度随行数自动增长。
             const fixedCols = smartGridColsForCount(count);
             const fixedRows = Math.ceil(count / fixedCols);
             const availW = Math.max(40, explicitW - pad - Math.max(0, fixedCols - 1) * gap);
@@ -6940,7 +6943,7 @@ function appendPendingImageGroupLayout(count=1, scale=MEDIA_GROUP_DEFAULT_SCALE,
     const hasExplicit = Number.isFinite(explicitW) && explicitW > 40
         && Number.isFinite(explicitH) && explicitH > 40;
     // 2026-10-10（用户要求：生成 3 张 / 4 张按宫格排列）：列数统一走宫格规则
-    // （2 张 2 列、3~4 张 2 列 2 行、5 张起 3 列…最多 4 列），
+    // （列数 = ceil(√N) + 防孤行，不再固定一行 4 个），
     // 有显式框时再按框宽高拟合微调，保证占位格与节点框尺寸同源、不被裁切。
     let cols = smartGridColsForCount(c);
     // 2026-10-10（用户要求：追加时占位框固定不变 / 外框收紧）——3000 口径节点列数
@@ -19752,7 +19755,7 @@ function nodeBodyHtml(node, layout){
         const isGridSplit = imgs.some(img => img?.grid?.type === 'grid-split');
         const gridSplitClass = isGridSplit ? ' grid-split-layout' : '';
         // 2026-10-10（用户要求：多图排列按 3000 版）：普通多图网格用固定列数的 CSS Grid，
-        // 列数严格等于布局算出的 cols（2 张 2×1、3~4 张 2×2、5 张起 3 列），
+        // 列数严格等于布局算出的 cols（宫格 ceil(√N)，4 张 2×2、8 张 3×3），
         // 不再靠 flex 换行“凑”出排布（格子一窄一行就会多塞一张）。
         const colsClass = isGridSplit ? '' : ' thumb-grid-cols';
         const gCols = Number(layout.cols) || 1;
@@ -31712,7 +31715,7 @@ function pendingBoxSize(count, options={}){
     if(c <= 1){
         return {w:Math.round(base.w), h:Math.round(base.h)};
     }
-    // 2026-10-12（用户要求）：与输出宫格同口径——一行 4 个，超过再换行。
+    // 2026-10-30（用户要求）：与输出宫格同口径——宫格自动换行（ceil(√N) + 防孤行）。
     const cols = smartGridColsForCount(c);
     const rows = Math.ceil(c / cols);
     const gap = 12;
