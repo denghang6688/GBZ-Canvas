@@ -7276,6 +7276,9 @@ function openArrangeModePicker(ids, anchorEl){
 // .smart-node-culled 开 CV。这些节点用户根本看不见，裁剪零副作用，但能省掉它们的
 // layout/paint —— 布局开销正是 63 节点画布 render 从 15ms 涨回 90ms+ 的主因。
 const SMART_CULL_MARGIN = 360;
+// 2026-10-30（用户反馈拖动变卡）：裁剪解除余量收紧到 0.6 倍，与挂载余量之间留死区。
+// 节点在边界上来回 1px 也会反复挂/摘 content-visibility，每次都会触发合成层重建（Layerize）。
+const SMART_CULL_RELEASE_MARGIN = Math.round(SMART_CULL_MARGIN * 0.6);
 let smartCullRaf = 0;
 function scheduleSmartNodeCulling(){
     if(smartCullRaf) return;
@@ -7290,16 +7293,17 @@ function applySmartNodeCulling(){
     const h = shell.clientHeight || window.innerHeight || 0;
     if(!w || !h) return;
     const scale = safeScale(viewport.scale);
-    const m = SMART_CULL_MARGIN;
-    // 视口反算成世界坐标（只做算术，绝不读 DOM，避免搬运期间的强制回流）
-    const left = (-m - viewport.x) / scale;
-    const right = (w + m - viewport.x) / scale;
-    const top = (-m - viewport.y) / scale;
-    const bottom = (h + m - viewport.y) / scale;
+    // 迟滞判定：未裁剪的节点用大余量（360）判「出界」，已裁剪的用小余量（216）判「回界」，
+    // 中间 144px 死区里状态保持不变，避免边界处反复 toggle 造成层重建抖动。
     const byId = new Map(nodes.map(n => [n.id, n]));
     world.querySelectorAll('.image-node').forEach(el => {
         const node = byId.get(el.dataset.id);
         if(!node){ el.classList.remove('smart-node-culled'); return; }
+        const mm = el.classList.contains('smart-node-culled') ? SMART_CULL_RELEASE_MARGIN : SMART_CULL_MARGIN;
+        const left = (-mm - viewport.x) / scale;
+        const right = (w + mm - viewport.x) / scale;
+        const top = (-mm - viewport.y) / scale;
+        const bottom = (h + mm - viewport.y) / scale;
         const r = nodeRect(node);
         const outside = r.x > right || (r.x + r.width) < left || r.y > bottom || (r.y + r.height) < top;
         // 选中/拖拽中/正在生成的节点永不开 CV：用户可能立刻要看它的浮层或进度动画
@@ -7315,8 +7319,13 @@ let lastGridStyleSize = '', lastGridStyleAlpha = '';
 function applyViewport(options={}){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     const scale = safeScale(viewport.scale);
-    world.style.setProperty('--canvas-scale', String(scale));
-    world.style.setProperty('--canvas-inverse-scale', String(1 / scale));
+    // 2026-10-30：缩放没变时跳过 --canvas-scale/--canvas-inverse-scale 写入。平移期间 scale
+    // 恒定，每帧 setProperty 即便同值也会让 world 的内联样式失效、触发一次样式重算。
+    if(world.dataset.canvasScale !== String(scale)){
+        world.dataset.canvasScale = String(scale);
+        world.style.setProperty('--canvas-scale', String(scale));
+        world.style.setProperty('--canvas-inverse-scale', String(1 / scale));
+    }
     // world 被 transform:scale 缩放后，其内部带 backdrop-filter 的卡片（参数设置/合成卡等）
     // 会被部分浏览器（Chrome/Edge 等 Blink 内核）当作独立合成层先按 1x 栅格化、再整体缩放，
     // 缩小时位图被降采样 → 组件发虚。缩放态下关闭这些 backdrop-filter（底色本身已接近不透明，
@@ -7352,7 +7361,11 @@ function applyViewport(options={}){
     // 平移期间跳过「选中图高清升级」：缩放没变、结论不会变，而它每帧都要遍历全画布
     // 100+ 张图并读真实矩形。平移结束时（clearCanvasPanState）会补跑一次。
     if(!options.pan) syncSmartSelectedImageResolution(world);
-    scheduleSmartNodeCulling();
+    // 2026-10-30（用户反馈拖动变卡）：平移期间冻结视口外裁剪。平移中节点不断进出裁剪
+    // 边界，content-visibility 反复挂/摘会反复重建合成层（Layerize 实测是平移开销最大头，
+    // 4 秒里 913ms），表现为拖画布一卡一卡。平移结束时 clearCanvasPanState →
+    // applyViewport({minimap:true}) 不带 pan 标记，会在这里补跑一次裁剪。
+    if(!options.pan) scheduleSmartNodeCulling();
 }
 function cancelScheduledViewportApply(){
     if(viewportApplyRaf) cancelAnimationFrame(viewportApplyRaf);
@@ -7531,7 +7544,11 @@ function updateSmartZoomPanel(){
     if(!smartZoomRange && !smartZoomValue) return;
     const percent = Math.round(clampSmartCanvasZoom(viewport.scale) * 100);
     if(smartZoomRange && String(smartZoomRange.value) !== String(percent)) smartZoomRange.value = String(percent);
-    if(smartZoomValue) smartZoomValue.textContent = `${percent}%`;
+    // 2026-10-30：同值不写 textContent，平移期间避免无谓的面板重绘
+    if(smartZoomValue && smartZoomValue.dataset.percent !== String(percent)){
+        smartZoomValue.dataset.percent = String(percent);
+        smartZoomValue.textContent = `${percent}%`;
+    }
 }
 function setSmartCanvasZoom(nextScale){
     const center = viewportCenter();
@@ -23211,6 +23228,10 @@ function findIdlePortMagnet(e){
     // 平移/拖动期间不做端口磁吸：端口在低质量模式下本来就被隐藏，这里再挡一层，
     // 否则每次 mousemove 都要把全画布 200+ 个端口逐个读一次布局（拖动卡顿的主因）。
     if(!e || panState || didPan || portDragState || dragState || resizeState || selectionState || smartMinimapDrag) return null;
+    // 2026-10-30（用户反馈拖动变卡）：缩得很小时禁用端口磁吸。小视图下端口间距只剩几像素，
+    // 34px 抓取半径会覆盖大半屏幕，用户想拖画布却总是误抓端口进入连线拖拽（比平移重得多，
+    // 表现就是「拖画布又卡又不听使唤」）。连线是精细操作，缩放到 50% 以上再提供。
+    if(safeScale(viewport.scale) < 0.5) return null;
     if(e.target?.closest?.('.composer,.smart-back,.smart-project-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return null;
     let best = null;
     const radius = 34;
@@ -24195,12 +24216,26 @@ function findPortDragTarget(drag, e){
     }
     let best = null;
     const magnetRadius = 42;
-    world.querySelectorAll(`.image-node .node-port[data-port="${requiredPort}"]`).forEach(portEl => {
-        const nodeEl = portEl.closest('.image-node');
-        const nodeId = nodeEl?.dataset?.id || '';
-        if(!nodeId || sourceIds.has(nodeId)) return;
-        const node = nodes.find(n => n.id === nodeId);
-        if(!node || isWorkflowGroupNode(node)) return;
+    // 2026-10-30（用户反馈拖动变卡）：端口拖拽的每帧磁吸搜索先按节点数据矩形把候选压到个位数，
+    // 再只对候选节点读真实端口矩形。旧实现对全画布 180+ 个端口逐个 getBoundingClientRect
+    // （每次都强制回流），正是节点拖动优化注释里点名的「拖动卡顿主因」同款模式。
+    const GUARD = magnetRadius + 60; // 数据矩形与真实渲染矩形有出入，留足余量
+    const shellRect = shell.getBoundingClientRect();
+    const scale = safeScale(viewport.scale);
+    const candIds = [];
+    for(const node of (nodes || [])){
+        if(!node || isWorkflowGroupNode(node) || sourceIds.has(node.id)) continue;
+        const r = nodeRect(node);
+        const left = shellRect.left + viewport.x + (node.x || 0) * scale;
+        const top = shellRect.top + viewport.y + (node.y || 0) * scale;
+        if(e.clientX < left - GUARD || e.clientX > left + r.width * scale + GUARD) continue;
+        if(e.clientY < top - GUARD || e.clientY > top + r.height * scale + GUARD) continue;
+        candIds.push(node.id);
+    }
+    candIds.forEach(nodeId => {
+        const nodeEl = world.querySelector(`.image-node[data-id="${CSS.escape(String(nodeId))}"]`);
+        const portEl = nodeEl?.querySelector(`.node-port[data-port="${CSS.escape(requiredPort)}"]`);
+        if(!nodeEl || !portEl) return;
         const rect = portEl.getBoundingClientRect();
         if(!rect.width && !rect.height) return;
         const cx = rect.left + rect.width / 2;
@@ -40291,6 +40326,20 @@ function removeDetachedThumbFromSource(info){
 // 节点拖动的 rAF 合帧状态（见 applyDragMoveFrame / window.onmousemove）
 let dragMovePendingEvent = null;
 let dragMoveRafId = 0;
+// 端口拖拽的 rAF 合帧（2026-10-30）：高回报率鼠标下每次 mousemove 都做命中测试 +
+// 磁吸搜索 + SVG 路径重建，与节点拖动一样只记录最新事件、每帧最多应用一次。
+let portDragPendingEvent = null;
+let portDragRafId = 0;
+function applyPortDragFrame(){
+    portDragRafId = 0;
+    const e = portDragPendingEvent;
+    portDragPendingEvent = null;
+    if(!e || !portDragState) return;
+    portDragState.currentWorld = screenToWorld(e);
+    portDragState.moved = true;
+    updatePortDragTargetFromEvent(portDragState, e);
+    updatePortDragVisual();
+}
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
     if(smartMinimapDrag){
@@ -40299,12 +40348,8 @@ window.onmousemove = e => {
         return;
     }
     if(portDragState){
-        e.preventDefault();
-        const p = screenToWorld(e);
-        portDragState.currentWorld = p;
-        portDragState.moved = true;
-        updatePortDragTargetFromEvent(portDragState, e);
-        updatePortDragVisual();
+        portDragPendingEvent = e;
+        if(!portDragRafId) portDragRafId = requestAnimationFrame(applyPortDragFrame);
         return;
     }
     if(promptResizeState){
