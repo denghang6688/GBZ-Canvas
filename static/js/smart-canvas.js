@@ -42234,12 +42234,29 @@ document.addEventListener('click', event => {
     if(event.target.closest?.('#refManifestPop, #refManifestBtn')) return;
     toggleRefManifest(false);
 });
+// 2026-10-30：contenteditable 全选删除后 Chrome 常残留 <br> / <div><br></div>，
+// 让 :empty 不成立 → 灰色占位文案不再显示。文字真的为空时把残骸清掉（此时光标就在行首，不会跳）。
+function normalizeEmptyPromptInput(){
+    if(!promptInput) return false;
+    if((promptInput.textContent || '').trim()) return false;
+    const html = promptInput.innerHTML || '';
+    if(!html) return false;
+    const stripped = html
+        .replace(/<br\s*\/?>/gi, '')
+        .replace(/<\/?(?:div|p|span)[^>]*>/gi, '')
+        .replace(/&nbsp;|&#160;|&#8203;|&#x200b;/gi, '')
+        .trim();
+    if(stripped) return false;
+    promptInput.innerHTML = '';
+    return true;
+}
 promptInput.addEventListener('input', maybeOpenMentionPicker);
 promptInput.addEventListener('input', maybeOpenSlashMenu);
 // ⇄ 换模板模式下直接打字 = 放弃换模板、继续自己写，菜单收起
 promptInput.addEventListener('input', () => { if(slashState.replaceChip) closeSlashMenu(); });
 promptInput.addEventListener('input', () => {
     delete promptInput.dataset.preserveDraftOnce;
+    normalizeEmptyPromptInput();
     syncPromptChipHint();
     dropAppliedTemplateIfNoChip();
     markPromptDraftDirty();

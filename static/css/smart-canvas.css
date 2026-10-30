@@ -20502,3 +20502,17 @@ html body #composer .composer-card {
 html body #composer.prompt-expanded .composer-card {
     border-radius: 10px !important;
 }
+
+/* ===== 2026-10-30 空态占位文案：清空后也要回来 =====
+   contenteditable 被全选删除时 Chrome 会留下 <br> 或 <div><br></div>，:empty 就不再成立，
+   原来的 ::before 占位直接消失（用户实测：输入几个字再全删，灰字再也不出现）。
+   这里把三种"其实没有文字"的状态一并当成空态：真空、只剩 <br>、只剩一层 <div><br></div>
+   （再深的包裹由 JS 的 normalizeEmptyPromptInput() 在 input 时清成真空）。
+   颜色沿用之前的 #7d7d7d，字号/字重/不拦截鼠标都与 :empty 那条保持一致。 */
+html body .composer-card .prompt-input[data-placeholder]:is(:empty, :has(> br:only-child), :has(> div:only-child > br:only-child))::before {
+    content: attr(data-placeholder) !important;
+    color: #7d7d7d !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    pointer-events: none !important;
+}
