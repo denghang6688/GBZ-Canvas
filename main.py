@@ -14546,6 +14546,31 @@ async def probe_volcengine_auto_detect(client, base_url: str, api_key: str):
         "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
     }
 
+# 2026-10-30：拉取模型时自动标出"画布用不上"的模型（向量化 / 重排 / 语音识别 / 审核）。
+# 只按模型名判断，不额外发请求、不计费；前端默认隐藏，可一键展开查看。
+# 注意：TTS（语音合成）不在此列——画布的音频生成节点就是要用 TTS 模型，隐藏会让人配不出音频。
+UNUSABLE_MODEL_KEYS = (
+    ("embedding", ("embedding", "text-embedding", "bge-", "bge/", "bce-embedding", "m3e", "gte-", "text2vec", "jina-embed", "embed-", "conan-embedding")),
+    ("rerank", ("rerank",)),
+    ("asr", ("whisper", "paraformer", "sensevoice", "funasr", "speech-to-text", "-asr", "asr-")),
+    ("moderation", ("moderation", "content-safety", "nsfw-detect", "guard-model")),
+)
+
+def upstream_unusable_reason(mid):
+    lc = str(mid or "").lower()
+    for reason, keys in UNUSABLE_MODEL_KEYS:
+        if any(k in lc for k in keys):
+            return reason
+    return ""
+
+def upstream_unusable_map(ids):
+    out = {}
+    for mid in ids or []:
+        reason = upstream_unusable_reason(mid)
+        if reason:
+            out[mid] = reason
+    return out
+
 def classify_upstream_model(mid):
     lc = str(mid or "").lower()
     video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "doubao-1", "kling", "hailuo", "video", "t2v-", "i2v-", "s2v"]
@@ -15068,6 +15093,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
             "all": payload["all"],
             "message": payload["message"],
             "raw": payload["raw"],
+            "unusable": upstream_unusable_map(payload["all"]),
         }
     return {
         "total": len(ids),
@@ -15075,6 +15101,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         "chat_models": grouped["chat"],
         "video_models": grouped["video"],
         "all": ids,
+        "unusable": upstream_unusable_map(ids),
         "image_request_mode": detect_image_request_mode(base_url, ids) or normalize_image_request_mode(image_request_mode),
     }
 

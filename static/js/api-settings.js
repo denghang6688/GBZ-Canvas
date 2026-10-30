@@ -3087,6 +3087,7 @@ async function probeAsync(){
             });
             applyDetectedProtocol('runninghub');
             lastFetchedAll = data.all || [];
+            lastFetchedUnusable = data.unusable || {};
             lastFetchedSuggestion = {
                 image: new Set(data.image_models || []),
                 chat: new Set(data.chat_models || []),
@@ -3188,6 +3189,7 @@ async function testConnection(){
             if(data.image_request_mode) applyDetectedImageRequestMode(data.image_request_mode);
             // 存入 picker 状态并启用「选择模型」按钮，但不自动弹出
             lastFetchedAll = data.all || [];
+            lastFetchedUnusable = data.unusable || {};
             lastFetchedSuggestion = {
                 image: new Set(data.image_models || []),
                 chat: new Set(data.chat_models || []),
@@ -3226,6 +3228,7 @@ async function testConnection(){
     }
 }
 let lastFetchedAll = [];          // 全部模型 id 列表
+let lastFetchedUnusable = {};     // 画布用不上的模型（向量化/重排/语音等）→ {id: 原因}
 let lastFetchedSuggestion = null; // 后端自动分类建议
 
 async function fetchModels(){
@@ -3257,6 +3260,7 @@ async function fetchModels(){
             return r.json();
         });
         lastFetchedAll = data.all || [];
+        lastFetchedUnusable = data.unusable || {};
         lastFetchedSuggestion = {
             image: new Set(data.image_models || []),
             chat: new Set(data.chat_models || []),
@@ -3275,7 +3279,8 @@ async function fetchModels(){
             ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
             : (detectedProtocol === 'volcengine' || isVolcengineProvider(item)) ? ' · 已识别方舟协议，火山聊天建议改填 ep-... 接入点' : '';
         const imageModeExtra = normalizeImageRequestMode(imageRequestModeInput?.value || item.image_request_mode) === 'openai-json' ? ' · 图片接口已设为 OpenAI JSON' : '';
-        setStatus(`已拉取 ${data.total} 个模型 · 点「选择模型」勾选要导入的${extra}${imageModeExtra}`);
+        const hiddenUnusable = Object.keys(lastFetchedUnusable || {}).length;
+        setStatus(`已拉取 ${data.total} 个模型${hiddenUnusable ? ` · 已自动隐藏 ${hiddenUnusable} 个不可用（向量化/重排/语音等）` : ''} · 点「选择模型」勾选要导入的${extra}${imageModeExtra}`);
         openModelPicker();
     } catch(e){
         alert('拉取失败：' + (e.message || e));
@@ -3287,14 +3292,14 @@ async function fetchModels(){
 
 // —— 模型选择器浮层 ——
 // 每个模型只归一类（根据用户已配置 或 关键字猜测）；勾选 = 纳入该分类
-let pickerState = { category: {}, selected: {} };
+let pickerState = { category: {}, selected: {}, unusable: {}, showUnusable: false };
 let pickerVisibleIds = [];
 function openModelPicker(){
     const item = provider();
     if(!item || !lastFetchedAll.length){ alert('没有拉取到模型'); return; }
     const existing = { image: new Set(item.image_models||[]), chat: new Set(item.chat_models||[]), video: new Set(item.video_models||[]), audio: new Set(item.audio_models||[]) };
     const allIds = new Set([...lastFetchedAll, ...(item.image_models||[]), ...(item.chat_models||[]), ...(item.video_models||[]), ...(item.audio_models||[])]);
-    pickerState = { category: {}, selected: {} };
+    pickerState = { category: {}, selected: {}, unusable: { ...(lastFetchedUnusable || {}) }, showUnusable: false };
     allIds.forEach(id => {
         // 类别归属：用户已配置 > 关键字建议 > 默认 chat
         let cat;
@@ -3317,26 +3322,39 @@ function openModelPicker(){
     renderModelPicker();
 }
 function closeModelPicker(){ document.getElementById('modelPickerOverlay').style.display = 'none'; }
+const PICKER_UNUSABLE_LABELS = { embedding:'向量化', rerank:'重排', asr:'语音识别', tts:'语音合成', moderation:'审核' };
 function renderModelPicker(){
     const filter = (document.getElementById('pickerFilter')?.value || '').toLowerCase();
     const currentTab = document.querySelector('.picker-cat-tab.active')?.dataset.cat || 'all';
     const ids = Object.keys(pickerState.category).sort();
-    // 各分类总数 / 已选数
-    const totals = { all: ids.length, image:0, chat:0, video:0, audio:0 };
+    const unusable = pickerState.unusable || {};
+    const showUnusable = !!pickerState.showUnusable;
+    const unusableTotal = ids.filter(id => unusable[id]).length;
+    // 不可用模型默认隐藏；但已经被用户勾选/已配置的照常显示，避免"看不见却生效"
+    const scoped = ids.filter(id => showUnusable || !unusable[id] || pickerState.selected[id]);
+    // 各分类总数 / 已选数（都按当前可见集合统计）
+    const totals = { all: scoped.length, image:0, chat:0, video:0, audio:0 };
     const selecteds = { all:0, image:0, chat:0, video:0, audio:0 };
-    ids.forEach(id => {
+    scoped.forEach(id => {
         const cat = pickerState.category[id];
         totals[cat]++;
         if(pickerState.selected[id]){ selecteds[cat]++; selecteds.all++; }
     });
     // 过滤显示
-    const list = ids.filter(id => {
+    const list = scoped.filter(id => {
         if(filter && !id.toLowerCase().includes(filter)) return false;
         if(currentTab === 'all') return true;
         return pickerState.category[id] === currentTab;
     });
     pickerVisibleIds = list;
-    document.getElementById('pickerCount').textContent = `共 ${totals.all} 个模型 · 当前显示 ${list.length} 个`;
+    const hiddenNote = unusableTotal && !showUnusable ? ` · 已自动隐藏 ${unusableTotal} 个不可用` : '';
+    document.getElementById('pickerCount').textContent = `共 ${ids.length} 个模型${hiddenNote} · 当前显示 ${list.length} 个`;
+    const toggle = document.getElementById('pickerUnusableToggle');
+    if(toggle){
+        toggle.style.display = unusableTotal ? '' : 'none';
+        toggle.classList.toggle('on', showUnusable);
+        toggle.textContent = showUnusable ? `隐藏不可用 (${unusableTotal})` : `显示不可用 (${unusableTotal})`;
+    }
     document.querySelectorAll('.picker-cat-tab').forEach(tab => {
         const cat = tab.dataset.cat;
         tab.querySelector('.cat-count').textContent = `${selecteds[cat]}/${totals[cat]}`;
@@ -3344,12 +3362,14 @@ function renderModelPicker(){
     // 列表
     const html = list.map((id, index) => {
         const checked = pickerState.selected[id];
+        const reason = unusable[id];
+        const tag = reason ? `<span class="picker-unusable-tag">${escapeHtml(PICKER_UNUSABLE_LABELS[reason] || '不可用')}</span>` : '';
         return `
-            <div class="picker-row ${checked?'has-sel':''}" onclick="togglePickerRowByIndex(${index})">
+            <div class="picker-row ${checked?'has-sel':''} ${reason?'is-unusable':''}" onclick="togglePickerRowByIndex(${index})">
                 <div class="picker-checkbox ${checked?'checked':''}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </div>
-                <div class="picker-model-name" title="${escapeAttr(id)}">${escapeHtml(id)}</div>
+                <div class="picker-model-name" title="${escapeAttr(id)}">${escapeHtml(id)}</div>${tag}
             </div>
         `;
     }).join('');
@@ -3362,7 +3382,11 @@ function renderModelPicker(){
     if(sumImage){ sumImage.textContent = `生图 ${selecteds.image}`; sumImage.classList.toggle('picker-sum-chip-empty', selecteds.image === 0); }
     if(sumChat){ sumChat.textContent = `LLM ${selecteds.chat}`; sumChat.classList.toggle('picker-sum-chip-empty', selecteds.chat === 0); }
     if(sumVideo){ sumVideo.textContent = `视频 ${selecteds.video}`; sumVideo.classList.toggle('picker-sum-chip-empty', selecteds.video === 0); }
-    if(sumUnsel){ sumUnsel.textContent = `未选 ${totals.all - selecteds.all}`; }
+    if(sumUnsel){ sumUnsel.textContent = `未选 ${scoped.length - selecteds.all}`; }
+}
+function togglePickerUnusable(){
+    pickerState.showUnusable = !pickerState.showUnusable;
+    renderModelPicker();
 }
 function togglePickerRow(id){
     pickerState.selected[id] = !pickerState.selected[id];

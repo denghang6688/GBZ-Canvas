@@ -382,6 +382,14 @@ body.studio-theme-dark .picker-overlay { background:rgba(0,0,0,.62); }
 .picker-count { font-size:11px; color:var(--muted); font-weight:700; margin-top:2px; }
 .picker-close { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; transition:all .15s ease; }
 .picker-close:hover { background:var(--soft); color:var(--text); }
+/* 2026-10-30 拉取模型自动过滤：默认隐藏"画布用不上"的模型（向量化/重排/语音/审核），
+   头部开关可展开回来看，展开后行置灰并挂一个灰标说明原因 */
+.picker-unusable-toggle { margin-left:auto; height:28px; padding:0 11px; border-radius:8px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:11px; font-weight:800; cursor:pointer; transition:all .15s ease; }
+.picker-unusable-toggle:hover { color:var(--text); border-color:var(--line-strong); }
+.picker-unusable-toggle.on { background:var(--panel); color:var(--text); border-color:var(--line-strong); }
+.picker-row.is-unusable { opacity:.55; }
+.picker-row.is-unusable:hover { opacity:.8; }
+.picker-unusable-tag { margin-left:auto; flex:0 0 auto; padding:1px 6px; border-radius:5px; background:var(--line); color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.02em; }
 .picker-toolbar { display:flex; align-items:center; gap:10px; padding:12px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .picker-search { flex:1; min-width:160px; height:34px; padding:0 12px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--text); outline:none; font-size:12.5px; }
 .picker-search:focus { border-color:var(--text); background:var(--panel); }

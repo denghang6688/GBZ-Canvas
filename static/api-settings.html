@@ -50,7 +50,7 @@
     <script src="/static/js/theme.js?v=V26.10.30.31.1790042521"></script>
     <script src="/static/js/i18n.js?v=V26.10.30.31.1790305929"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=V26.10.30.31.1790492361">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.30.31.1792995554">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=V26.10.30.31.1793342173">
 </head>
 <body class="studio-theme-dark">
     <div class="page">
@@ -520,6 +520,7 @@
                     <div class="picker-title">从上游拉取的模型清单</div>
                     <div id="pickerCount" class="picker-count">—</div>
                 </div>
+                <button id="pickerUnusableToggle" class="picker-unusable-toggle" type="button" onclick="togglePickerUnusable()" style="display:none">显示不可用</button>
                 <div class="picker-close" onclick="closeModelPicker()"><i data-lucide="x" class="w-4 h-4"></i></div>
             </div>
             <div class="picker-toolbar">
@@ -685,7 +686,7 @@
             setTimeout(force, 0);
         })();
     </script>
-    <script src="/static/js/api-settings.js?v=V26.10.30.31.1793285417"></script>
+    <script src="/static/js/api-settings.js?v=V26.10.30.31.1793342179"></script>
     <script>
         (function(){
             function applyApiPageTheme(theme) {
