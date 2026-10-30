@@ -500,12 +500,14 @@ html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-f
 }
 
 /* 旧版普通节点工具条带有一串 :not() 高特异度规则，这里使用同等范围
-   覆盖它，保证普通节点和组框不再分别出现 24/32px 两种条高。 */
+   覆盖它，保证普通节点和组框不再分别出现 24/32px 两种条高。
+   2026-10-30（A 方案）：同步 40/32/16，selected/hover 变体比 1629 块多一个类，
+   不改这里 32px 会反过来压住 40px 主规则。 */
 html body .world .image-node.image-node:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.selected:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node:hover:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu {
-    min-height: 32px !important;
-    height: 32px !important;
+    min-height: 40px !important;
+    height: 40px !important;
     padding-top: 4px !important;
     padding-bottom: 4px !important;
     align-items: center !important;
@@ -515,8 +517,8 @@ html body .world .image-node.image-node:hover:not(.empty-node):not(.prompt-smart
 html body .world .image-node.image-node.empty-node > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.empty-node.selected > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.empty-node:hover > .smart-node-floating-menu.compact-icon-menu {
-    min-height: 32px !important;
-    height: 32px !important;
+    min-height: 40px !important;
+    height: 40px !important;
     padding-top: 4px !important;
     padding-bottom: 4px !important;
     align-items: center !important;
@@ -526,8 +528,8 @@ html body .world .image-node.image-node.empty-node:hover > .smart-node-floating-
 html body .world .image-node.image-node.empty-node:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.empty-node.selected:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.empty-node:hover:not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu {
-    min-height: 32px !important;
-    height: 32px !important;
+    min-height: 40px !important;
+    height: 40px !important;
 }
 
 /* 2026-10-07：ComfyUI / MiniMax H3 节点最终外框收口。
@@ -1623,20 +1625,20 @@ html body .world .image-node.dragging .thumb-grid > .thumb-item > .mini-x.image-
    面板保持 3000 口径（height 30、padding 3 5、gap 4、圆角 12），
    按钮改回纯图标方块：24×24、padding 0；名称走 title 悬停提示。
    span 规则保留 display:none 兜底（防其他路径渲染出文字）。
-   ===== 2026-10-11 下午（用户要求：整体放大 1.5 倍，看得更清楚）=====
-   面板 30→45、按钮 24→36、图标 14→21、gap 4→6、圆角 12→18，
-   颜色触发按钮同步 36×36，避免多图组工具条上高低不齐。 */
+   ===== 2026-10-30（A 方案：统一高度与比例）=====
+   面板 45→40、按钮 36→32、图标 21→16、gap 6→4、圆角 18→14，
+   文字键与图标键同高 32，一排只有一种按钮高度。 */
 html body .world .image-node.image-node:not(.empty-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node) > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node.empty-node > .smart-node-floating-menu.compact-icon-menu,
 html body .world .image-node.image-node > .smart-node-floating-menu.compact-icon-menu {
-    height: 45px !important;
-    min-height: 45px !important;
-    max-height: 45px !important;
-    padding: 4px 8px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+    padding: 4px 10px !important;
     padding-top: 4px !important;
     padding-bottom: 4px !important;
-    gap: 6px !important;
-    border-radius: 18px !important;
+    gap: 4px !important;
+    border-radius: 14px !important;
     max-width: min(1200px, calc(100vw - 48px)) !important;
     overflow-x: auto !important;
     overflow-y: hidden !important;
@@ -1647,15 +1649,15 @@ html body .world .image-node.image-node > .smart-node-floating-menu.compact-icon
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu::-webkit-scrollbar {
     display: none !important;
 }
-/* 2026-10-30：定宽 36px 图标规则只作用于纯图标模式（:not(.snm-labeled)）；带文字模式用基础尺寸 */
+/* 2026-10-30：定宽图标规则只作用于纯图标模式（:not(.snm-labeled)），A 方案 32×32；带文字模式同高 32 */
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu:not(.snm-labeled) > button:not(.batch-resize-action) {
-    width: 36px !important;
-    min-width: 36px !important;
-    height: 36px !important;
-    min-height: 36px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
     padding: 0 !important;
     gap: 0 !important;
-    border-radius: 13px !important;
+    border-radius: 10px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -1663,9 +1665,9 @@ html body .world .image-node .smart-node-floating-menu.compact-icon-menu:not(.sn
 }
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) i,
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) svg {
-    width: 21px !important;
-    height: 21px !important;
-    stroke-width: 2.2 !important;
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2.1 !important;
     flex: 0 0 auto !important;
 }
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) span:not(.snm-lbl) {
@@ -1683,16 +1685,16 @@ html body .world .image-node .smart-node-floating-menu.compact-icon-menu > butto
     cursor: not-allowed !important;
 }
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger {
-    width: 36px !important;
-    min-width: 36px !important;
-    height: 36px !important;
-    min-height: 36px !important;
-    border-radius: 13px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    border-radius: 10px !important;
 }
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger i,
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu .workflow-group-color-trigger svg {
-    width: 21px !important;
-    height: 21px !important;
+    width: 16px !important;
+    height: 16px !important;
 }
 
 /* ===== 2026-10-11（用户要求：视频卡片按参考稿显示「AI生成」来源角标）=====
@@ -1777,28 +1779,27 @@ html body .world .image-node.smart-group-node .smart-group-card.pure-image-group
     min-height: 0 !important;
 }
 
-/* ===== 2026-10-12（用户要求）单节点/组节点面板固定显示 + 统一 1.5 倍尺寸 =====
-   474 起的通用块把组菜单容器压成 32px、按钮 24px（特异度高于主 css 的 45/36 规则）。
-   这里在 skin 末尾用更高特异度收口：组菜单容器 45、按钮/颜色触发器 36、图标 21，
+/* ===== 2026-10-30（A 方案）单节点/组节点面板统一 40/32/16 =====
+   组菜单容器 40、按钮/颜色触发器 32、图标 16，
    与单节点 compact 面板（1610 块）完全一致。常显逻辑由主 css 完成。 */
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu {
-    height: 45px !important;
-    min-height: 45px !important;
-    max-height: 45px !important;
-    padding: 4px 8px !important;
-    gap: 6px !important;
-    border-radius: 18px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+    padding: 4px 10px !important;
+    gap: 4px !important;
+    border-radius: 14px !important;
 }
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu > button,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger {
-    width: 36px !important;
-    min-width: 36px !important;
-    height: 36px !important;
-    min-height: 36px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
     padding: 0 !important;
-    border-radius: 13px !important;
+    border-radius: 10px !important;
 }
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button i,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.smart-group-menu > button svg,
@@ -1806,9 +1807,9 @@ html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-f
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu.workflow-group-menu > button svg,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger i,
 html body .world .image-node.image-node > .smart-node-floating-menu.smart-node-floating-menu .workflow-group-color-trigger svg {
-    width: 21px !important;
-    height: 21px !important;
-    stroke-width: 2.2 !important;
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2.1 !important;
 }
 
 /* ===== 2026-10-12（用户要求）compact 图标工具条配色与智能分组菜单统一 =====
@@ -2222,15 +2223,15 @@ html body.theme-light .world .image-node.prompt-smart-node:not(.smart-group-memb
 }
 
 /* ===== 2026-10-30 工具条显示名称（.snm-labeled 带文字模式）=====
-   覆盖上方 24px/36px 定宽图标规则：按钮按内容自适应宽度 */
+   A 方案：按钮与图标键同高 32，宽度按内容自适应 */
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled > button:not(.batch-resize-action),
 html body .world .smart-node-floating-menu.compact-icon-menu.snm-labeled > button:not(.batch-resize-action) {
     width: auto !important;
-    min-width: 34px !important;
-    height: 28px !important;
-    min-height: 28px !important;
-    padding: 0 11px !important;
-    gap: 7px !important;
+    min-width: 30px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 10px !important;
+    gap: 6px !important;
     font-size: 12.5px !important;
     font-weight: 700 !important;
     border-radius: 10px !important;
@@ -2253,4 +2254,70 @@ html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-lab
 /* 「更多」下拉需要溢出显示：1629 行的 overflow-y:hidden 会把弹层裁掉，带文字模式放行 */
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled {
     overflow: visible !important;
+}
+
+/* ===== 2026-10-30 A 方案：「更多」按钮补齐尺寸 =====
+   「更多」外面包了一层 div.snm-more，不是 .compact-icon-menu 的直接子级，
+   上面「带文字按钮自适应」和 1651 的图标规则（都要求 > button）都打不到它，
+   会退回旧 26×26 定宽 —— 图标+「更多」+箭头挤在一格里折行、文字溢出面板。
+   这里给 .snm-more 内的按钮同样的 32/16/12.5 规格。 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    position: relative;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more > button {
+    width: auto !important;
+    min-width: 30px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 10px !important;
+    gap: 6px !important;
+    border-radius: 10px !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+    transform: none !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more > button > i:not(.snm-chev),
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more > button > svg {
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2.1 !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more .snm-chev {
+    width: 11px !important;
+    height: 11px !important;
+    margin-left: -1px !important;
+    stroke-width: 2.4 !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+    opacity: .72;
+}
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more .snm-lbl {
+    display: inline !important;
+    font-size: 12.5px !important;
+    line-height: 1 !important;
+}
+/* 小缩放（<35%）文字回收后，「更多」退回 32 方键，箭头隐藏 */
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more > button {
+    width: 32px !important;
+    min-width: 32px !important;
+    padding: 0 !important;
+    gap: 0 !important;
+}
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more .snm-chev {
+    display: none !important;
+}
+/* tiny 下「更多」文字也要收回：文字在 .snm-more 里，上面「> button > span」的 tiny 规则打不到 */
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more .snm-lbl {
+    display: none !important;
 }
