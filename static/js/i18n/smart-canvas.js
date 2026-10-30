@@ -10,7 +10,7 @@
         "smart.engineRh": { zh: "RunningHub", en: "RunningHub" },
         "smart.kindImage": { zh: "图片", en: "Image" },
         "smart.kindVideo": { zh: "视频", en: "Video" },
-        "smart.promptPlaceholder": { zh: "描述你想生成或编辑的图片...", en: "Describe what you want to generate or edit..." },
+        "smart.promptPlaceholder": { zh: "描述你想要生成的画面内容，@引用素材", en: "Describe what you want to generate or edit..." },
         "smart.promptTemplateLibrary": { zh: "模板库", en: "Templates" },
         "smart.tplAll": { zh: "全部", en: "All" },
         "smart.slashRecent": { zh: "最近使用", en: "Recent" },
