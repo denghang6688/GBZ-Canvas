@@ -1647,7 +1647,8 @@ html body .world .image-node.image-node > .smart-node-floating-menu.compact-icon
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu::-webkit-scrollbar {
     display: none !important;
 }
-html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) {
+/* 2026-10-30：定宽 36px 图标规则只作用于纯图标模式（:not(.snm-labeled)）；带文字模式用基础尺寸 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu:not(.snm-labeled) > button:not(.batch-resize-action) {
     width: 36px !important;
     min-width: 36px !important;
     height: 36px !important;
@@ -1667,7 +1668,14 @@ html body .world .image-node .smart-node-floating-menu.compact-icon-menu > butto
     stroke-width: 2.2 !important;
     flex: 0 0 auto !important;
 }
-html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) span {
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) span:not(.snm-lbl) {
+    display: none !important;
+}
+/* 2026-10-30 工具条显示名称：.snm-lbl（图标旁的中文名）放行；缩放 <35% 时由 smart-canvas-tiny 回收 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) span.snm-lbl {
+    display: inline !important;
+}
+html body .world.smart-canvas-tiny .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action) > span.snm-lbl {
     display: none !important;
 }
 html body .world .image-node .smart-node-floating-menu.compact-icon-menu > button:not(.batch-resize-action):disabled {
@@ -2211,4 +2219,38 @@ html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .pr
 html body.theme-light .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
 html body.theme-light .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card .prompt-node-llm-output {
     color: rgba(74, 77, 84, .96) !important;
+}
+
+/* ===== 2026-10-30 工具条显示名称（.snm-labeled 带文字模式）=====
+   覆盖上方 24px/36px 定宽图标规则：按钮按内容自适应宽度 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled > button:not(.batch-resize-action),
+html body .world .smart-node-floating-menu.compact-icon-menu.snm-labeled > button:not(.batch-resize-action) {
+    width: auto !important;
+    min-width: 34px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 11px !important;
+    gap: 7px !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    border-radius: 10px !important;
+    flex: 0 0 auto !important;
+    transform: none !important;
+}
+/* 「更多」下拉里的按钮：竖排菜单，靠左对齐 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled .snm-more-pop > button:not(.batch-resize-action) {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 10px !important;
+    gap: 9px !important;
+    justify-content: flex-start !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    border-radius: 7px !important;
+}
+/* 「更多」下拉需要溢出显示：1629 行的 overflow-y:hidden 会把弹层裁掉，带文字模式放行 */
+html body .world .image-node .smart-node-floating-menu.compact-icon-menu.snm-labeled {
+    overflow: visible !important;
 }

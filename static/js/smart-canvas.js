@@ -7331,6 +7331,8 @@ function applyViewport(options={}){
     // 缩小时位图被降采样 → 组件发虚。缩放态下关闭这些 backdrop-filter（底色本身已接近不透明，
     // 观感几乎无差），让卡片随矢量重新栅格化，保持清晰。
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
+    // 2026-10-30 缩放 < 35% 时工具条回收为纯图标（反向补偿后文字依然占位，小视图下糊成一团）
+    world.classList.toggle('smart-canvas-tiny', scale < 0.35);
     // 2026-09-29（用户要求）点阵加密 1.3 倍 + 再淡一点：
     // 网格基准 24 → 18.5（≈24/1.3）并同步收窄钳制区间（22~56 → 17~43）；
     // alpha 基数 0.16 → 0.12（上限 0.30 → 0.24，下限 0.02 → 0.015）
@@ -21377,10 +21379,42 @@ function smartNodeToolbarHtml(node){
         const v = lpResolveFeather(lpPlanForBar);
         return `<span class="lp-feather" title="羽化半径：越大遮罩边缘越柔"><span>羽化</span><input type="range" min="0" max="48" step="2" value="${v}" data-lp-feather="1" data-node-id="${escapeAttr(node.id)}" aria-label="羽化半径"><b>${v}</b></span>`;
     })() : '';
-    return `<div class="smart-node-floating-menu ${menuClass}${keepDisabled ? ' keep-disabled' : ''}" data-smart-node-menu="1">${actions.map(action => `
+    // 2026-10-30（用户要求）工具条显示名称：图标 + 中文名并排（参考 LiblibAI 画布）。
+    // 视频节点除下载外全外露带文字；图片节点 11 键只外露 4 个高频操作，其余收进「更多」下拉；
+    // 多图 Group（自带文字版式）与遮罩工作台（按钮文字是长说明）维持纯图标。
+    const menuBtnHtml = (action, withLabel) => `
         <button type="button" class="${action.active ? 'active' : ''}" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}">
-            <i data-lucide="${escapeAttr(action.icon)}"></i>
-        </button>`).join('')}${colorPicker}${lpFeatherPill}</div>`;
+            <i data-lucide="${escapeAttr(action.icon)}"></i>${withLabel ? `<span class="snm-lbl">${escapeHtml(action.label)}</span>` : ''}
+        </button>`;
+    let menuInner = '';
+    let menuLabeled = false;   // 2026-10-30 带文字模式：皮肤 CSS 的 36px 定宽图标规则要绕开
+    if(!isMultiImageGroup && !lpPlanForBar && kind === 'video'){
+        const tail = actions.filter(a => a.key === 'download');
+        const main = actions.filter(a => a.key !== 'download');
+        menuLabeled = true;
+        menuInner = main.map(a => menuBtnHtml(a, true)).join('')
+            + (tail.length ? `<span class="snm-sep"></span>${tail.map(a => menuBtnHtml(a, false)).join('')}` : '');
+    } else if(!isMultiImageGroup && !lpPlanForBar && kind === 'image'){
+        // 高频 4 键外露；其余收「更多」。宽度约 380px（全展开会超 900px）。
+        const SMM_EXPOSED = ['preview', 'crop', 'outpaint', 'local'];
+        const SMM_MORE = ['resize', 'brush', 'annotate', 'transform', 'grid', 'clear-output'];
+        const main = actions.filter(a => SMM_EXPOSED.includes(a.key));
+        const more = actions.filter(a => SMM_MORE.includes(a.key));
+        const tail = actions.filter(a => a.key === 'download');
+        menuLabeled = true;
+        menuInner = main.map(a => menuBtnHtml(a, true)).join('')
+            + (more.length ? `
+            <div class="snm-more">
+                <button type="button" data-smart-node-more="1" data-node-id="${escapeAttr(node.id)}" title="更多操作" aria-label="更多操作" aria-expanded="false">
+                    <i data-lucide="ellipsis"></i><span class="snm-lbl">更多</span><i data-lucide="chevron-down" class="snm-chev"></i>
+                </button>
+                <div class="snm-more-pop">${more.map(a => menuBtnHtml(a, true)).join('')}</div>
+            </div>` : '')
+            + (tail.length ? `<span class="snm-sep"></span>${tail.map(a => menuBtnHtml(a, false)).join('')}` : '');
+    } else {
+        menuInner = actions.map(a => menuBtnHtml(a, false)).join('');
+    }
+    return `<div class="smart-node-floating-menu ${menuClass}${menuLabeled ? ' snm-labeled' : ''}${keepDisabled ? ' keep-disabled' : ''}" data-smart-node-menu="1">${menuInner}${colorPicker}${lpFeatherPill}</div>`;
 }
 function gridSplitGroupToolbarHtml(node){
     if(!isGridSplitImageGroupNode(node)) return '';
@@ -21538,6 +21572,7 @@ async function batchResizeImageGroupImages(node, shortEdge){
     return true;
 }
 function runSmartNodeToolbarAction(nodeId, action){
+    closeSmartNodeMoreMenus();   // 点任何工具项都收起「更多」下拉（动作可能不触发重渲染）
     const node = nodes.find(n => n.id === nodeId);
     if(!node) return;
     const index = smartNodeToolbarImageIndex(node);
@@ -24642,6 +24677,19 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 e.preventDefault();
                 e.stopPropagation();
                 runSmartNodeToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartNodeAction);
+            });
+        });
+        // 2026-10-30「更多」下拉：工具条有 overflow 裁剪 + 缩放变换，弹层统一 port 到 body 用 fixed 定位
+        el.querySelectorAll('[data-smart-node-more]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const wrap = btn.closest('.snm-more');
+                if(!wrap) return;
+                const isOpen = wrap.classList.contains('open');
+                closeSmartNodeMoreMenus(wrap);
+                if(isOpen) closeSmartNodeMoreMenus(); else openSmartNodeMoreMenu(wrap);
             });
         });
         // 遮罩工具条上的羽化滑杆：只记参数，点「完成」导出遮罩时才真正羽化
@@ -44110,3 +44158,40 @@ function openSmartTopazPanel(url, nodeId){
         bar.style.transform = 'translateX(-50%)';
     });
 }
+
+// ===== 2026-10-30 工具条「更多」下拉：port 到 body 的 fixed 弹层 =====
+function openSmartNodeMoreMenu(wrap){
+    const btn = wrap.querySelector('[data-smart-node-more]');
+    const pop = wrap.querySelector('.snm-more-pop');
+    if(!btn || !pop) return;
+    document.body.appendChild(pop);          // 移出工具条：绕开 overflow 裁剪与 inverse-scale 变换
+    pop.classList.add('open');
+    pop.style.display = 'flex';
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth || 152;
+    const h = pop.offsetHeight || 200;
+    const left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+    let top = r.bottom + 8;
+    if(top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+    wrap.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+}
+function closeSmartNodeMoreMenus(exceptWrap){
+    document.querySelectorAll('.snm-more.open').forEach(wrap => {
+        if(exceptWrap && (wrap === exceptWrap || exceptWrap.contains(wrap))) return;
+        wrap.classList.remove('open');
+        wrap.querySelector('[data-smart-node-more]')?.setAttribute('aria-expanded', 'false');
+        const pop = wrap.querySelector('.snm-more-pop') || document.querySelector('.snm-more-pop.open');
+        if(pop){ pop.classList.remove('open'); pop.style.display = 'none'; pop.remove(); }
+    });
+    // 兜底：body 下残留的弹层（wrap 已被重渲染清掉）也一并收掉
+    document.querySelectorAll('body > .snm-more-pop.open').forEach(pop => { pop.classList.remove('open'); pop.style.display = 'none'; pop.remove(); });
+}
+window.addEventListener('mousedown', e => {
+    const t = e.target;
+    // 弹层已 port 到 body：点弹层里的项目不能触发关闭（否则元素被移除，click 不再派发）
+    if(t?.closest?.('.snm-more') || t?.closest?.('.snm-more-pop')) return;
+    closeSmartNodeMoreMenus();
+}, true);
