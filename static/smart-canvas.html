@@ -24,10 +24,10 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=V26.10.27.3.1790042522"></script>
-    <script src="/static/js/theme.js?v=V26.10.27.3.1790042521"></script>
-    <script src="/static/js/touch-mouse.js?v=V26.10.27.3.1790042521"></script>
-    <script src="/static/js/i18n.js?v=V26.10.27.3.1790305929"></script>
+    <script src="/static/vendor/js/lucide.js?v=V26.10.30.30.1790042522"></script>
+    <script src="/static/js/theme.js?v=V26.10.30.30.1790042521"></script>
+    <script src="/static/js/touch-mouse.js?v=V26.10.30.30.1790042521"></script>
+    <script src="/static/js/i18n.js?v=V26.10.30.30.1790305929"></script>
     <script>
         // 2026-09-26 被外壳(index.html) iframe 嵌入时隐藏画布页自己的品牌坞：
         // 外壳侧栏已有 GitHub/DH/版本号，再显示会并排重复；且品牌坞透过透明侧栏显形
@@ -54,8 +54,8 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.27.3.1793104923">
-    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.10.27.3.1792302014">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.30.30.1793336884">
+    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.10.30.30.1793325316">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -64,14 +64,21 @@
                 <div class="composer-card">
                     <div class="composer-head">
                         <div class="composer-head-left">
-                            <select id="engineSelect" class="engine-select">
+                            <!-- 2026-10-30：原生 select 只作数据源（视觉隐藏），外观换成
+                                 engine-chip 触发器 + engine-menu 深色胶囊菜单（系统绘制的高亮白块看不清）。
+                                 值的读写、onchange、applySmartPanelKindLock 对 option 的增删全部沿用原 select。 -->
+                            <div id="engineSelectWrap" class="engine-select-wrap">
+                                <select id="engineSelect" class="engine-select">
                                 <option value="api" data-i18n="smart.engineApi">API生成</option>
                                 <option value="volcengine" data-i18n="smart.engineVolcengine">火山引擎</option>
                                 <option value="modelscope" data-i18n="smart.engineMs">MS生成</option>
                                 <option value="h3" data-i18n="smart.engineH3">Minimax H3</option>
                                 <option value="comfy" data-i18n="smart.engineComfy">ComfyUI生成</option>
                                 <option value="runninghub" data-i18n="smart.engineRh">RunningHub</option>
-                            </select>
+                                </select>
+                                <button type="button" id="engineChip" class="engine-chip" aria-haspopup="listbox" aria-expanded="false" title="切换生成引擎"></button>
+                                <div id="engineMenu" class="engine-menu" role="listbox" hidden></div>
+                            </div>
                             <span id="composerPanelTitle" class="composer-engine-label composer-panel-title" hidden></span>
                             <div id="apiKindToggle" class="kind-toggle" style="display:none">
                                 <button type="button" data-kind="image" class="active"><i data-lucide="image"></i><span data-i18n="smart.kindImage">图片</span></button>
@@ -80,6 +87,14 @@
                             </div>
                             <div id="inputMediaSummary" class="input-media-summary" hidden aria-live="polite"></div>
                             <span id="promptWordCount" class="prompt-word-count" hidden aria-live="polite"></span>
+                        </div>
+                        <!-- 2026-10-30：提示词过长时不再把输入框顶高，改用这颗按钮打开居中大面板。
+                             两个图标静态并列，由 .prompt-expanded 切换显隐，运行时不重建 DOM。 -->
+                        <div class="composer-head-right">
+                            <button id="promptExpandBtn" class="composer-expand-btn" type="button" aria-expanded="false" title="扩大编辑提示词">
+                                <span class="expand-icon-in"><i data-lucide="maximize-2"></i></span>
+                                <span class="expand-icon-out"><i data-lucide="minimize-2"></i></span>
+                            </button>
                         </div>
                     </div>
                     <div id="inputThumbsRow" class="input-thumbs-row"></div>
@@ -100,7 +115,7 @@
                             </div>
                         </div>
                         <button id="cascadeRunBtn" class="run-btn cascade-run-btn" type="button" style="display:none" hidden disabled aria-hidden="true"><i data-lucide="workflow"></i><span>一键运行</span></button>
-                        <button id="runBtn" class="run-btn" type="button"><i data-lucide="sparkles"></i><span data-i18n="smart.run">运行</span></button>
+                        <button id="runBtn" class="run-btn" type="button" title="运行" aria-label="运行"><i data-lucide="arrow-up"></i></button>
                     </div>
                 </div>
             </div>
@@ -121,8 +136,8 @@
                         <button id="promptLlmOptimizeRule" class="prompt-llm-opt-rule" type="button" title="当前规则（点开切换 / 新建）"><span class="gear">⚙</span><span id="promptLlmOptimizeRuleName">指令清晰化</span></button>
                         <button id="promptLlmTranslate" class="prompt-llm-translate" type="button" title="翻译输入内容" aria-label="翻译输入内容"><span>文A</span></button>
                         <div id="promptLlmSkillChipRow" class="prompt-llm-skill-chip-row" hidden></div>
-                        <button id="promptLlmRun" class="prompt-llm-run" type="button" title="生成">
-                            <i data-lucide="arrow-up"></i><span>生成</span>
+                        <button id="promptLlmRun" class="prompt-llm-run" type="button" title="生成" aria-label="生成">
+                            <i data-lucide="arrow-up"></i>
                         </button>
                     </div>
                 </div>
@@ -354,7 +369,7 @@
         </style>
         <aside id="smartAgentPanel" class="smart-agent-panel smart-agent-gpt-host" aria-label="GPT 对话">
             <button id="smartAgentCloseBtn" class="smart-agent-frame-close" type="button" title="收起 GPT 对话"><i data-lucide="x"></i></button>
-            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V26.10.27.3.1793102279" title="AI 助手"></iframe>
+            <iframe id="smartAgentChatFrame" class="smart-agent-chat-frame" data-base-src="/static/gpt-chat.html?v=V26.10.30.30.1793336890" title="AI 助手"></iframe>
             <script>
                 // 聊天 iframe 的 src 由脚本注入时间戳：保证任何情况下都加载最新版聊天页（绕过一切缓存）
                 (function(){
@@ -1028,7 +1043,9 @@
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
     <div id="slashPeek" class="slash-peek" aria-hidden="true"></div>
-    <script src="/static/js/smart-canvas.js?v=V26.10.27.3.1793104923"></script>
+    <!-- 大面板遮罩：点它收起。放 world 之外，展开时把 #world 提到 z-index 100 才不会连面板一起盖住 -->
+    <div id="composerExpandMask" class="composer-expand-mask" hidden></div>
+    <script src="/static/js/smart-canvas.js?v=V26.10.30.30.1793336131"></script>
 </body>
 </html>
 

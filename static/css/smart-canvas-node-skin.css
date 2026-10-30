@@ -7,18 +7,24 @@
  */
 
 html body {
-    --gbz-node-bg: #181818;
-    --gbz-node-bg-soft: #202020;
-    --gbz-node-surface: #242424;
+    /* 2026-10-28（用户要求）画布所有卡片统一到浅一档的灰：
+       原来 empty / prompt / loop / storyboard / H3 各自 24 / 32 / 42，深浅不一。
+       这里把三级灰度整体抬到 #262626 / #2c2c2c / #333333（与生成输入框同族），
+       层级关系（bg < soft < surface）保持不变。 */
+    --gbz-node-bg: #262626;
+    --gbz-node-bg-soft: #2c2c2c;
+    --gbz-node-surface: #333333;
     --gbz-node-line: rgba(226, 226, 226, .36);
     --gbz-node-line-soft: rgba(226, 226, 226, .20);
     --gbz-node-line-strong: rgba(246, 246, 246, .62);
     --gbz-node-text: rgba(246, 246, 246, .92);
     --gbz-node-muted: rgba(246, 246, 246, .58);
     /* Single source of truth for node corner geometry. Change the outer
-       value once; nested content surfaces follow the same visual family. */
-    --gbz-node-radius: 18px;
-    --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 4px);
+       value once; nested content surfaces follow the same visual family.
+       2026-10-30（用户要求）圆角 18px → 8px（参考第三方画布，方角感）。
+       内层差值同步 -4px → -2px：外框 8px 时内层 4px 会显得外框反而更圆。 */
+    --gbz-node-radius: 8px;
+    --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 2px);
     --gbz-node-toolbar-radius: 8px;
     --gbz-node-shadow: 0 14px 34px rgba(0, 0, 0, .22);
     --gbz-node-shadow-selected: 0 0 0 1px rgba(246, 246, 246, .36), 0 18px 42px rgba(0, 0, 0, .28);
@@ -177,7 +183,9 @@ html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .pr
     margin: 12px 14px 0 !important;
     padding: 12px 13px !important;
     min-height: 72px !important;
-    font-size: 12px !important;
+    /* 2026-10-29（用户要求）：原先硬编码 12px 会压掉节点自带的字号设置，
+       导致提示词字号改不动；改为跟随节点变量（默认 16px）。 */
+    font-size: var(--prompt-node-font-size, 17px) !important;
     line-height: 1.5 !important;
 }
 
@@ -855,10 +863,11 @@ html body .world .image-node.workflow-group-node .smart-group-card {
 }
 
 /* ===== V10-08 最终覆盖：生成动画 X 与媒体圆角由皮肤文件兜底 =====
-   本文件在 smart-canvas.css 之后加载，所以这里负责最终显示效果。 */
+   本文件在 smart-canvas.css 之后加载，所以这里负责最终显示效果。
+   2026-10-30（用户要求）随节点外框 18px → 8px 一起收紧。 */
 html body .world {
-    --smart-unified-media-radius: 18px;
-    --smart-pending-media-radius: 18px;
+    --smart-unified-media-radius: 8px;
+    --smart-pending-media-radius: 8px;
 }
 
 html body .world .image-node.node-pending .generation-pending-wrap .pending-pill-cancel,
@@ -1480,8 +1489,15 @@ html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item {
     align-items: center !important;
     justify-content: center !important;
     overflow: hidden !important;
-    border: 1px solid rgba(148, 163, 184, .38) !important;
-    border-radius: 12px !important;
+    /* 2026-10-29（用户反馈「怎么显示了2圈线」）：这里原本是 1px rgba(148,163,184,.38) 的冷灰描边。
+       2026-10-29 把裁剪半径从 18px 钉回 12px 之后，格子四角的弧线不再被切掉，这条边框就整圈露了出来，
+       与节点外框并排成「一大一小两圈线」。降到几乎不可见，只保留一点分隔感。 */
+    /* 2026-10-29（用户要求）：格子在亮图上会被看成第二圈线，取消描边 */
+    /* 2026-10-30（用户要求）节点外框收到 8px：格子裁剪/圆角与外框同源 12px → 8px，
+       避免「内层比外框圆」。 */
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    clip-path: inset(0 round 8px) !important;
     background: var(--soft) !important;
 }
 html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > img,
@@ -1518,6 +1534,9 @@ html body .world .image-node .thumb-grid.append-pending-grid > .thumb-item > .me
     object-fit: contain !important;
     object-position: center center !important;
     background: var(--soft) !important;
+    /* 2026-10-30：媒体自身圆角/裁剪与格子（8px）同源。 */
+    border-radius: 8px !important;
+    clip-path: inset(0 round 8px) !important;
 }
 
 /* ===== 2026-10-10（用户要求）生成等待：格内中心纯文字小字「生成中.....」 =====
@@ -1722,7 +1741,10 @@ html body .world .image-node.smart-group-node .smart-group-card.pure-image-group
     background-image: none !important;
     background-size: auto !important;
     background-position: 0 0 !important;
-    border: 1px solid rgba(148, 163, 184, .38) !important;
+    /* 2026-10-29（用户反馈「怎么显示了2圈线」）：与普通多图组格子同步，冷灰描边降到几乎不可见，
+       避免与外框并排成两圈线。 */
+    /* 2026-10-29（用户要求）：格子在亮图上会被看成第二圈线，取消描边 */
+    border: 1px solid transparent !important;
     /* 2026-10-12 修「角落残缺」：border-radius 与 clip-path 必须同源——此前 radius 硬编码 12px、
        clip 用 var(--smart-unified-media-radius)=18px（skin 860 定义），18px 裁切把 12px 边框圆角
        切掉一角。现在三层（格子/内层卡/媒体）全部统一用该变量，与普通 Group 格子完全一致。 */
@@ -2155,3 +2177,38 @@ html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-btn > span { color:#9a9a9a; }
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-btn:hover { border-color:rgba(220,220,220,.6); }
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node) .loop-output-menu { background:#303030; border-color:rgba(154,154,154,.34); }
+
+/* ===== 2026-10-28 工作流组：更小的圆角（最终覆盖） =====
+   必须放在文件末尾：上方 363 行的通用分组规则与 855 行的 .smart-group-card 规则
+   都用了 !important，同特异性靠后生效，写在中途会被它们压回去。 */
+html body .world .image-node.workflow-group-node {
+    border-radius: 8px !important;
+}
+html body .world .image-node.workflow-group-node .smart-group-card {
+    border-radius: 7px !important;
+}
+
+/* ===== 2026-10-28 智能分组：与工作流组统一为 8px（用户要求） =====
+   同样要写在文件末尾：363 行的通用分组规则（--gbz-node-radius=18px）和
+   571/847 行的 .smart-group-card（calc(18px - 1px)）都是 !important，
+   同特异性靠后生效。内层卡依旧比外框小 1px，双圈同心。 */
+html body .world .image-node.smart-group-node:not(.smart-group-member-node) {
+    border-radius: 8px !important;
+    /* 组内格子原本继承 --smart-unified-media-radius(18px)，外框收到 8px 后
+       格子比外框还圆，视觉上会“内圆外方”。这里让格子跟随外框。 */
+    --smart-unified-media-radius: 8px;
+}
+html body .world .image-node.smart-group-node:not(.smart-group-member-node) .smart-group-card {
+    border-radius: 7px !important;
+}
+
+/* 2026-10-30（用户要求）提示词/LLM 正文提亮一档：
+   深色主题 .92 白 → .96 近纯白；浅色主题 #141416 → 中灰 #4a4d54。 */
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
+html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card .prompt-node-llm-output {
+    color: rgba(250, 250, 252, .96) !important;
+}
+html body.theme-light .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
+html body.theme-light .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card .prompt-node-llm-output {
+    color: rgba(74, 77, 84, .96) !important;
+}

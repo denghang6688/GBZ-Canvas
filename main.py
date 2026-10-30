@@ -697,7 +697,9 @@ RUNNINGHUB_FALLBACK_CHAT_MODELS = [
     "openai/gpt-5.1",
 ]
 JIMENG_DEFAULT_IMAGE_MODELS = [
+    "5.0Pro",
     "5.0",
+    "4.7",
     "4.6",
     "4.5",
     "4.1",
@@ -705,15 +707,21 @@ JIMENG_DEFAULT_IMAGE_MODELS = [
     "3.1",
     "3.0",
 ]
+# 2026-10-29：对齐 dreamina CLI 1.4.22（2026-10-28 发布）的支持集。
+# 旧清单里的 3.5pro / 3.0pro / 3.0 / 3.0fast 视频模型已被 CLI 移除
+# （新版帮助只列 seedance 家族，且明确"legacy values are rejected"），
+# 继续保留会让用户选中后提交直接被拒，所以换成当前真实可用的一组。
 JIMENG_DEFAULT_VIDEO_MODELS = [
+    "seedance2.5",
     "seedance2.0_vip",
     "seedance2.0fast_vip",
     "seedance2.0",
     "seedance2.0fast",
-    "3.5pro",
-    "3.0pro",
-    "3.0",
-    "3.0fast",
+    "seedance2.0mini",
+    # 2026-10-29：image2video / frames2video 另支持这两档旧 seedance，
+    # text2video / multimodal2video 不支持（画布端按指令白名单过滤，不会误显示）。
+    "seedance1.5pro",
+    "seedance1.0fast",
 ]
 CODEX_DEFAULT_IMAGE_MODELS = ["gpt-image-2", "$imagegen"]
 CODEX_DEFAULT_CHAT_MODELS = ["gpt-5.5"]
@@ -735,6 +743,12 @@ JIMENG_LEGACY_IMAGE_MODELS = {
 JIMENG_LEGACY_VIDEO_MODELS = {
     "jimeng-video-720p",
     "jimeng-video-1080p",
+    # 2026-10-29：CLI 1.4.22 起只保留 seedance 家族，这几档视频模型已下线，
+    # 选中后提交会被 CLI 以"unsupported / legacy value"直接拒绝，故在规范化时剔除。
+    "3.0",
+    "3.0fast",
+    "3.0pro",
+    "3.5pro",
 }
 try:
     JIMENG_DEFAULT_POLL_SECONDS = max(1, min(3600, int(os.getenv("JIMENG_POLL_SECONDS", "900"))))
@@ -1260,13 +1274,15 @@ def merge_default_api_providers(providers, inject_missing=True):
             continue
         current["protocol"] = "jimeng"
         current["base_url"] = ""
+        # 2026-10-29：默认清单放前面（去重保留首个），保证新模型（5.0Pro / 4.7 / seedance2.5）
+        # 出现在画布模型下拉的最前面；用户自定义的额外模型顺延到后面，不会被删掉。
         current["image_models"] = model_list_from_values([
-            *[item for item in (current.get("image_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_IMAGE_MODELS],
             *JIMENG_DEFAULT_IMAGE_MODELS,
+            *[item for item in (current.get("image_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_IMAGE_MODELS],
         ])
         current["video_models"] = model_list_from_values([
-            *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
             *JIMENG_DEFAULT_VIDEO_MODELS,
+            *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
         ])
     # OpenAI/Antigravity CLI 和即梦一样作为协议使用：用户选中 CLI 协议时再规范化模型与地址，不强制额外注入平台。
     for current in merged:
@@ -6644,12 +6660,19 @@ def jimeng_ratio_from_size(size, fallback="1:1"):
 
 # 官方 dreamina 支持的图片模型（来自 text2image/image2image -h）。
 # image2image 不支持 3.0/3.1。
-JIMENG_TEXT2IMAGE_MODELS = {"3.0", "3.1", "4.0", "4.1", "4.5", "4.6", "5.0"}
-JIMENG_IMAGE2IMAGE_MODELS = {"4.0", "4.1", "4.5", "4.6", "5.0"}
+JIMENG_TEXT2IMAGE_MODELS = {"3.0", "3.1", "4.0", "4.1", "4.5", "4.6", "4.7", "5.0", "5.0Pro"}
+JIMENG_IMAGE2IMAGE_MODELS = {"4.0", "4.1", "4.5", "4.6", "4.7", "5.0", "5.0Pro"}
 
 def jimeng_normalize_image_model(model):
-    match = re.search(r"(\d+\.\d+)", str(model or ""))
-    return match.group(1) if match else ""
+    """把用户选择的模型名归一成 CLI 的 --model_version 值。
+    2026-10-29：CLI 1.4.22 起支持 Seedream 5.0 Pro，参数值是 5.0Pro（大小写敏感、无空格）。
+    老的正则只抓 "5.0"，会把 5.0Pro 静默降级成 5.0，所以这里单独识别 Pro 后缀。"""
+    text = str(model or "")
+    match = re.search(r"(\d+\.\d+)\s*(pro)?", text, re.IGNORECASE)
+    if not match:
+        return ""
+    version = match.group(1)
+    return f"{version}Pro" if match.group(2) else version
 
 def jimeng_image_model_version(model, mode="text2image"):
     version = jimeng_normalize_image_model(model)
@@ -6660,6 +6683,8 @@ def jimeng_image_resolution(model, size, mode="text2image"):
     text = str(model or "").lower()
     if "4k" in text:
         desired = "4k"
+    elif "1.5k" in text:
+        desired = "1.5k"
     elif "1k" in text:
         desired = "1k"
     elif "2k" in text:
@@ -6669,6 +6694,10 @@ def jimeng_image_resolution(model, size, mode="text2image"):
         desired = "4k" if max(width, height) > 2048 else "2k"
     # 按官方规则收敛到模型允许的分辨率
     version = jimeng_normalize_image_model(model)
+    # 2026-10-29（CLI 1.4.22）：5.0Pro 支持 1.5k / 2k / 4k（不含 1k），
+    # text2image 与 image2image 都一样，所以放在 image2image 分支之前单独处理。
+    if version == "5.0Pro":
+        return "4k" if desired == "4k" else ("1.5k" if desired in ("1k", "1.5k") else "2k")
     if mode == "image2image":
         # image2image 只支持 2k/4k
         return "4k" if desired == "4k" else "2k"
@@ -6678,8 +6707,11 @@ def jimeng_image_resolution(model, size, mode="text2image"):
     # 4.x/5.0 只支持 2k/4k
     return "4k" if desired == "4k" else "2k"
 
-# 仅 VIP seedance 支持 1080P；其余模型最高 720P（官方无 480P 选项）
-JIMENG_VIDEO_1080P_MODELS = {"seedance2.0_vip", "seedance2.0fast_vip"}
+# 仅 VIP seedance 支持 1080P；其余模型最高 720P
+# 2026-10-29（CLI 1.4.22）：seedance2.5 支持 480p/720p/1080p（VIP-only），
+# 且它是唯一支持 480p 的档位；seedance2.0_vip 最高到 4k（画布暂无 4K 选项，见下）。
+JIMENG_VIDEO_1080P_MODELS = {"seedance2.0_vip", "seedance2.0fast_vip", "seedance2.5"}
+JIMENG_VIDEO_480P_MODELS = {"seedance2.5"}
 
 def jimeng_video_resolution(model, resolution):
     version = jimeng_video_model_version(model)
@@ -6687,17 +6719,24 @@ def jimeng_video_resolution(model, resolution):
     if requested not in {"480P", "720P", "1080P"}:
         text = str(model or "").lower()
         requested = "1080P" if "1080" in text else "720P"
+    if requested == "480P" and version in JIMENG_VIDEO_480P_MODELS:
+        return "480P"
     if requested == "1080P" and version in JIMENG_VIDEO_1080P_MODELS:
         return "1080P"
     return "720P"
 
 # 各模型支持的时长区间（秒）：3.0 系列 3-10，3.5pro 4-12，seedance 4-15
+# 2026-10-29（CLI 1.4.22）：seedance2.5 支持 4-30s
 def jimeng_video_duration_range(model):
     version = jimeng_video_model_version(model)
     if version in ("3.0", "3.0fast", "3.0pro"):
         return 3, 10
     if version == "3.5pro":
         return 4, 12
+    if version == "seedance2.5":
+        return 4, 30
+    if version == "seedance1.5pro":
+        return 5, 12
     return 4, 15
 
 def jimeng_video_duration(duration, model=None):
@@ -6721,11 +6760,17 @@ def jimeng_transition_duration(total_duration, transition_count):
 def jimeng_video_model_version(model):
     value = str(model or "").strip()
     low = value.lower()
+    # 2026-10-29：对齐 CLI 1.4.22 —— 新增 seedance2.5 / seedance2.0mini / seedance1.5pro / seedance1.0fast。
+    # 注意顺序即匹配优先级：seedance2.0mini 必须排在 seedance2.0 之前，否则会被 "seedance2.0" 子串吃掉。
     aliases = {
+        "seedance2.5": "seedance2.5",
         "seedance2.0fast_vip": "seedance2.0fast_vip",
         "seedance2.0_vip": "seedance2.0_vip",
+        "seedance2.0mini": "seedance2.0mini",
         "seedance2.0fast": "seedance2.0fast",
         "seedance2.0": "seedance2.0",
+        "seedance1.5pro": "seedance1.5pro",
+        "seedance1.0fast": "seedance1.0fast",
         "3.0_fast": "3.0fast",
         "3.0fast": "3.0fast",
         "3.0_pro": "3.0pro",
@@ -6995,7 +7040,10 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
                     f"--duration={duration}",
                     f"--poll={jimeng_poll_seconds()}",
                 ]
-                jimeng_append_model_resolution_args(args, payload, include_model=True)
+                # 2026-10-29：multiframe2video 的 model_version 是固定的、不可配置，
+                # 该子命令根本没有 --model_version 这个 flag，传了会直接
+                # "unknown flag: --model_version" 失败，所以这里只补 video_resolution。
+                jimeng_append_model_resolution_args(args, payload, include_model=False)
         elif image_refs:
             image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(image_refs[0]), "image")
             temp_paths.extend(created)

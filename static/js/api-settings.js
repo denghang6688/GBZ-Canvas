@@ -99,10 +99,12 @@ const LINGJING_REGISTER_URL = 'https://apistudio.vip/register?aff=IQiM';
 const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
 const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=WYHULTBN3EEQ';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
-const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
-const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.0fast_vip', 'seedance2.0_vip'];
+// 2026-10-29：对齐 dreamina CLI 1.4.22（2026-10-28）—— 图片新增 5.0Pro / 4.7，
+// 视频换成当前的 seedance 家族（旧的 3.5pro / 3.0pro / 3.0 / 3.0fast 已被 CLI 移除）。
+const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0Pro', '5.0', '4.7', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
+const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.5', 'seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0', 'seedance2.0fast', 'seedance2.0mini', 'seedance1.5pro', 'seedance1.0fast'];
 const JIMENG_LEGACY_IMAGE_MODELS = new Set(['jimeng-image-2k', 'jimeng-image-4k']);
-const JIMENG_LEGACY_VIDEO_MODELS = new Set(['jimeng-video-720p', 'jimeng-video-1080p']);
+const JIMENG_LEGACY_VIDEO_MODELS = new Set(['jimeng-video-720p', 'jimeng-video-1080p', '3.0', '3.0fast', '3.0pro', '3.5pro']);
 const CODEX_DEFAULT_IMAGE_MODELS = ['$imagegen'];
 const CODEX_DEFAULT_CHAT_MODELS = ['gpt-5.5'];
 const GEMINI_CLI_DEFAULT_IMAGE_MODELS = ['auto'];
@@ -149,8 +151,8 @@ function applyCliProtocolDefaults(item, protocol){
     item.base_url = '';
     item.protocol = value;
     if(value === 'jimeng'){
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
+        item.image_models = unique([...JIMENG_DEFAULT_IMAGE_MODELS, ...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim()))]);
+        item.video_models = unique([...JIMENG_DEFAULT_VIDEO_MODELS, ...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim()))]);
         item.chat_models = unique(item.chat_models || []);
     } else if(value === 'codex'){
         item.image_models = unique([...(item.image_models || []), ...CODEX_DEFAULT_IMAGE_MODELS]);
@@ -766,8 +768,8 @@ function applyProviderOnboardingDefaults(id){
     } else if(id === 'jimeng'){
         item.base_url = '';
         item.protocol = 'jimeng';
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
+        item.image_models = unique([...JIMENG_DEFAULT_IMAGE_MODELS, ...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim()))]);
+        item.video_models = unique([...JIMENG_DEFAULT_VIDEO_MODELS, ...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim()))]);
     } else if(id === 'codex'){
         applyCliProtocolDefaults(item, 'codex');
     } else if(id === 'gemini-cli'){
@@ -2641,8 +2643,8 @@ function renderEditor(){
     if(isJimeng){
         item.base_url = '';
         item.protocol = 'jimeng';
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
+        item.image_models = unique([...JIMENG_DEFAULT_IMAGE_MODELS, ...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim()))]);
+        item.video_models = unique([...JIMENG_DEFAULT_VIDEO_MODELS, ...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim()))]);
         keyInput.placeholder = '即梦 CLI 使用本机 dreamina login，无需 API Key';
         keyHint.textContent = '请先在终端安装 dreamina CLI，并执行 dreamina login';
     }
@@ -3630,8 +3632,8 @@ async function addCliProvider(kind){
     item.base_url = '';
     item.protocol = preset.protocol;
     if(preset.protocol === 'jimeng'){
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
+        item.image_models = unique([...JIMENG_DEFAULT_IMAGE_MODELS, ...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim()))]);
+        item.video_models = unique([...JIMENG_DEFAULT_VIDEO_MODELS, ...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim()))]);
         item.chat_models = unique(item.chat_models || []);
     } else {
         applyCliProtocolDefaults(item, preset.protocol);

@@ -216,7 +216,15 @@ body.smart-node-drag .image-node .image-wrap > .media-video-card { transition:no
 .image-node.group-node { padding:0; border-radius:16px; overflow:visible; background:var(--image-group-bg, rgba(255,255,255,.46)); border:1px solid var(--image-group-border, rgba(154,154,154,.35)); box-shadow:0 10px 30px rgba(16,16,16,.06); backdrop-filter:blur(12px); }
 /* 2026-09-28 组节点工具条要浮在节点上方（top:-46px），overflow:hidden 会把它裁掉；
    圆角裁剪改由内层 node-body 负责 */
-.image-node.group-node .node-body { overflow:hidden; border-radius:12px; }
+/* 2026-10-28 内层裁剪半径原本是 12px，比外框 16px 小 4px，内容四角永远比边框“更方”；
+   改成 15px（外框 16px 减 1px 边框）内外弧线才贴合 */
+.image-node.group-node .node-body { overflow:hidden; border-radius:15px; }
+/* 组内拼贴块 / 宫格块的外角跟随组框：这几类网格自带 border-radius:0，
+   白底图一旦贴到边角就会露出直角，看着像“没被组的圆角包住” */
+.image-node.group-node .node-body > .thumb-grid,
+.image-node.grid-split-node > .node-body > .thumb-grid.grid-split-layout {
+    border-radius:12px !important;
+}
 .theme-dark .image-node.group-node { background:var(--image-group-bg, rgba(22,22,26,.92)); border-color:var(--image-group-border, rgba(154,154,154,.28)); }
 .image-node.history-group-node { border-color:rgba(154,154,154,.34); background:rgba(247,247,247,.66); }
 .theme-dark .image-node.history-group-node { border-color:rgba(148,148,148,.28); background:rgba(31,31,31,.42); }
@@ -330,11 +338,11 @@ body.smart-node-drag .image-node .image-wrap > .media-video-card { transition:no
 .image-node.smart-group-member-node .node-resize-handle,
 .image-node.smart-group-member-node .node-hint { display:none !important; }
 .image-node.smart-group-member-node .loop-smart-card::before { content:"Loop"; width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:10px; font-weight:900; background:var(--soft); }
-.image-node.workflow-group-node { z-index:0; box-sizing:border-box; padding:0; border-radius:12px; background:var(--workflow-group-bg, rgba(31,31,31,.58)); border:1px solid color-mix(in srgb, var(--workflow-group-border, rgba(150,150,150,.58)) 90%, rgba(226,226,226,.28)); box-shadow:inset 0 0 0 1px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.24); backdrop-filter:none; overflow:visible; pointer-events:auto; }
+.image-node.workflow-group-node { z-index:0; box-sizing:border-box; padding:0; border-radius:8px; background:var(--workflow-group-bg, rgba(31,31,31,.58)); border:1px solid color-mix(in srgb, var(--workflow-group-border, rgba(150,150,150,.58)) 90%, rgba(226,226,226,.28)); box-shadow:inset 0 0 0 1px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.24); backdrop-filter:none; overflow:visible; pointer-events:auto; }
 .theme-dark .image-node.workflow-group-node { background:var(--workflow-group-bg, rgba(31,31,31,.58)); border-color:color-mix(in srgb, var(--workflow-group-border, rgba(150,150,150,.58)) 90%, rgba(226,226,226,.18)); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 0 0 1px rgba(0,0,0,.34); }
 .image-node.workflow-group-node:hover,
 .image-node.workflow-group-node.selected { border-color:color-mix(in srgb, var(--strong) 74%, var(--workflow-group-border, rgba(154,154,154,.42))); box-shadow:0 0 0 1px color-mix(in srgb, var(--strong) 58%, transparent), inset 0 0 0 1px rgba(255,255,255,.18); }
-.workflow-group-frame { width:100%; height:100%; border-radius:11px; background:transparent; pointer-events:none; }
+.workflow-group-frame { width:100%; height:100%; border-radius:7px; background:transparent; pointer-events:none; }
 .workflow-group-title { position:absolute; left:10px; top:-34px; min-height:28px; display:inline-flex; align-items:center; gap:10px; padding:0 12px; border-radius:9px; background:var(--panel); border:1px solid var(--line); color:var(--text); font-size:15px; font-weight:900; box-shadow:0 8px 20px rgba(16,16,16,.1); pointer-events:auto; }
 .workflow-group-title-text { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:text; }
 .workflow-group-title small { color:var(--muted); font-size:12px; font-weight:850; }
@@ -1516,7 +1524,7 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .prompt-row { position:relative; display:block; min-width:0; }
 .composer-card .prompt-row { grid-area:prompt; }
 .prompt-row { position:relative; }
-.prompt-input { width:100%; height:var(--prompt-h, 150px); min-height:70px; max-height:440px; resize:none; border:1px solid var(--line); border-radius:13px; outline:none; padding:12px 46px 12px 15px; background:var(--card); color:var(--text); font-size:14px; font-weight:400; line-height:1.7; overflow:auto; transition:border-color .15s ease, box-shadow .15s ease; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; scrollbar-width:none; scrollbar-color:transparent transparent; }
+.prompt-input { width:100%; height:var(--prompt-h, 150px); min-height:70px; max-height:440px; resize:none; border:1px solid var(--line); border-radius:13px; outline:none; padding:12px 46px 12px 15px; background:var(--card); color:color-mix(in srgb, var(--text) 68%, var(--muted)); font-size:17px; font-weight:400; line-height:1.65; overflow:auto; transition:border-color .15s ease, box-shadow .15s ease; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; scrollbar-width:none; scrollbar-color:transparent transparent; }
 /* 粘贴进来的富文本可能自带 white-space:nowrap 内联样式导致长行溢出，统一强制折行（引用 chip 除外） */
 .prompt-input *:not(.mention-image-token):not(.mention-image-token *):not(.tpl-chip):not(.tpl-chip *) { white-space:pre-wrap !important; overflow-wrap:anywhere !important; word-break:break-word; }
 .prompt-input::-webkit-scrollbar { width:6px; height:6px; }
@@ -3904,12 +3912,13 @@ body.theme-dark.theme-custom {
 }
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text {
     color:var(--muted) !important;
-    font-size:12px !important;
+    /* 2026-10-29：跟随节点字号变量，不再写死 12px（写死会压掉节点自身的字号设置） */
+    font-size:var(--prompt-node-font-size, 17px) !important;
     font-weight:760 !important;
 }
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text::placeholder {
     color:var(--faint) !important;
-    font-size:12px !important;
+    font-size:var(--prompt-node-font-size, 17px) !important;
     font-weight:760 !important;
 }
 .theme-dark .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
@@ -9173,8 +9182,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card .prompt-node-output-wrap .prompt-node-llm-output {
     padding-right:18px !important;
-    background:var(--prompt-node-bg, #202020) !important;
-    font-size:var(--prompt-node-font-size, 11.2px) !important;
+    background:var(--prompt-node-bg, #171717) !important;
+    font-size:var(--prompt-node-font-size, 14.2px) !important;
     font-weight:var(--prompt-node-font-weight, 500) !important;
     font-style:var(--prompt-node-font-style, normal) !important;
 }
@@ -9359,7 +9368,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .world .image-node.smart-group-member-node.selected,
 .world .smart-group-node.selected,
 .world .image-node.workflow-group-node.selected {
-    outline:1px solid var(--strong) !important;
+    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
+    outline:none !important;
     outline-offset:0 !important;
 }
 
@@ -9394,7 +9404,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .world .image-node.smart-group-member-node.selected,
 .world .smart-group-node.selected,
 .world .image-node.workflow-group-node.selected {
-    outline:1px solid var(--strong) !important;
+    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
+    outline:none !important;
     outline-offset:0 !important;
 }
 
@@ -9422,7 +9433,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .world.world.world.world.world .image-node.smart-group-member-node.selected,
 .world.world.world.world.world .smart-group-node.selected,
 .world.world.world.world.world .image-node.workflow-group-node.selected {
-    outline:1px solid var(--strong) !important;
+    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
+    outline:none !important;
     outline-offset:0 !important;
 }
 
@@ -9587,12 +9599,12 @@ body.smart-canvas-pan-low-quality .world .image-node *,
 
 /* Prompt formatting: the swatch controls the whole prompt-node backplate. */
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-card {
-    background:var(--prompt-node-surface, #202020) !important;
+    background:var(--prompt-node-surface, #171717) !important;
 }
 
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text,
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-llm-card .prompt-node-output-wrap .prompt-node-llm-output {
-    background:var(--prompt-node-bg, #202020) !important;
+    background:var(--prompt-node-bg, #171717) !important;
 }
 
 .image-node.prompt-smart-node:not(.smart-group-member-node) .floating-node-actions {
@@ -9766,9 +9778,9 @@ body.theme-dark .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-g
 html.theme-custom body .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-llm-card.has-generated-text.is-collapsed .prompt-node-output-wrap .prompt-node-llm-output.prompt-node-text,
 body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-llm-card.has-generated-text.is-collapsed .prompt-node-output-wrap .prompt-node-llm-output.prompt-node-text,
 .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-group-member-node) .prompt-node-llm-card.has-generated-text.is-collapsed .prompt-node-output-wrap .prompt-node-llm-output.prompt-node-text {
-    background:var(--prompt-node-bg, #202020) !important;
-    background-color:var(--prompt-node-bg, #202020) !important;
-    font-size:var(--prompt-node-font-size, 12px) !important;
+    background:var(--prompt-node-bg, #171717) !important;
+    background-color:var(--prompt-node-bg, #171717) !important;
+    font-size:var(--prompt-node-font-size, 15px) !important;
     font-weight:var(--prompt-node-font-weight, 500) !important;
     font-style:var(--prompt-node-font-style, normal) !important;
 }
@@ -12919,7 +12931,7 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
     outline: none !important;
 }
 /* 空态内部两层容器自带描边和分层灰底，会在面板顶部/四周形成接缝线，统一拍平成一块纯灰 */
-.image-node.minimax-h3-node { background: #202020 !important; }
+.image-node.minimax-h3-node { background: var(--gbz-node-bg) !important; }
 .image-node.minimax-h3-node .smart-run-empty-state {
     border: none !important;
     background: transparent !important;
@@ -13159,7 +13171,8 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
       漏排 .minimax-h3-node，其特异性(0,7,0)压过 12443 的 #202020(0,2,0)，
       节点背景被打成透明、与画布同色。用同款 :not 链 + minimax 类(0,8,0)且更晚出现，把面板背景拿回来。 */
 .image-node.minimax-h3-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) {
-    background: #202020 !important;
+    /* 2026-10-28：原写死 #202020，与其它节点 #181818 不一致；改读统一变量 */
+    background: var(--gbz-node-bg) !important;
     border: 1px solid transparent !important;
     border-radius: 18px !important;
     padding: 0 !important;
@@ -14163,13 +14176,20 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 /* ===== 2026-09-28（用户要求）画布工作区底色加深 =====
    9580 行（2026-07-31 density pass）把 .shell 底色定为 #141414，
    用户反馈偏亮，这里加深为 #0a0a0a（亮度减半、非纯黑，网格点仍可辨）。
-   2026-10-27（用户要求）灰度再加深 10%：#0a0a0a → #090909。 */
+   2026-10-27（用户要求）灰度再加深 10%：#0a0a0a → #090909。
+   2026-10-28（用户要求）反馈偏暗，回调一档：#090909 → #141414。
+   2026-10-28（用户要求）按参考图灰度对齐：#141414 → #1a1a1a（参考图实测 rgb(26,26,26)）。
+   2026-10-28（用户要求）反馈偏浅，深一档：#1a1a1a → #161616（比上一版 #141414 稍亮，居中取值）。
+   2026-10-29（用户要求）背景再变浅一点：#161616 → #1a1a1a（回到参考图实测的画布外层 rgb(26,26,26)，
+   与提示词卡片 #171717 形成"卡片略深于底"的层次）。
+   2026-10-30（用户要求）背景加深色一点：#1a1a1a → #141414（比节点卡片 #262626 低一档，
+   空白画布更沉，节点卡片层次更清楚）。 */
 html body .shell,
 body.theme-dark .shell,
 html.theme-dark body .shell,
 body.theme-custom .shell,
 html.theme-custom body .shell {
-    background-color:#090909 !important;
+    background-color:#141414 !important;
 }
 
 /* ===== 2026-09-28（用户要求）组节点标题：不加粗、上下居中、与浮动面板拉开 =====
@@ -16448,7 +16468,7 @@ html body .smart-run-ref-media .smart-video-canvas-mute svg {
 
 /* 上传节点的视频卡：媒体层默认 overflow:hidden 会把向上弹出的截帧菜单切掉，
    视频自带圆角，放开裁剪不影响外观（选择器权重要压过 12534 行的 :not(.empty-node) 规则）。 */
-html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-media:has(> video) {
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media:has(> video) {
     overflow:visible !important;
 }
 
@@ -18807,3 +18827,1678 @@ select.llm-rule-input option { background:#1f1f1f; color:#eee; }
 .smart-thumb-drag-ghost img,
 .smart-thumb-drag-ghost video,
 .smart-thumb-drag-ghost canvas { width:100%; height:100%; object-fit:cover; display:block; }
+
+/* ===== 2026-10-28（用户要求）生成输入框灰度对齐参考图 =====
+   参考图（无限画布 composer）实测：
+     卡片整块 rgb(38,38,38)=#262626，内部胶囊/下拉 rgb(51,51,51)=#333333，
+     输入区与外层同色（不分块），无硬边框。
+   本文件原有：卡 #161616（10941 行 !important）+ 输入区 #222222，
+   层次是"深卡套亮块"。这里改成参考图那种"整块提亮一档 + 控件再亮一档"，
+   并让输入区回到与卡片同色，只留极淡描边暗示区域。
+   注意：必须写在文件末尾，10941 行的 #161616 与 14360 行的 LLM 面板都是
+   单类 + !important，这里用 html body 提高特异性才能压住。 */
+html body .composer-card {
+    background:#262626 !important;
+    border-color:#333333 !important;
+    /* 内部胶囊、下拉、数值控件都读 --card / --soft，一并提亮，
+       否则 #222 的控件落在 #262626 的卡上会显得凹进去 */
+    --card:#333333;
+    --soft:#2c2c2c;
+}
+html body .composer-card .prompt-input {
+    background:#262626 !important;
+    border-color:rgba(255,255,255,.055) !important;
+}
+/* 输入区提亮后 placeholder 会偏暗，微调一档保证可读 */
+html body .composer-card .prompt-input[data-placeholder]:empty::before {
+    color:#7d7d7d !important;
+}
+/* 顶部引擎下拉与标题胶囊再提亮一档：#2c2c2c 落在 #262626 上几乎看不出，
+   对齐参考图的 chip 灰度 #333333（边框同步提亮，否则同色描边看不见） */
+html body .composer-card .engine-select,
+html body .composer-card .composer-engine-label {
+    background:#333333 !important;
+    border-color:#3d3d3d !important;
+}
+/* 空标题胶囊会变成一颗没有文字的灰椭圆（#composerPanelTitle 在某些引擎下为空），
+   提亮后更显眼，这里直接隐藏空状态 */
+html body .composer-card .composer-engine-label:empty {
+    display:none !important;
+}
+
+/* ===== 同步 LLM 编辑面板（prompt-llm-composer）到同一灰度 =====
+   该面板 2026-09-28 起就是"逐项对齐主 composer"的，#161616 / #222222 是当时的值；
+   主 composer 提到 #262626 后必须一起改，否则同一个输入框点开 AI 优化会突然变暗。 */
+html body .prompt-llm-composer .prompt-llm-composer-card {
+    background:#262626 !important;
+    border-color:#333333 !important;
+}
+html body .prompt-llm-composer .prompt-llm-input-shell {
+    background:#262626 !important;
+    border-color:rgba(255,255,255,.055) !important;
+}
+
+/* ===== 2026-10-28（用户要求）"添加节点"面板去掉投影 =====
+   来源：662 行 `.create-menu { box-shadow:0 22px 58px var(--shadow) }`。
+   深底上 58px 大扩散阴影会在面板四周糊出一圈灰晕，比面板本身还抢眼；
+   面板已有 1px 边框 + 16px 圆角 + .94 不透明度，靠边框就足够和画布分开，
+   所以整段投影直接去掉，不做减弱。 */
+html body .create-menu,
+html body #createMenu.create-menu,
+html body .create-menu.open {
+    box-shadow:none !important;
+    -webkit-box-shadow:none !important;
+}
+
+/* ===== 2026-10-29（用户要求）组标题：平时只显示名字 =====
+   上一版给组框画了一条贯穿整宽的 24px 带边框浅色条，视觉上像一个常显的输入框，
+   跟"名字"这件事本身不匹配。本版改为：
+     · 平时 **只有名字文字**（无边、无底、无圆角），meta 小字也不显示；
+     · 双击名字才原地变成输入框（Enter/失焦提交、Esc 取消）；
+     · 名字上不再拦截 mousedown/click，单击照常选中节点、按住照常拖动整组。
+   条高度仍保留 24px（透明），用于承载 13px 名字与编辑态输入框的垂直空间，
+   也让顶部浮动工具条有稳定的让位距离（见本块第 4 节）。
+   特异性：4 个 :not 对齐 16491 行 (0,7,3)，本块在文件末尾后置取胜；
+   工作流组标题用 image-node.workflow-group-node 双类 (0,4,2) 压过 skin 111 行。 */
+
+/* --- 1. 智能分组 / 多图组：.node-head 退成透明承载层（不画框） --- */
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head {
+    top:-24px !important;
+    height:24px !important;
+    min-height:24px !important;
+    padding:0 2px !important;
+    align-items:center !important;
+    gap:8px !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+    pointer-events:auto !important;
+    overflow:hidden !important;
+}
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head:hover,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head:hover {
+    background:transparent !important;
+}
+
+/* 名字：13px/600 纯文字，不画底色，悬停只提亮字色（提示"可双击"） */
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title {
+    font-size:13px !important;
+    font-weight:600 !important;
+    line-height:22px !important;
+    height:auto !important;
+    color:#e6e8ec !important;
+    padding:0 2px !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    max-width:calc(100% - 8px) !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+    pointer-events:auto !important;
+    cursor:text;
+    flex:0 1 auto !important;
+}
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title > svg,
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title > i,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title > svg,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title > i {
+    display:none !important;
+}
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title:hover,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title:hover {
+    background:transparent !important;
+    color:#fff !important;
+}
+
+/* meta（N 张图 / N 个视频）不显示：用户要求"只显示名字"。
+   注意 17212 行那条 4 个 :not 的规则把 .node-resolution 设为 display:flex 且带 !important，
+   这里必须凑到更高权重 (0,8,2) 才能压住。 */
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node) > .node-head > .node-resolution,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node) > .node-head > .node-resolution {
+    display:none !important;
+}
+
+/* --- 2. 编辑态：只有双击改名时才出现输入框（深底 + 描边 + 焦点光晕） --- */
+html body .world .image-node > .node-head > .node-title-input {
+    flex:0 1 auto !important;
+    width:200px !important;
+    max-width:calc(100% - 8px) !important;
+    height:22px !important;
+    padding:0 6px !important;
+    border:1px solid rgba(255,255,255,.28) !important;
+    border-radius:3px !important;
+    background:#2b2b2b !important;
+    color:#fff !important;
+    font-size:13px !important;
+    font-weight:600 !important;
+    line-height:20px !important;
+    letter-spacing:0 !important;
+    outline:0 !important;
+    pointer-events:auto !important;
+    box-shadow:0 0 0 3px rgba(255,255,255,.06) !important;
+}
+html body .world .image-node > .node-head > .node-title-input::selection {
+    background:#2b64c8 !important;
+    color:#fff !important;
+}
+
+/* --- 3. 工作流组：同样退成透明文字（双类 (0,4,2) 压过 skin 111 的 (0,3,2)） --- */
+html body .world .image-node.workflow-group-node .workflow-group-title {
+    left:0 !important;
+    right:0 !important;
+    width:auto !important;
+    top:-24px !important;
+    height:24px !important;
+    min-height:24px !important;
+    padding:0 2px !important;
+    gap:8px !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title:hover {
+    background:transparent !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-text {
+    font-size:13px !important;
+    font-weight:600 !important;
+    line-height:22px !important;
+    color:#e6e8ec !important;
+    max-width:calc(100% - 8px) !important;
+    padding:0 2px !important;
+    border-radius:0 !important;
+    background:transparent !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-text:hover {
+    background:transparent !important;
+    color:#fff !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title small {
+    /* 与多图组/智能分组一致：只显示名字，节点数不显示 */
+    display:none !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-input {
+    width:200px !important;
+    max-width:calc(100% - 60px) !important;
+    height:22px !important;
+    padding:0 6px !important;
+    border:1px solid rgba(255,255,255,.28) !important;
+    border-radius:3px !important;
+    background:#2b2b2b !important;
+    color:#fff !important;
+    font-size:13px !important;
+    font-weight:600 !important;
+    line-height:20px !important;
+    outline:0 !important;
+    box-shadow:0 0 0 3px rgba(255,255,255,.06) !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-input::selection {
+    background:#2b64c8 !important;
+    color:#fff !important;
+}
+
+/* --- 4. 工具条上移让位：条占 -24..0，浮动菜单从"框顶+10px"抬到"条顶+10px" --- */
+html body .world .image-node.group-node > .smart-node-floating-menu,
+html body .world .image-node.smart-group-node > .smart-node-floating-menu,
+html body .world .image-node.workflow-group-node > .smart-node-floating-menu {
+    bottom:calc(100% + (34px * var(--canvas-inverse-scale, 1))) !important;
+}
+
+/* ===== 2026-10-29（用户反馈）平移掉帧优化：拖动时隐藏点阵 =====
+   点阵画在 .shell 的 radial-gradient 上，13px 一格意味着全视口约 (1600/13)^2 ≈ 1.5 万个
+   渐变 tile；background-position 每帧都变，等于每帧重绘整屏 gradient。
+   平移降级模式（.smart-canvas-pan-low-quality）下直接把 background-image 关掉，
+   transform 合成完全接管；点阵本身 alpha 已极低（~0.02），拖动瞬间消失无感，
+   松手恢复。特异性 (0,2,1) 与 9803 行那条相同，靠本文件末尾后置取胜。 */
+body.smart-canvas-pan-low-quality .shell,
+.shell.smart-canvas-pan-low-quality {
+    background-image:none !important;
+}
+
+/* ===== 2026-10-29（用户要求）组颜色板对齐参考图：10 色、5 列 × 2 行 =====
+   参考图实测：圆点直径约等于工具条按钮（我们按钮 28~30px），色板是深色圆角卡片，
+   圆点纯色无描边、间距约 1/3 直径。这里：24px 圆点、9px 间距、12px 内边距、
+   16px 圆角、#1b1b1b 底。选中态用白色 2px 外圈（参考图没有选中态，按我们原有交互保留）。
+   特异性：893 行 popover 是 (0,1,0)、895 行 swatch 是 (0,2,0)，本块 (0,2,0)/(0,3,0)
+   且带 !important、位置在文件末尾，稳赢。 */
+.smart-node-floating-menu .workflow-group-color-popover {
+    display:grid !important;
+    grid-template-columns:repeat(5, 24px) !important;
+    align-content:center !important;
+    justify-content:center !important;
+    gap:9px !important;
+    height:auto !important;
+    padding:12px !important;
+    border-radius:16px !important;
+    background:#1b1b1b !important;
+    border:1px solid rgba(255,255,255,.10) !important;
+    box-shadow:0 18px 44px rgba(0,0,0,.58) !important;
+    -webkit-backdrop-filter:none !important;
+    backdrop-filter:none !important;
+}
+
+/* 圆点：纯色、无描边（参考图观感），只留一点落影。
+   ⚠️ 必须带 `html body .world .image-node` 前缀：smart-group 的浮动菜单上有一条
+   `.image-node.smart-group-node > .smart-node-floating-menu.smart-group-menu button
+   { background:transparent !important }`（(0,4,1)），会把 895 行的渐变直接压成透明，
+   导致智能分组的色点全是空圈（普通组不触发这条，所以以前只在智能分组上看得见）。
+   本选择器 (0,6,2) 稳压它。 */
+html body .world .image-node .smart-node-floating-menu .workflow-group-color-swatch {
+    width:24px !important;
+    min-width:24px !important;
+    height:24px !important;
+    padding:0 !important;
+    border:0 !important;
+    border-radius:999px !important;
+    /* 颜色不在这里给：浮层里有多条 `button{background:transparent !important}` 与
+       `.workflow-group-color-swatch{background:linear-gradient(...)}` 互相压制，
+       靠 CSS 权重拉扯很脆（实测展开态仍会变透明）。颜色改由模板内联
+       `background:#xxx !important` 提供，内联 !important 优先级最高且不受层叠影响。 */
+    filter:none !important;
+    box-shadow:0 1px 3px rgba(0,0,0,.5) !important;
+}
+html body .world .image-node .smart-node-floating-menu .workflow-group-color-swatch:hover {
+    transform:scale(1.08) !important;
+    border:0 !important;
+    box-shadow:0 0 0 2px rgba(255,255,255,.24), 0 2px 7px rgba(0,0,0,.5) !important;
+}
+html body .world .image-node .smart-node-floating-menu .workflow-group-color-swatch.active {
+    border:0 !important;
+    box-shadow:0 0 0 2px #ffffff, 0 0 14px rgba(255,255,255,.18) !important;
+}
+
+/* 色板展开态：显式抬到最高优先级。
+   浮层内有多条 `button{... !important}`（smart-group / workflow-group 的浮动菜单各有一套），
+   与 894 行的 .open 规则同域竞争；这里用最高权重 + !important 固定展开态，
+   避免色板在某些组类型上点开只有一层黑底。 */
+html body .world .image-node .smart-node-floating-menu .workflow-group-color-picker.open .workflow-group-color-popover {
+    opacity:1 !important;
+    visibility:visible !important;
+    pointer-events:auto !important;
+    transform:translateX(-50%) translateY(0) !important;
+}
+
+/* ===== 2026-10-29（用户要求）「规则智能体」面板调浅色，与画布 #161616 拉开层次 ===== */
+.llm-opt-menu {
+    background:#262626;
+    border-color:#3f3f3f;
+    box-shadow:0 20px 48px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.02) inset;
+}
+.llm-opt-menu-tabs { gap:6px; }
+.llm-opt-menu-tab {
+    background:#2f2f2f;
+    border-color:#464646;
+    color:#b0b0b8;
+}
+.llm-opt-menu-tab:hover { background:#383838; color:#e4e4ea; }
+.llm-opt-menu-chips { padding-bottom:10px; }
+.llm-opt-menu-chip {
+    background:#2f2f2f;
+    border-color:#464646;
+    color:#a4a4ac;
+}
+.llm-opt-menu-chip em { color:#7d7d85; }
+.llm-opt-menu-chip:hover { color:#e4e4ea; border-color:#565656; }
+.llm-opt-menu-chip.on { color:#c0b4ff; border-color:rgba(124,92,255,.62); background:rgba(124,92,255,.18); }
+.llm-opt-menu-chip.on em { color:#a99bff; }
+.llm-opt-menu-list::-webkit-scrollbar-thumb { background:#4a4a4a; }
+.llm-opt-menu-list::-webkit-scrollbar-thumb:hover { background:#5a5a5a; }
+.llm-opt-menu-sec { color:#9a9aa2; }
+.llm-opt-menu-sec .n { color:#6e6e76; }
+.llm-opt-menu-head { color:#9a9aa2; }
+.llm-opt-menu-title { color:#ececf1; }
+.llm-opt-menu-row:hover { background:rgba(255,255,255,.07); }
+.llm-opt-menu-row.active { background:rgba(255,214,64,.16); }
+.llm-opt-menu-foot { border-top-color:#383838; }
+.llm-opt-menu-empty { color:#7d7d85; }
+
+/* ===== 2026-10-29（用户要求）组标题胶囊化 + 组框描边降饱和 =====
+   参考图 2（Group 3 胶囊标签）与图 3（低饱和描边）：
+     · 标题从"裸文字"改成小胶囊：22px 高 / 5px 圆角 / 左右 9px 内边距，
+       底与字都由组颜色推出来（--xx-group-cap-bg / --xx-group-cap-fg，见 JS 预设表），
+       字色是同色相浅色而不是纯白 —— 字色跟随组色；
+     · 标题条整体从 -24px 下移到 -28px，让胶囊底边离组框顶部留 5px 间隙；
+     · 描边改用 color.border（饱和 38% / 明度 28.5%），只比填充亮一档，不再是一条艳边；
+     · 编辑态输入框高度 24px、行高 22px，字不会被上下裁掉（宽度由 JS 按中英字宽算）。 */
+
+/* --- 1. 多图组 / 智能分组：标题条下移 4px，胶囊贴框左缘 --- */
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head,
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head {
+    top:-28px !important;
+    padding:0 !important;
+    gap:6px !important;
+    overflow:visible !important;
+}
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title {
+    height:22px !important;
+    line-height:22px !important;
+    padding:0 9px !important;
+    border-radius:5px !important;
+    background:var(--image-group-cap-bg, #2b2b2b) !important;
+    color:var(--image-group-cap-fg, #e6e8ec) !important;
+    box-shadow:0 1px 2px rgba(0,0,0,.3) !important;
+    letter-spacing:.1px;
+}
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title {
+    height:22px !important;
+    line-height:22px !important;
+    padding:0 9px !important;
+    border-radius:5px !important;
+    background:var(--smart-group-cap-bg, #2b2b2b) !important;
+    color:var(--smart-group-cap-fg, #e6e8ec) !important;
+    box-shadow:0 1px 2px rgba(0,0,0,.3) !important;
+    letter-spacing:.1px;
+}
+/* hover 只做整体微提亮，不再把字刷成纯白（否则"跟随组色"就断了） */
+html body .world .image-node.group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title:hover {
+    background:var(--image-group-cap-bg, #2b2b2b) !important;
+    color:var(--image-group-cap-fg, #e6e8ec) !important;
+    filter:brightness(1.14);
+}
+html body .world .image-node.smart-group-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.workflow-group-node) > .node-head > .node-title:hover {
+    background:var(--smart-group-cap-bg, #2b2b2b) !important;
+    color:var(--smart-group-cap-fg, #e6e8ec) !important;
+    filter:brightness(1.14);
+}
+
+/* --- 2. 工作流组：同款胶囊（文字节点是 .workflow-group-title-text） --- */
+html body .world .image-node.workflow-group-node .workflow-group-title {
+    top:-28px !important;
+    padding:0 !important;
+    gap:6px !important;
+    overflow:visible !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-text {
+    height:22px !important;
+    line-height:22px !important;
+    font-size:13px !important;
+    font-weight:600 !important;
+    padding:0 9px !important;
+    border-radius:5px !important;
+    background:var(--workflow-group-cap-bg, #2b2b2b) !important;
+    color:var(--workflow-group-cap-fg, #e6e8ec) !important;
+    box-shadow:0 1px 2px rgba(0,0,0,.3) !important;
+    letter-spacing:.1px;
+    /* 不能用 inline-flex：纯文本会变成匿名 flex item，字被压缩后互相重叠 */
+    display:inline-block !important;
+    vertical-align:middle !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-text:hover {
+    background:var(--workflow-group-cap-bg, #2b2b2b) !important;
+    color:var(--workflow-group-cap-fg, #e6e8ec) !important;
+    filter:brightness(1.14);
+}
+
+/* --- 3. 编辑态：24px 高、行高 22，字上下不裁；圆角对齐胶囊 --- */
+html body .world .image-node > .node-head > .node-title-input {
+    height:24px !important;
+    line-height:22px !important;
+    padding:0 8px !important;
+    border-radius:5px !important;
+    background:#2b2b2b !important;
+    color:#fff !important;
+    border:1px solid rgba(255,255,255,.30) !important;
+    box-shadow:0 0 0 3px rgba(255,255,255,.06) !important;
+}
+html body .world .image-node.workflow-group-node .workflow-group-title-input {
+    height:24px !important;
+    line-height:22px !important;
+    padding:0 8px !important;
+    border-radius:5px !important;
+    background:#2b2b2b !important;
+    color:#fff !important;
+    border:1px solid rgba(255,255,255,.30) !important;
+    box-shadow:0 0 0 3px rgba(255,255,255,.06) !important;
+    max-width:calc(100% - 12px) !important;
+}
+
+/* --- 4. 浮动工具条跟着标题条下移 4px，保持 10px 间距 --- */
+html body .world .image-node.group-node > .smart-node-floating-menu,
+html body .world .image-node.smart-group-node > .smart-node-floating-menu,
+html body .world .image-node.workflow-group-node > .smart-node-floating-menu {
+    bottom:calc(100% + (38px * var(--canvas-inverse-scale, 1))) !important;
+}
+
+/* ===== 2026-10-29（用户反馈）生成框四角没有被描边包住 —— 描边改由节点外框承担 =====
+   原因链（实测复现）：
+     1) 1px 描边只画在最内层 .loading-cell 上（border-radius 12px）；
+     2) 它的父级 .image-node.node-pending > .node-body 被设成
+        border-radius:18px + overflow:hidden + clip-path:inset(0 round 18px) + contain:paint，
+        而 .node-body 是 inset:0 绝对定位铺满节点的；
+     3) loading-cell 尺寸 = 节点外尺寸（JS 写死），12px 圆角比父级 18px 更“方”，
+        四角落在父级裁剪弧的外侧 → 弧上的 1px 边框整段被裁掉，只剩直边。
+        实测描边从距角 14px 处才开始出现（18 − √(18²−17.5²) ≈ 13.8）。
+   修法：描边改画在节点自身（overflow:visible，半径与裁剪弧同为 18px），
+        与裁剪路径完全同源，四角天然闭合；内层铺满格子让位、边框透明。
+   注意：.node-body 是 inset:0 绝对定位，节点加 border 后它会自动内缩到
+        padding box 内沿（skin 1179 行的注释也写明这套约定），因此不会出现双线。 */
+html body .world .image-node.node-pending:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.minimax-h3-node):not(.pending-group-node) {
+    border: 1px solid var(--gbz-node-line-soft, rgba(226, 226, 226, .20)) !important;
+    border-radius: var(--gbz-node-radius, 18px) !important;
+    box-sizing: border-box !important;
+}
+/* 内层那张“铺满整框”的占位卡让出描边，避免与外框形成双线；
+   它的 12px 圆角本来就被父级 18px 裁掉，实际不起作用，保留几何不变。 */
+html body .world .image-node.node-pending .pending-3000-wrap > .loading-cell.single,
+html body .world .image-node.node-pending .node-body > .loading-cell.single {
+    border-color: transparent !important;
+}
+/* 同心收口：内层裁剪弧比外框半径小 1px（18 → 17），与外框描边平行贴合，
+   否则 18px 弧内缩 1px 后圆心不重合，圆弧内侧会露出一线画布底色。 */
+html body .world .image-node.node-pending:not(.pending-group-node) > .node-body {
+    border-radius: calc(var(--gbz-node-radius, 18px) - 1px) !important;
+    clip-path: inset(0 round calc(var(--gbz-node-radius, 18px) - 1px)) !important;
+}
+
+/* ===== 2026-10-29（用户要求）LLM 编辑面板输入框字号 +2 =====
+   对象 = #promptLlmInstruction（.prompt-llm-composer-input），即点开 LLM 节点后
+   那个带引用图缩略图、底部有「火山引擎 / 模型 / 生成」的面板里的文本区。
+   原值 14px（smart-canvas.css:14384 覆盖了 10028 的 13px）→ 16px。
+   选择器多一层 .prompt-llm-input-shell，压过 14384 的同名规则。 */
+html body .prompt-llm-composer .prompt-llm-input-shell .prompt-llm-composer-input {
+    font-size:16px !important;
+}
+
+/* ===== 2026-10-29（用户要求）素材名双击可编辑 + 参考图样式落地 =====
+   对象 = 单图/单视频/单音频素材节点（非组框/智能分组/上传入口/空节点/生成中/minimax-h3）。
+   参照已确认预览（preview/asset-title-preview.html，10px/400 版）：
+   ① 文件名 10px/400 #9aa0a6（原 11px/900 全大写），双击原地改名（写回 node.title，
+      生成产物兜底名维持"图片节点 N"方案 A）；
+   ② 分辨率 10px/400 #767b81，仍固定标题栏右上角（17212 的定位不动，只改字）；
+   ③ 悬停只提亮名字（#e2e5ea），分辨率不动；
+   ④ 编辑框 #2b2b2b 底 / 1px 白30% 边 / 圆角 5px / 24px 高 / 10px 字。
+   node-head 是 pointer-events:none（16491），标题要接双击必须显式 auto。
+   特异度 (0,12,2) 压过 17147 (0,7,2) 与 17212 (0,8,2)。 */
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-title {
+    font-size:10px !important;
+    font-weight:400 !important;
+    letter-spacing:0 !important;
+    text-transform:none !important;
+    color:#9aa0a6 !important;
+    height:24px !important;
+    line-height:24px !important;
+    gap:5px !important;
+    pointer-events:auto !important;
+    cursor:text;
+}
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-title i,
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-title svg {
+    width:11px !important;
+    height:11px !important;
+    flex:0 0 11px !important;
+    color:#8b9098 !important;
+    stroke-width:1.8 !important;
+}
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head:hover > .node-title {
+    color:#e2e5ea !important;
+}
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head:hover > .node-title i,
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head:hover > .node-title svg {
+    color:#b9bec6 !important;
+}
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-resolution {
+    font-size:10px !important;
+    font-weight:400 !important;
+    color:#767b81 !important;
+    letter-spacing:.2px !important;
+    height:24px !important;
+    line-height:24px !important;
+}
+/* 图片外侧旧分辨率角标（14px/500）一律不在单素材节点出现：
+   分辨率只由标题栏那一份 10px 承担，避免同一节点两个字号的"一会大一会小"。
+   JS updateImageResolutionBadgeElement() 已改为把值写进标题栏，这条是纯兜底
+   （压过 16056 的 (0,13,2)）。 */
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) .node-body .image-resolution-badge.image-resolution-badge-outside {
+    display:none !important;
+}
+/* 编辑态输入框（仅单素材节点走这条；组框沿用 18957 的 13px/600/圆角3） */
+html body .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-title-input {
+    height:24px !important;
+    padding:0 8px !important;
+    border:1px solid rgba(255,255,255,.30) !important;
+    border-radius:5px !important;
+    background:#2b2b2b !important;
+    font-size:10px !important;
+    font-weight:400 !important;
+    line-height:22px !important;
+}
+/* 浅色主题（对应 17238-17239 的浅色覆写） */
+html body.theme-light .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-title { color:rgba(60,63,68,.78) !important; }
+html body.theme-light .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head:hover > .node-title { color:rgba(20,22,26,.92) !important; }
+html body.theme-light .world .image-node:not(.prompt-smart-node):not(.loop-smart-node):not(.storyboard-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.group-node):not(.upload-entry-node):not(.empty-node):not(.minimax-h3-node) > .node-head > .node-resolution { color:rgba(60,63,68,.5) !important; }
+
+
+/* 2026-10-29（用户要求）缩放手柄常驻显示：不再需要鼠标悬停或选中节点才出现。
+   拖拽 / 缩放过程中仍然隐藏，避免挡住拖拽目标。 */
+html body .world .image-node:not(.smart-group-member-node):not(.dragging) .node-resize-handle {
+    opacity:1 !important;
+    pointer-events:auto !important;
+}
+html body.smart-node-drag .world .image-node:not(.smart-group-member-node) .node-resize-handle,
+html body .world .image-node.dragging:not(.smart-group-member-node) .node-resize-handle {
+    opacity:0 !important;
+    pointer-events:none !important;
+}
+/* 2026-10-29（用户确认）工作流组四角拉伸角标：极简折角、贴近框角、悬停才显示。
+   手柄放在 world 级覆盖层 .wf-resize-overlay（跟着组框 left/top/width/height 走），
+   不能放进组框元素内部：组框 z-index:0，组内素材画在它上面，框缩到贴内容时角上手柄会被盖住。 */
+.wf-resize-overlay {
+    position:absolute;
+    z-index:12;
+    pointer-events:none;
+}
+.wf-resize-overlay .wf-resize-handle {
+    position:absolute;
+    width:22px;
+    height:22px;
+    padding:3px;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:transparent;
+    border:0;
+    border-radius:0;
+    color:rgba(255,255,255,.40);
+    opacity:0;
+    pointer-events:none;
+    /* 反向缩放只朝框内生长：transform-origin 锚在对应角上，折角到框边的距离恒定，
+       缩放画布时既不变形也不外漂；放大倍数上限 2 倍，缩得很远时折角也不会抢过内容。 */
+    transform:scale(clamp(1, var(--canvas-inverse-scale, 1), 2));
+    transition:opacity .16s ease, color .16s ease;
+}
+.wf-resize-overlay .wf-resize-handle::before {
+    content:"";
+    width:7px;
+    height:7px;
+    border-right:1px solid currentColor;
+    border-bottom:1px solid currentColor;
+}
+html body.theme-light .wf-resize-overlay .wf-resize-handle {
+    color:rgba(24,26,30,.32);
+}
+/* 悬停该组（或鼠标压在手柄上）才浮现，平时不占视觉 */
+.wf-resize-overlay.is-hover .wf-resize-handle,
+.wf-resize-overlay:hover .wf-resize-handle,
+html body.smart-node-resize .wf-resize-overlay .wf-resize-handle {
+    opacity:1;
+    pointer-events:auto;
+}
+.wf-resize-overlay .wf-resize-handle:hover {
+    color:#ffffff;
+}
+html body.theme-light .wf-resize-overlay .wf-resize-handle:hover {
+    color:rgba(24,26,30,.82);
+}
+/* 四角内缩（完全在框内）+ 内容朝角对齐：折角贴到框角，热区仍是 22px 好点。
+   内缩量乘 1/scale，屏幕上距框边恒为 3px —— 缩放画布时角标不会往里外漂。 */
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="nw"] { left:calc(3px * var(--canvas-inverse-scale, 1));  top:calc(3px * var(--canvas-inverse-scale, 1));    transform-origin:0 0;       align-items:flex-start; justify-content:flex-start; cursor:nwse-resize; }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="ne"] { right:calc(3px * var(--canvas-inverse-scale, 1)); top:calc(3px * var(--canvas-inverse-scale, 1));    transform-origin:100% 0;    align-items:flex-start; justify-content:flex-end;   cursor:nesw-resize; }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="sw"] { left:calc(3px * var(--canvas-inverse-scale, 1));  bottom:calc(3px * var(--canvas-inverse-scale, 1)); transform-origin:0 100%;    align-items:flex-end;   justify-content:flex-start; cursor:nesw-resize; }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="se"] { right:calc(3px * var(--canvas-inverse-scale, 1)); bottom:calc(3px * var(--canvas-inverse-scale, 1)); transform-origin:100% 100%; align-items:flex-end;   justify-content:flex-end;   cursor:nwse-resize; }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="nw"]::before { transform:rotate(180deg); }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="ne"]::before { transform:rotate(-90deg); }
+.wf-resize-overlay .wf-resize-handle[data-wf-resize-dir="sw"]::before { transform:rotate(90deg); }
+
+/* 2026-10-29（用户要求「上传资源的图怎么有三圈线」）：
+   多图 / 上传资源节点的边框在悬停、选中时不再变白，始终是一圈中性灰；
+   配合上面去掉的白色描边与格子描边，整块只剩单层边框。 */
+html body .world .image-node.group-node,
+html body .world .image-node.group-node:hover,
+html body .world .image-node.group-node.selected {
+    border-color: rgb(102, 102, 102) !important;
+    box-shadow: none !important;
+}
+
+/* ===== 2026-10-29（用户确认 B 方案）上传资源节点有图后与单素材节点完全统一 =====
+   ① 去掉三层旧外观：节点自身的 #2b2b2f 底 + 1px 灰边（css 209）、
+      .upload-preview-card 的 1px rgba(226,226,226,.36)（skin 262）、
+      .upload-preview-media 的 1px 亮边（实测 computed 1px .58 白）。
+      统一后 = 无边框纯图 + 18/17px 双层同心圆角，与生成图节点一致。
+   ② 标题栏走单素材同款：top:-30px 透明条（16491 已通用），
+      文件名 10px/400 #9aa0a6（19320 同款）、分辨率右上 10px/400（19335 同款）、
+      悬停提亮、双击改名输入框同款。空态（empty-node）不在此列，保留上传入口外观。 */
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node),
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node):hover,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node).selected {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-card,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media {
+    border: 0 !important;
+    box-shadow: none !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-card {
+    border-radius: 18px !important;
+    background: #101010 !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media > img,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media > video {
+    border-radius: 17px !important;
+    clip-path: inset(0 round 17px) !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-body {
+    padding: 0 !important;
+}
+/* 旧「分辨率角标」在有图上传节点也不出现（与 19348 的单素材规则同款），分辨率只进标题栏 */
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .node-body .image-resolution-badge.image-resolution-badge-outside,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-card + .image-resolution-badge.image-resolution-badge-outside {
+    display: none !important;
+}
+/* 标题栏（与 19320/19335/19370 的单素材规则逐条同款，仅把 :not(.upload-entry-node) 换成命中上传节点） */
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head {
+    height: 24px !important;
+    min-height: 0 !important;
+    flex: 0 0 auto !important;
+    padding: 0 !important;
+    border-bottom: 0 !important;
+    background: transparent !important;
+    gap: 8px !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head > .node-title {
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: #9aa0a6 !important;
+    height: 24px !important;
+    line-height: 24px !important;
+    gap: 5px !important;
+    pointer-events: auto !important;
+    cursor: text;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head > .node-title i,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head > .node-title svg {
+    width: 11px !important;
+    height: 11px !important;
+    flex: 0 0 11px !important;
+    color: #8b9098 !important;
+    stroke-width: 1.8 !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head:hover > .node-title {
+    color: #e2e5ea !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head:hover > .node-title i,
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head:hover > .node-title svg {
+    color: #b9bec6 !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head > .node-resolution {
+    /* 与 17212 的单素材规则同款：定位到标题栏右上角，不参与标题 flex 排版 */
+    position: absolute !important;
+    top: 0 !important;
+    right: 0 !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    width: auto !important;
+    max-width: 112px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    color: #767b81 !important;
+    letter-spacing: .2px !important;
+    height: 24px !important;
+    line-height: 24px !important;
+}
+html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-head > .node-title-input {
+    height: 24px !important;
+    padding: 0 8px !important;
+    border: 1px solid rgba(255, 255, 255, .30) !important;
+    border-radius: 5px !important;
+    background: #2b2b2b !important;
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    line-height: 22px !important;
+}
+/* 浅色主题（与 19386 的单素材浅色覆写同款） */
+html body.theme-light .world .image-node.upload-entry-node:not(.empty-node) > .node-head > .node-title { color: rgba(60, 63, 68, .78) !important; }
+html body.theme-light .world .image-node.upload-entry-node:not(.empty-node) > .node-head:hover > .node-title { color: rgba(20, 22, 26, .92) !important; }
+html body.theme-light .world .image-node.upload-entry-node:not(.empty-node) > .node-head > .node-resolution { color: rgba(60, 63, 68, .5) !important; }
+
+/* ===== 2026-10-29（用户要求）上传资源节点右上角「替换」按钮 =====
+   与生图节点右上角上传角标（.smart-run-upload-fab.smart-run-corner-upload）完全同款：
+   38×38 / radius 10 / 10px 内缩 / 8% 白底 / #b8b8b8 图标 18px / hover 提亮 / 同款投影。
+   左侧生图节点最终生效的是 13385 段的灰版（白色 8% 底 + #b8b8b8 图标），这里照抄同一组数值。
+   只是类名不同（避免被 24228 行 .smart-run-upload-fab 的绑定抢走点击），
+   点击后走 data-upload-replace 绑定：原地替换唯一素材。 */
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-card .upload-replace-btn {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    left: auto !important;
+    bottom: auto !important;
+    z-index: 7 !important;
+    width: 38px !important;
+    height: 38px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: 0 !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, .08) !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .32) !important;
+    color: #b8b8b8 !important;
+    cursor: pointer !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transition: background .14s ease, color .14s ease !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+}
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-card .upload-replace-btn i,
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-card .upload-replace-btn svg {
+    width: 18px !important;
+    height: 18px !important;
+    max-width: 18px !important;
+    max-height: 18px !important;
+    min-width: 0 !important;
+    stroke-width: 2 !important;
+    color: inherit !important;
+}
+html body .world .image-node.upload-entry-node:not(.empty-node) .upload-preview-card .upload-replace-btn:hover {
+    background: rgba(255, 255, 255, .16) !important;
+    color: #e8e8e8 !important;
+}
+/* 拖动节点时隐藏，避免拖拽中误点（与 17782 生图节点 fab 同策略） */
+html body .world .image-node.upload-entry-node.dragging .upload-preview-card .upload-replace-btn {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ===== 2026-10-30 优化按钮合并：短按启停 / 长按展开面板（蓝紫配色，取自 llm-opt-menu-tab.on） ===== */
+.dynamic-params .prompt-opt-btn { position: relative; }
+.prompt-opt-panel {
+    position: fixed; z-index: 10021; width: 322px;
+    padding: 11px 12px; border-radius: 14px;
+    background: #1b1c1f; border: 1px solid #33343a;
+    box-shadow: 0 18px 44px rgba(0,0,0,.55);
+    color: #e6e6ea; font-size: 12px;
+    animation: llmOptPop .12s ease-out;
+}
+.prompt-opt-panel .po-head { display: flex; align-items: center; gap: 8px; }
+.prompt-opt-panel .po-title { font-size: 12.5px; font-weight: 500; color: #f0f0f3; }
+.prompt-opt-panel .po-rule { font-size: 11px; color: #b9a7ff; margin-left: auto; }
+.prompt-opt-panel .po-switch {
+    width: 34px; height: 19px; border-radius: 10px; flex: 0 0 auto;
+    background: #3a3b40; border: 0; position: relative; cursor: pointer; padding: 0;
+}
+.prompt-opt-panel .po-rule { margin-left: auto; }
+.prompt-opt-panel .po-switch { margin-left: auto; }
+.prompt-opt-panel .po-rule + .po-switch { margin-left: 8px; }
+.prompt-opt-panel .po-switch i {
+    position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+    border-radius: 50%; background: #9a9ca2; display: block; transition: left .12s, background .12s;
+}
+.prompt-opt-panel .po-switch.on { background: #7c5cff; }
+.prompt-opt-panel .po-switch.on i { left: 17px; background: #1b1c1f; }
+.prompt-opt-panel .po-hint { font-size: 11px; color: #82858c; line-height: 1.55; margin-top: 6px; }
+.prompt-opt-panel .po-hr { height: 1px; background: #2a2b30; margin: 10px 0; }
+.prompt-opt-panel .po-list-label { font-size: 11px; color: #7d8087; letter-spacing: .3px; margin-bottom: 5px; }
+.prompt-opt-panel .po-row {
+    display: flex; align-items: center; gap: 9px; height: 30px;
+    padding: 0 8px; border-radius: 8px; font-size: 12px; color: #b7b9c0; cursor: pointer;
+}
+.prompt-opt-panel .po-row:hover { background: rgba(255,255,255,.05); }
+.prompt-opt-panel .po-row.on { background: rgba(124,92,255,.14); color: #c9bbff; }
+.prompt-opt-panel .po-radio { width: 13px; height: 13px; border-radius: 50%; border: 1.4px solid #5a5c63; flex: 0 0 auto; }
+.prompt-opt-panel .po-row.on .po-radio { border-color: #9d84ff; box-shadow: inset 0 0 0 3px #9d84ff; }
+.prompt-opt-panel .po-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-opt-panel .po-pen {
+    margin-left: auto; opacity: .45; background: none; border: 0; color: inherit;
+    width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.prompt-opt-panel .po-pen:hover { opacity: .9; }
+.prompt-opt-panel .po-pen svg { width: 12px; height: 12px; }
+.prompt-opt-panel .po-add {
+    display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
+    font-size: 11.5px; color: #8b8e95; background: none; border: 0; cursor: pointer; width: 100%;
+}
+.prompt-opt-panel .po-add:hover { color: #c9cad0; }
+.prompt-opt-panel .po-add svg { width: 12px; height: 12px; }
+.prompt-opt-panel .po-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prompt-opt-panel .po-meta { font-size: 11px; color: #82858c; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-opt-panel .po-dot { width: 6px; height: 6px; border-radius: 50%; background: #5a5c63; flex: 0 0 auto; }
+.prompt-opt-panel .po-dot.g { background: #3ddc84; }
+.prompt-opt-panel .po-dot.r { background: #ff5a52; }
+.prompt-opt-panel .po-run {
+    height: 25px; padding: 0 9px; border-radius: 8px; flex: 0 0 auto;
+    border: 1px solid rgba(139,108,255,.46); background: rgba(124,92,255,.16); color: #c9bbff;
+    font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+}
+.prompt-opt-panel .po-run:hover { background: rgba(124,92,255,.26); color: #ded4ff; }
+.prompt-opt-panel .po-run svg { width: 11px; height: 11px; }
+
+/* ===== 2026-10-30 双击引用缩略图定位来源节点：落点闪一圈 ===== */
+.image-node.locate-flash::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border-radius: calc(var(--gbz-node-radius, 18px) + 7px);
+    border: 2px solid color-mix(in srgb, var(--text) 62%, transparent);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--text) 12%, transparent);
+    pointer-events: none;
+    z-index: 9;
+    animation: nodeLocateFlash 1.5s ease-out forwards;
+}
+html body.theme-light .image-node.locate-flash::after {
+    border-color: rgba(24, 24, 26, .42);
+    box-shadow: 0 0 0 7px rgba(24, 24, 26, .08);
+}
+@keyframes nodeLocateFlash {
+    0%   { opacity: 0; transform: scale(.982); }
+    16%  { opacity: 1; transform: scale(1); }
+    62%  { opacity: .85; transform: scale(1.006); }
+    100% { opacity: 0; transform: scale(1.014); }
+}
+
+/* ===== 2026-10-30 规则面板：拖动排序 + 批量编辑 + H3 骨架隐藏 ===== */
+.prompt-opt-panel .po-list { position: relative; }
+.prompt-opt-panel .po-grip {
+    width: 14px; height: 22px; flex: 0 0 auto; margin-left: -4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #63666d; cursor: grab; touch-action: none;
+}
+.prompt-opt-panel .po-grip svg { width: 12px; height: 12px; }
+.prompt-opt-panel .po-grip:hover { color: #9d84ff; }
+.prompt-opt-panel .po-row.dragging { opacity: .45; }
+.prompt-opt-panel .po-list.po-dragging { cursor: grabbing; }
+.prompt-opt-panel .po-list.po-dragging .po-row { pointer-events: none; }
+.prompt-opt-panel .po-drop-line {
+    position: absolute; left: 4px; right: 4px; height: 2px;
+    background: #7c5cff; border-radius: 1px; z-index: 5; pointer-events: none;
+}
+.prompt-opt-panel .po-list-label { display: flex; align-items: baseline; }
+.prompt-opt-panel .po-list-tip { margin-left: auto; font-size: 10.5px; color: #5d6067; letter-spacing: 0; white-space: nowrap; }
+.prompt-opt-panel .po-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prompt-opt-panel .po-batch {
+    height: 24px; padding: 0 9px; border-radius: 8px; font-size: 11.5px;
+    color: #b9a7ff; background: none; border: 1px solid rgba(139,108,255,.36); cursor: pointer;
+    white-space: nowrap; flex: 0 0 auto;
+}
+.prompt-opt-panel .po-add { white-space: nowrap; overflow: hidden; }
+.prompt-opt-panel .po-batch:hover { background: rgba(124,92,255,.14); color: #ded4ff; }
+.rule-skel-hint {
+    background: rgba(124,92,255,.10); border: 1px solid rgba(139,108,255,.30);
+    border-radius: 8px; padding: 7px 9px; font-size: 11.5px; line-height: 1.55;
+    color: #b9a7ff; margin-bottom: 10px;
+}
+.rules-batch-box { width: 560px; max-width: calc(100vw - 32px); text-align: left; }
+.rules-batch-box .rb-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.rules-batch-box .rb-title { font-size: 14px; font-weight: 500; color: #f0f0f3; }
+.rules-batch-box .rb-hint { font-size: 11px; color: #7d8087; }
+.rules-batch-box .rb-list { max-height: 56vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+.rules-batch-box .rb-row { border: 1px solid rgba(255,255,255,.09); border-radius: 10px; padding: 8px 9px; background: rgba(255,255,255,.03); }
+.rules-batch-box .rb-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rules-batch-box .rb-name { flex: 1; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 6px 9px; color: #fff; font-size: 12.5px; box-sizing: border-box; }
+.rules-batch-box .rb-del { width: 24px; height: 24px; border-radius: 7px; flex: 0 0 auto; border: 1px solid rgba(255,107,107,.28); background: none; color: #ff8a8a; font-size: 14px; line-height: 1; cursor: pointer; }
+.rules-batch-box .rb-del:hover { background: rgba(255,107,107,.12); }
+.rules-batch-box .rb-note { font-size: 11px; color: #b9a7ff; background: rgba(124,92,255,.10); border: 1px solid rgba(139,108,255,.26); border-radius: 7px; padding: 5px 8px; margin-bottom: 6px; line-height: 1.5; }
+.rules-batch-box .rb-text { width: 100%; min-height: 56px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 7px 9px; color: #e6e6ea; font-size: 12px; line-height: 1.55; resize: vertical; font-family: inherit; box-sizing: border-box; }
+.rules-batch-box .rb-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.rules-batch-box .rb-add { background: none; border: 1px dashed rgba(255,255,255,.2); border-radius: 8px; padding: 6px 12px; color: #b7b9c0; font-size: 12px; cursor: pointer; }
+.rules-batch-box .rb-add:hover { color: #ded4ff; border-color: rgba(139,108,255,.5); }
+
+/* ===== 2026-10-30（用户要求）运行 / 生成按钮统一为「箭头图标」按钮 =====
+   参考第三方画布面板底部那颗按钮：41×41 中性灰(147)方圆形 + 深色(#1d1d1d)向上箭头，无文字。
+   这两个按钮历史上被十几层 !important 覆盖过（999px 胶囊、紫色 #7c3aed、绿色渐变 --gen-grad、
+   亮胶囊 --strong、.prompt-llm-composer 作用域专属色…），改前面那些规则既费事又会反复。
+   这里统一在文件最末用 ID 级特异度一次钉死：#runBtn / #promptLlmRun。
+   故意不选 .run-btn 类 —— 那会连 #cascadeRunBtn「一键运行」一起改成图标，它是带文字的独立动作。 */
+html body #runBtn,
+html body #promptLlmRun {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 12px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    background: #939393 !important;
+    color: #1d1d1d !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+    opacity: 1 !important;
+    flex: 0 0 auto !important;
+    transition: background .14s ease, transform .1s ease, opacity .14s ease !important;
+}
+/* 历史 HTML / JS 里残留的文字节点一律隐藏，保证只剩箭头 */
+html body #runBtn span,
+html body #promptLlmRun span {
+    display: none !important;
+}
+html body #runBtn i,
+html body #runBtn svg,
+html body #promptLlmRun i,
+html body #promptLlmRun svg {
+    width: 19px !important;
+    height: 19px !important;
+    stroke-width: 2 !important;
+    color: inherit !important;
+    flex: 0 0 auto !important;
+}
+html body #runBtn:hover:not(:disabled),
+html body #promptLlmRun:hover:not(:disabled) {
+    background: #a6a6a6 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    filter: none !important;
+}
+html body #runBtn:active:not(:disabled),
+html body #promptLlmRun:active:not(:disabled) {
+    background: #8a8a8a !important;
+    transform: scale(.94) !important;
+}
+/* 可运行 / 不可运行：2026-10-30（用户要求）改成「有提示词=更亮白底，没有=灰色」——
+   白底是面板里最亮的元素，只有按钮真正可点时才亮起来，禁用态保持幽灵灰。 */
+html body #runBtn.is-ready:not(:disabled) {
+    background: #F2F2F2 !important;
+    color: #1A1A1A !important;
+    box-shadow: none !important;
+}
+html body #runBtn.is-ready:hover:not(:disabled) {
+    background: #FFFFFF !important;
+}
+html body #runBtn.is-ready:active:not(:disabled) {
+    background: #E2E2E2 !important;
+    transform: scale(.94) !important;
+}
+html body #runBtn:disabled,
+html body #runBtn[aria-disabled="true"] {
+    background: rgba(255, 255, 255, .10) !important;
+    color: rgba(246, 246, 246, .30) !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+}
+/* 生成中：JS 已把图标换成 loader-2（自带旋转动画），底色退回透明 */
+html body #promptLlmRun.is-running {
+    background: rgba(255, 255, 255, .10) !important;
+    color: rgba(246, 246, 246, .82) !important;
+    border: 0 !important;
+}
+/* 浅色主题：实测两个 composer 面板的卡片底恒为深色(#262626 系)，按钮保持同一支中灰即可；
+   只把禁用态从「暗底淡箭头」换成同色系（否则 rgba 白 10% 叠在深色面板上会和背景融掉）。 */
+html body.theme-light #runBtn:disabled,
+html body.theme-light #runBtn[aria-disabled="true"],
+html body.theme-light #promptLlmRun.is-running {
+    background: rgba(255, 255, 255, .10) !important;
+    color: rgba(246, 246, 246, .34) !important;
+}
+
+/* ===== 2026-10-30（用户要求）API 生图输入面板：顶行幽灵化 / 引用图缩小 / 底栏提亮 / 圆角收紧 =====
+   对齐第三方画布面板的克制感：顶行不是两颗胶囊按钮，而是"灰字 + 小箭头"的工具条文案；
+   引用图缩到 42px；底栏参数提亮让信息读得清；面板圆角从 18 收到 12。
+   和历史那批 .composer-card 规则一样，统一放在文件最末用高特异度覆盖，不改前面几十处旧值。 */
+
+/* ① 顶行：胶囊(#333 底 + #3d3d3d 边框 + 999px) → 灰色幽灵按钮（透明底 / 无边框 / 圆角 8 / 26 高 / 12.5 号） */
+html body #composer .composer-card .engine-select,
+html body #composer .composer-card .composer-engine-label {
+    height: 26px !important;
+    padding: 0 20px 0 8px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    background-color: transparent !important;
+    color: rgba(246, 246, 246, .62) !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    box-shadow: none !important;
+    transition: background-color .14s ease, color .14s ease;
+}
+/* 原生 select 的箭头在深色下又大又亮（Chrome 画的白三角），换成 10px 细箭头，
+   与参考图顶行的"灰字 + 小箭头"一致；appearance:none 只改外观，下拉行为不变。 */
+html body #composer .composer-card .engine-select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    padding-right: 18px !important;
+    /* 原生 select 宽度取「最长选项」，导致箭头被推到很远、和文字之间空一大段。
+       field-sizing:content 让宽度跟当前选中项走（Chrome 123+）；不支持时忽略，退回原宽度。 */
+    field-sizing: content !important;
+    min-width: 84px !important;
+    max-width: 168px !important;
+    text-overflow: ellipsis !important;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2.6 4.1L5 6.6l2.4-2.5' fill='none' stroke='%23f6f6f6' stroke-opacity='.55' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 5px center !important;
+    background-size: 10px 10px !important;
+}
+html body #composer .composer-card .composer-engine-label {
+    padding: 0 8px !important;
+}
+html body #composer .composer-card .engine-select:hover,
+html body #composer .composer-card .composer-engine-label:hover {
+    background-color: rgba(255, 255, 255, .06) !important;
+    color: rgba(246, 246, 246, .88) !important;
+}
+html body #composer .composer-card .engine-select:focus {
+    border-color: rgba(255, 255, 255, .16) !important;
+    background-color: rgba(255, 255, 255, .06) !important;
+    outline: none !important;
+}
+/* 圆角收紧后顶行贴着上边框会显得挤，给头部一点内缩 */
+html body #composer .composer-card .composer-head {
+    padding: 0 1px !important;
+}
+
+/* ② 引用图：60→42 后用户仍嫌小，2026-10-30 二次调整到 50：缩略图 50 / 加号 40 / 角标 11 高 7 号 /
+   删除键 15 / 间距 6，空态行高跟随。圆角 8→9 与新尺寸比例一致。 */
+html body #composer .composer-card .input-thumbs-row.has-items {
+    padding: 1px 2px 1px !important;
+}
+html body #composer .composer-card .input-thumb-list.empty {
+    min-height: 50px !important;
+}
+html body #composer .composer-card .input-thumb {
+    width: 50px !important;
+    height: 50px !important;
+    border-radius: 9px !important;
+}
+html body #composer .composer-card .input-thumb-add {
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 9px !important;
+}
+html body #composer .composer-card .input-thumb-add i,
+html body #composer .composer-card .input-thumb-add svg {
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2.2 !important;
+}
+html body #composer .composer-card .input-thumb-label {
+    height: 11px !important;
+    padding: 0 2px !important;
+    font-size: 7px !important;
+    border-radius: 999px !important;
+}
+html body #composer .composer-card .input-thumb-remove {
+    width: 15px !important;
+    height: 15px !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    right: -3px !important;
+    top: -3px !important;
+}
+/* 缩略图变大后行间距放宽一档 */
+html body #composer .composer-card .input-thumb-list {
+    gap: 6px !important;
+}
+
+/* ③ 底栏：参数文字提亮（主信息 .90 / 次级 .70 / 图标 .66），字号沿用 14.5 不变 */
+html body #composer .composer-card .smart-pill {
+    color: rgba(246, 246, 246, .90) !important;
+}
+html body #composer .composer-card .smart-pill .sub {
+    color: rgba(246, 246, 246, .70) !important;
+}
+html body #composer .composer-card .smart-pill .size-picker-label {
+    color: rgba(246, 246, 246, .90) !important;
+}
+html body #composer .composer-card .smart-pill i,
+html body #composer .composer-card .smart-pill svg {
+    opacity: .66 !important;
+}
+html body #composer .composer-card .smart-control:hover .smart-pill i,
+html body #composer .composer-card .smart-control:hover .smart-pill svg {
+    opacity: .92 !important;
+}
+/* 「·」分隔点退到 .38，不抢视线 */
+html body #composer .composer-card .size-picker-dot {
+    background: rgba(246, 246, 246, .38) !important;
+    opacity: 1 !important;
+}
+
+/* ④ 面板圆角 18→12（节点已收到 8，面板再留 18 会显得比节点还圆）；
+   内层输入框 13→10 跟随，避免"内角比外角圆"的错位。 */
+html body #composer .composer-card {
+    border-radius: 12px !important;
+}
+html body #composer .composer-card .prompt-input {
+    border-radius: 10px !important;
+}
+/* 提示词节点那个 LLM 编辑面板与主面板同族，一起收 */
+html body .prompt-llm-composer .prompt-llm-composer-card {
+    border-radius: 12px !important;
+}
+
+/* ===== 2026-10-30（用户要求）引擎下拉自绘化 + 顶行去「生图」 =====
+   原生 <select> 的展开弹层由系统绘制：深色主题下高亮项是白块，文字却是浅灰 → 看不清。
+   结构改为 engine-chip（触发器）+ engine-menu（自绘深色胶囊菜单），原生 select 只作数据源隐藏。
+   触发器对齐参考图 chip：26 高 / 圆角 8 / 12.5 号 / 浅灰胶囊底；展开层选中项为灰胶囊＋勾。 */
+html body #composer .composer-card .engine-select {
+    display: none !important;
+}
+html body #composer .composer-card .engine-select-wrap {
+    position: relative !important;
+    display: inline-flex !important;
+    min-width: 0 !important;
+}
+html body #composer .composer-card .engine-chip {
+    height: 26px !important;
+    padding: 0 24px 0 10px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    background-color: rgba(255, 255, 255, .06) !important;
+    color: rgba(246, 246, 246, .78) !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    cursor: pointer !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: background-color .14s ease, color .14s ease, border-color .14s ease !important;
+}
+html body #composer .composer-card .engine-chip::after {
+    content: '' !important;
+    position: absolute !important;
+    right: 8px !important;
+    top: 50% !important;
+    width: 10px !important;
+    height: 10px !important;
+    margin-top: -5px !important;
+    pointer-events: none !important;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2.6 4.1L5 6.6l2.4-2.5' fill='none' stroke='%23f6f6f6' stroke-opacity='.55' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-size: 10px 10px !important;
+    transition: transform .14s ease !important;
+}
+html body #composer .composer-card .engine-chip:hover {
+    background-color: rgba(255, 255, 255, .09) !important;
+    color: rgba(246, 246, 246, .92) !important;
+}
+html body #composer .composer-card .engine-chip.open {
+    background-color: rgba(255, 255, 255, .10) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+    color: #F2F2F2 !important;
+}
+html body #composer .composer-card .engine-chip.open::after {
+    transform: rotate(180deg) !important;
+}
+html body #composer .composer-card .engine-menu {
+    position: absolute !important;
+    top: calc(100% + 6px) !important;
+    left: 0 !important;
+    z-index: 40 !important;
+    min-width: 132px !important;
+    background: #2B2B2B !important;
+    border: 1px solid rgba(255, 255, 255, .09) !important;
+    border-radius: 10px !important;
+    padding: 4px !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .5) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(-3px) !important;
+    pointer-events: none !important;
+    transition: opacity .12s ease, transform .12s ease, visibility .12s !important;
+}
+html body #composer .composer-card .engine-menu.open {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
+    pointer-events: auto !important;
+}
+html body #composer .composer-card .engine-option {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
+    height: 28px !important;
+    padding: 0 8px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: rgba(246, 246, 246, .78) !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    cursor: pointer !important;
+    transition: background-color .1s ease, color .1s ease !important;
+}
+html body #composer .composer-card .engine-option:hover {
+    background: rgba(255, 255, 255, .08) !important;
+    color: rgba(246, 246, 246, .98) !important;
+}
+html body #composer .composer-card .engine-option.selected {
+    background: rgba(255, 255, 255, .11) !important;
+    color: #FFFFFF !important;
+}
+html body #composer .composer-card .engine-option svg {
+    width: 12px !important;
+    height: 12px !important;
+    flex: 0 0 auto !important;
+    color: rgba(246, 246, 246, .85) !important;
+}
+/* 顶行「生图 / 生视频 / 生音频」标题胶囊整体去掉：类型已由旁边图片/视频/音频图标表达，
+   再并排一颗文字胶囊是重复信息。ComfyUI 工作流 pill 是独立元素不受影响。 */
+html body #composer .composer-card .composer-engine-label {
+    display: none !important;
+}
+
+/* ===== 2026-10-30（用户要求）提示词大面板 =====
+   长提示词不再把输入框顶高（autoGrow 上限收到 200），看全文改走右上角扩大按钮：
+   同一个 composer 切换成屏幕居中的大面板，DOM 不克隆、状态天然同步。
+   位置由 JS 按画布坐标反算（composer 在 #world 内，world 带 translate+scale），
+   尺寸用 --canvas-inverse-scale 抵消缩放，滚轮缩放画布时面板保持原尺寸。 */
+
+/* ① 头部右侧扩大按钮：30×30 / 圆角 8 / 透明底，图标 55% 透明，hover 才浮现 */
+html body #composer .composer-card .composer-head-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex: 0 0 auto !important;
+}
+html body #composer .composer-card .composer-expand-btn {
+    width: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    background-color: transparent !important;
+    color: rgba(246, 246, 246, .55) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: background-color .14s ease, color .14s ease !important;
+}
+html body #composer .composer-card .composer-expand-btn:hover {
+    background-color: rgba(255, 255, 255, .07) !important;
+    color: rgba(246, 246, 246, .92) !important;
+}
+html body #composer .composer-card .composer-expand-btn svg,
+html body #composer .composer-card .composer-expand-btn i {
+    width: 15px !important;
+    height: 15px !important;
+    stroke-width: 2 !important;
+    color: inherit !important;
+}
+html body #composer .composer-card .composer-expand-btn .expand-icon-in,
+html body #composer .composer-card .composer-expand-btn .expand-icon-out {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+/* 展开态换成收起图标；收起态两个图标同时占位会让按钮变宽，所以严格互斥 */
+html body #composer .composer-card .composer-expand-btn .expand-icon-out {
+    display: none;
+}
+html body #composer.prompt-expanded .composer-card .composer-expand-btn .expand-icon-in {
+    display: none;
+}
+html body #composer.prompt-expanded .composer-card .composer-expand-btn .expand-icon-out {
+    display: inline-flex;
+}
+
+/* ② 展开态：屏幕居中大面板（位置 left/top 由 JS 写画布坐标） */
+html body #composer.prompt-expanded {
+    position: fixed !important;
+    left: 50% !important;
+    top: 50% !important;
+    width: min(1040px, calc(100vw - 120px)) !important;
+    height: min(640px, calc(100vh - 140px)) !important;
+    transform: translate(-50%, -50%) !important;
+    z-index: 60 !important;
+    /* 只保留透明度过渡：transform 从「节点下方」跳到「屏幕中心」如果也做过渡会拖出一条飞行轨迹 */
+    transition: opacity .16s ease !important;
+}
+html body #composer.prompt-expanded .composer-card {
+    height: 100% !important;
+    border-radius: 16px !important;
+    padding: 12px !important;
+    /* 5 行网格对应 head / thumbs / preview / prompt / params+run，让输入区吃掉剩余高度 */
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto !important;
+}
+html body #composer.prompt-expanded .prompt-row {
+    height: 100% !important;
+    min-height: 0 !important;
+}
+html body #composer.prompt-expanded .prompt-input {
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 120px !important;
+    padding: 16px 52px 16px 20px !important;
+    font-size: 17px !important;
+    line-height: 1.75 !important;
+}
+/* 大面板里输入区是绝对主角，边框弱化一档，避免一整圈实线把文字框住 */
+html body #composer.prompt-expanded .prompt-input {
+    border-color: rgba(255, 255, 255, .06) !important;
+}
+html body #composer.prompt-expanded .prompt-input:focus {
+    border-color: rgba(255, 255, 255, .14) !important;
+    box-shadow: none !important;
+}
+html body #composer.prompt-expanded .composer-card .prompt-resize {
+    display: none !important;
+}
+
+/* ③ 遮罩：铺满视口，压在画布之上、面板之下。
+   #world 带 transform 自成层叠上下文，若 composer 留在 world 里，遮罩要么盖住面板、要么被整块画布盖住；
+   所以展开时 JS 会把 composer 临时挂到 body 下（收起时移回），遮罩固定在 50、面板 60 就干净了。 */
+html body .composer-expand-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, .5);
+    cursor: default;
+}
+html body .composer-expand-mask[hidden] {
+    display: none !important;
+}
+/* 9216 行有一条 .composer { max-width:min(760px, calc(100vw - 32px)) !important }，
+   展开态必须显式放开，否则宽度仍被压在 760（高度不受影响，只有宽度被卡） */
+html body #composer.prompt-expanded {
+    max-width: none !important;
+    min-width: 0 !important;
+}
+/* AI 助手面板 z-index 58、顶部工具条 56，都比初版遮罩(50)高，会从遮罩里透出来一块亮区。
+   把遮罩提到 70、面板 80，保证展开态是「整屏压暗 + 只有提示词面板凸起」的单一焦点。 */
+html body .composer-expand-mask {
+    z-index: 70 !important;
+    background: rgba(0, 0, 0, .58) !important;
+}
+html body #composer.prompt-expanded {
+    z-index: 80 !important;
+}
+/* 展开态输入区不再画框：参考图里文字是直接铺在大面板上的，一块同色 + 弱边框的区域
+   反而像"空着没填"。去底去边后文字成为唯一内容，滚动条浮在面板上即可。 */
+html body #composer.prompt-expanded .prompt-input,
+html body #composer.prompt-expanded .prompt-input:hover,
+html body #composer.prompt-expanded .prompt-input:focus {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
+/* ===== 2026-10-30（用户要求）面板明度层级理顺 =====
+   诊断：卡片与输入区同为 #262626（无层次）；顶行引擎胶囊文字 .78 白 + 浅胶囊底，
+   比底栏参数（.90 白、透明底）更显眼 → 层级颠倒。
+   对齐左侧节点面板：顶标签 rgb(154,160,166) 灰、底部参数纯白。
+   卡 #262626→#1E1E1E（2026-10-28 曾从 #161616 提到 #262626，本次按用户新要求部分回退），
+   输入区比卡再深一档 #191919 形成"内凹字段"，内部控件变量 --card 同步降档。 */
+html body .composer-card {
+    background:#1E1E1E !important;
+    border-color:#2E2E2E !important;
+    --card:#2B2B2B;
+    --soft:#262626;
+}
+html body .composer-card .prompt-input {
+    background:#191919 !important;
+    border-color:rgba(255,255,255,.04) !important;
+}
+
+/* 顶行引擎胶囊：文字与箭头转灰（#9AA0A6 与节点顶标签一致），hover 回弹保证可点感 */
+html body #composer .composer-card .engine-chip {
+    background-color: rgba(255, 255, 255, .05) !important;
+    color: #9AA0A6 !important;
+}
+html body #composer .composer-card .engine-chip::after {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2.6 4.1L5 6.6l2.4-2.5' fill='none' stroke='%239AA0A6' stroke-opacity='.9' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+}
+html body #composer .composer-card .engine-chip:hover {
+    background-color: rgba(255, 255, 255, .09) !important;
+    color: rgba(246, 246, 246, .92) !important;
+}
+html body #composer .composer-card .engine-chip.open {
+    background-color: rgba(255, 255, 255, .10) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+    color: #F2F2F2 !important;
+}
+/* 展开态文字回到亮白，箭头也跟着回到亮箭头（基础态已被上面改成灰） */
+html body #composer .composer-card .engine-chip.open::after {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2.6 4.1L5 6.6l2.4-2.5' fill='none' stroke='%23f6f6f6' stroke-opacity='.55' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+}
+
+/* 底栏参数行：主文字提亮到纯白，次级与分隔点各提一档（胶囊保持无底，与左侧节点底栏一致） */
+html body #composer .composer-card .smart-pill {
+    color: #FFFFFF !important;
+}
+html body #composer .composer-card .smart-pill .sub {
+    color: rgba(255, 255, 255, .78) !important;
+}
+html body #composer .composer-card .smart-pill .size-picker-label {
+    color: #FFFFFF !important;
+}
+html body #composer .composer-card .size-picker-dot {
+    background: rgba(255, 255, 255, .45) !important;
+}
+
+/* ===== 2026-10-30（用户要求）面板回浅一档 =====
+   上一版压到 #1E1E1E / 输入区 #191919 后偏黑，按用户要求整体提亮 6 级，
+   保持"卡比输入区浅 5 级"的内凹关系不变。 */
+html body .composer-card {
+    background:#242424 !important;
+}
+html body .composer-card .prompt-input {
+    background:#1F1F1F !important;
+}
+
+/* ===== 2026-10-30（用户要求）面板圆角 12→8，收掉四角的深色缺口 =====
+   排查结论：卡片填充/描边/阴影/backdrop-filter/伪元素全部干净（染色测试验证填充是标准圆角），
+   四角的深色块是圆角把背后画布（以及压在下方的节点深色图）让出来的缺口，半径越大缺口越大。
+   12px 时对角深度约 5px，收到 8px 后约 3.3px，与节点圆角一致；要彻底没有只能改直角。 */
+html body #composer .composer-card {
+    border-radius: 8px !important;
+}
+html body #composer .composer-card .prompt-input {
+    border-radius: 7px !important;
+}
+
+/* ===== 2026-10-30（用户要求）提示词面板：去掉深色输入区，面板色对齐参考图 =====
+   参考图实测：画布 #1A1A1A → 面板 #262626 → 胶囊 #313131，输入区无底无边框，
+   占位文字直接铺在面板上；之前 #1F1F1F + 1px 边框的"内嵌输入卡"是参考图没有的元素。
+   面板描边压到 .05（几乎不可见），只在面板压在亮色节点上时起分离作用。 */
+html body .composer-card {
+    background: #262626 !important;
+    border-color: rgba(255, 255, 255, .05) !important;
+    --card: #2E2E2E;
+    --soft: #282828;
+}
+html body .composer-card .prompt-input,
+html body .composer-card .prompt-input:hover,
+html body .composer-card .prompt-input:focus {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+/* 引擎胶囊底色对齐参考图的 #313131（= #262626 上叠白 6%），文字维持 #9AA0A6 灰 */
+html body #composer .composer-card .engine-chip {
+    background-color: rgba(255, 255, 255, .06) !important;
+}
+/* 输入区透明后，浮在文字中央的拖拽横线会显得孤立：默认完全隐去，hover 提示词区才出现（拖拽能力保留） */
+html body .composer-card .prompt-row .prompt-resize {
+    opacity: 0 !important;
+}
+html body .composer-card .prompt-row:hover .prompt-resize,
+html body .composer-card .prompt-row:focus-within .prompt-resize {
+    opacity: 1 !important;
+}
+
+/* ===== 2026-10-30（用户要求）提示词输入框固定 3 行，超出滚动 =====
+   高度恒定 calc(3 * 1.65em + 26px) ≈ 110px（84 三行文字 + 24 内边距 + 2 边框），
+   与 JS autoGrowPromptInput 写入的 110px 一致；面板高度不再随字数变化。
+   展开大面板（.prompt-expanded）不吃这条，仍吃满剩余高度。
+   高度固定后拖拽手柄没有意义，display:none 收掉（settings.promptH 字段保留但不再生效）。 */
+html body #composer:not(.prompt-expanded) .composer-card .prompt-input {
+    /* 19 而不是 26（=3 行 84 + 24 内边距 + 2 边框）的原因：按 26 算时第 4 行会露出"半截字"。
+       逐档截图 + 像素量化：109px 露 11 设备px、107 露 7、105 露 4、103 归零，故取 103。
+       这 7px 是从第 3 行行盒下沿的空白里让出来的（字形 17px 在 28px 行盒里居中），
+       实测第 3 行字形仍是完整 17px 高、不被裁；再减就开始切字形了。 */
+    height: calc(3 * 1.65em + 19px) !important;
+    min-height: calc(3 * 1.65em + 19px) !important;
+    max-height: calc(3 * 1.65em + 19px) !important;
+}
+html body #composer .composer-card .prompt-row .prompt-resize,
+html body #composer .composer-card .prompt-row:hover .prompt-resize,
+html body #composer .composer-card .prompt-row:focus-within .prompt-resize {
+    display: none !important;
+}
+/* 原生滚动条彻底藏掉，改用下面这条自绘的 4px 指示条（JS syncPromptScrollbar 写 top/height）。
+   原因：Chrome 121+ 对 textarea/可编辑区用 overlay 滚动条，不占布局宽度、静止时不绘制，
+   实测 offsetWidth-clientWidth 恒为 0、截图里完全看不到；标准属性 scrollbar-width 一旦不是 auto
+   还会让 ::-webkit-scrollbar 整段失效（第一版就栽在这里），所以两侧都显式关掉。 */
+html body #composer .composer-card .prompt-input {
+    scrollbar-width: none !important;
+    scrollbar-color: transparent transparent !important;
+}
+html body #composer .composer-card .prompt-input::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+/* 自绘滚动条：单元素即滑块（没有轨道），4px 宽，静止时 16% 白，悬停整行提到 30% */
+html body #composer .composer-card .prompt-scrollbar {
+    position: absolute;
+    right: 4px;
+    width: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .16);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity .18s ease, background-color .18s ease;
+}
+html body #composer .composer-card .prompt-scrollbar[data-show="1"] {
+    opacity: 1;
+}
+/* 只在鼠标移到提示词区时提亮：输入时焦点常驻，若用 :focus 会让条一直停在 30%，失去"极简"的克制 */
+html body #composer .composer-card .prompt-row:hover .prompt-scrollbar {
+    background: rgba(255, 255, 255, .30);
+}
+
+/* ===== 2026-10-30（用户要求）提示词优化面板去紫：全部改中性灰 =====
+   原配色是 #7c5cff 一族（开关/选中行/立即润色/批量编辑/拖拽落点/规则名），
+   与画布其余部分的中性灰层级不搭。这里统一压到「白色不同透明度」，
+   用明度差表达状态（开启=亮、选中=白 9%、按钮=白 10%），不再引入任何彩色。
+   全部用 html body 前缀提高特异度，直接压过 19634-19740 那一段的原值。 */
+html body .prompt-opt-panel .po-switch.on { background: #d6d7db !important; }
+html body .prompt-opt-panel .po-switch.on i { background: #1b1c1f !important; }
+html body .prompt-opt-panel .po-rule { color: #9aa0a6 !important; }
+html body .prompt-opt-panel .po-row.on {
+    background: rgba(255, 255, 255, .09) !important;
+    color: #f2f2f4 !important;
+}
+html body .prompt-opt-panel .po-row.on .po-radio {
+    border-color: #d6d7db !important;
+    box-shadow: inset 0 0 0 3px #d6d7db !important;
+}
+html body .prompt-opt-panel .po-grip:hover { color: #c8c9ce !important; }
+html body .prompt-opt-panel .po-drop-line { background: rgba(255, 255, 255, .55) !important; }
+html body .prompt-opt-panel .po-run {
+    border-color: rgba(255, 255, 255, .20) !important;
+    background: rgba(255, 255, 255, .10) !important;
+    color: #ececef !important;
+}
+html body .prompt-opt-panel .po-run:hover {
+    background: rgba(255, 255, 255, .17) !important;
+    color: #ffffff !important;
+}
+html body .prompt-opt-panel .po-batch {
+    color: #c8c9ce !important;
+    border-color: rgba(255, 255, 255, .18) !important;
+}
+html body .prompt-opt-panel .po-batch:hover {
+    background: rgba(255, 255, 255, .10) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, .28) !important;
+}
+/* 规则编辑弹层 / 批量编辑里顺带的紫色块，一并中性化 */
+html body .rule-skel-hint {
+    background: rgba(255, 255, 255, .06) !important;
+    border-color: rgba(255, 255, 255, .14) !important;
+    color: #b7b9c0 !important;
+}
+html body .rules-batch-box .rb-note {
+    background: rgba(255, 255, 255, .05) !important;
+    border-color: rgba(255, 255, 255, .12) !important;
+    color: #b7b9c0 !important;
+}
+html body .rules-batch-box .rb-add:hover {
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, .30) !important;
+}
+/* 底栏那颗优化按钮的「已开启」态同样是紫色，一起改灰，避免面板灰了按钮还紫 */
+html body .dynamic-params .opt-prompt-btn.active,
+html body.theme-dark .dynamic-params .opt-prompt-btn.active {
+    color: #f0f0f3 !important;
+    background: rgba(255, 255, 255, .13) !important;
+    border-color: rgba(255, 255, 255, .24) !important;
+}
+
+/* ===== 2026-10-30（用户要求）大面板再放大一档 =====
+   旧值 1040×640（上限）按用户手绘框换算偏小：他框出的区域约等于旧面板的 1.35 倍宽、1.47 倍高，
+   换算后落在 1400×940 量级。这里取 1360×860：
+   - 宽 +31%、高 +34%，与手绘框的比例一致；
+   - 仍保留 112/128 的视口边距，1080p 下上下各留 64px，遮罩露得出来、不像全屏弹窗；
+   - 小窗口（笔记本 1366×768）自动降到 1254×640，不会顶到屏幕边。
+   内部布局不用改：输入区是 grid 的 minmax(0,1fr)，面板长高后它自己吃掉多出来的空间。 */
+html body #composer.prompt-expanded {
+    width: min(1360px, calc(100vw - 112px)) !important;
+    height: min(860px, calc(100vh - 128px)) !important;
+}
+/* 面板放大到 1360 后，小屏幕上它会盖住左下角的画布小地图；而 #minimap 是 z-index 81
+   （直接挂在 #shell 下、shell 不成层叠上下文），比面板的 80 还高，会浮在遮罩之上"穿透"出来。
+   展开期间把它压到遮罩(70)之下：跟着背景一起变暗，而不是突兀地消失或浮在最上层。 */
+html body.prompt-expanded-open #minimap {
+    z-index: 60 !important;
+}
+
+/* ===== 2026-10-30（用户定稿）大面板改窄：1360 → 1100 =====
+   1360 在 1920 屏上占 71%，两侧留白太少、长段落一行读起来太长；
+   收到 1100（占 57%，与用户圈框比例一致），高度 860 不变，宽高比 1.58 → 1.28。
+   窄屏仍按 100vw-160 兜底，1100 是上限不是定值。 */
+html body #composer.prompt-expanded {
+    width: min(1100px, calc(100vw - 160px)) !important;
+}
+
+/* ===== 2026-10-30（用户报「四边又出现黑色的角」）去掉卡片自身的 backdrop-filter =====
+   排查结论：卡片背景 var(--panel) 是不透明的 rgb(38,38,38)，blur 在视觉上没有任何作用，
+   但 Chrome 会因此给元素建一层「backdrop 根」——圆角之外、border-box 之内那块区域
+   （四角的小三角）会被这层以黑色填充，于是在画布上呈现成四个黑色的角。
+   64 行原本就有一条 `.world.canvas-scaled .composer-card *` 把子元素的 blur 关掉
+   （注释写着「避免缩放导致发虚」），但漏了卡片自己，这次补上，并覆盖展开态。
+   注意：不要用 display/visibility 隐藏，也不要改成半透明背景，否则会重新触发同样的合成问题。
+   只关卡片自己，不用 `*` 波及子元素——子元素里凡是有半透明底的（胶囊、缩略图遮罩）还靠 blur 撑质感。 */
+html body #composer .composer-card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* ===== 2026-10-30 四角缺口再收一档（用户二次反馈「四边又出现黑色的角」）=====
+   原因链：卡片是不透明的 #262626，圆角之外、border-box 之内（每角一个 8×8 的三角）
+   会露出画布；画布本身是深色渐变，于是那四个三角读作"黑色的角"。
+   8px → 3px 后缺口缩到 3×3，肉眼基本不可见；仍然保留一点圆角带来的柔化。
+   另加一层很轻的投影：面板浮在深色画布上，边缘本来没有分离度，投影能把残留的
+   1~2px 接缝盖成渐隐过渡，不会像"缺口"。 */
+html body #composer .composer-card {
+    border-radius: 3px !important;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .40) !important;
+}
+/* 展开态压在整屏遮罩上、背后是均匀色，不需要跟着收到 3px；10px 保持大面板的柔和感 */
+html body #composer.prompt-expanded .composer-card {
+    border-radius: 10px !important;
+}

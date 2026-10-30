@@ -37,6 +37,8 @@ const slashPeekState = { timer:0, hideTimer:0, idx:-1, btn:null };
 const mentionPreview = document.getElementById('mentionPreview');
 const engineSelect = document.getElementById('engineSelect');
 const composerPanelTitle = document.getElementById('composerPanelTitle');
+const promptExpandBtn = document.getElementById('promptExpandBtn');
+const composerExpandMask = document.getElementById('composerExpandMask');
 const dynamicParams = document.getElementById('dynamicParams');
 const runBtn = document.getElementById('runBtn');
 const cascadeRunBtn = document.getElementById('cascadeRunBtn');
@@ -3697,14 +3699,22 @@ function syncComposerEngineOptionsForPanel(kind){
     if(!engineSelect) return;
     const allowed = smartPanelEngineOptions(kind);
     const lock = kind === 'image' || kind === 'video' || kind === 'comfy';
+    // 2026-10-30（用户要求）：视频面板的引擎下拉不再出现「Minimax H3」（本地工作流引擎），
+    // API 生视频只保留「API 生成」；下方的 API 平台（GSRAI / 优云智算）里的 minimax-h3 模型不受影响。
+    // 仅隐藏可选项：已有 engine:'h3' 的旧节点保持原值照常运行（下拉在它们身上仍显示当前引擎），
+    // 校验白名单（applySmartPanelKindLock / onchange）仍放行 h3，用户手动切到 API 后不会再切回来。
+    const hideH3Option = kind === 'video' && engineSelect.value !== 'h3' && settings?.engine !== 'h3';
     engineSelect.querySelectorAll('option').forEach(option => {
-        const allowedOption = !lock || allowed.includes(option.value);
+        let allowedOption = !lock || allowed.includes(option.value);
+        if(hideH3Option && option.value === 'h3') allowedOption = false;
         option.hidden = !allowedOption;
         option.disabled = !allowedOption;
     });
-    if(lock && !allowed.includes(engineSelect.value)){
+    if(lock && !allowed.includes(engineSelect.value) && !(hideH3Option && engineSelect.value === 'h3')){
         engineSelect.value = allowed[0] || 'api';
     }
+    // 这里也会改 option 的 hidden/disabled 与 value，自绘 chip/菜单需要跟着刷新
+    if(typeof syncEngineChip === 'function') syncEngineChip();
 }
 function smartPanelSettingsForKind(kind, node=null){
     const panelKind = SMART_PANEL_META[kind] ? kind : 'image';
@@ -3926,7 +3936,7 @@ function stripTitleResolutionSuffix(title=''){
 //   · 生成产物（generatedResult / aiGenerated）没有语义文件名，维持「图片节点 1」这类自动命名；
 //   · image-1 / output-3 / 一长串 hex 这类无意义文件名同样回退到自动命名。
 const MATERIAL_AUTO_TITLES = new Set([
-    'Image','Video','Audio','上传','API生图','视频生成','音频生成','生图节点','ComfyUI生成',
+    'Image','Video','Audio','上传','上传节点','上传资源','API生图','视频生成','音频生成','生图节点','ComfyUI生成',
     'MS生成','RunningHub','MiniMax H3','素材','素材组','图片组','Group','File','文件'
 ]);
 const MATERIAL_MEDIA_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|tiff?|mp4|mov|webm|m4v|mkv|mp3|wav|flac|m4a|aac|ogg|opus|txt|md|psd|zip)$/i;
@@ -3981,9 +3991,22 @@ function smartMaterialNodeTitle(node, img){
 function nodeResolutionHtml(node, imgs=[]){
     // 2026-10-07 用户要求：图片节点标题右侧加分辨率小角标，与左名称两段式呈现；
     // 节点没有可确认尺寸时不显示。
-    const img = Array.isArray(imgs) && imgs.length ? imageForDisplay(imgs[0]) : null;
-    const label = img ? imageResolutionLabel(img) : '';
+    // 2026-10-29：判定必须用**原始条目**（imageResolutionLabel 的"尺寸已确认"是 WeakSet
+    // 按对象引用记的，imageForDisplay() 一旦返回复制对象就查不到，标题栏分辨率会漏渲染）。
+    const raw = Array.isArray(imgs) && imgs.length ? imgs[0] : null;
+    const label = raw ? imageResolutionLabel(raw) : '';
     if(!label) return '';
+    return `<span class="node-resolution" data-node-resolution="1">${escapeHtml(label)}</span>`;
+}
+// 2026-10-29（用户要求）组标题条右端 meta：多图组 / 智能分组显示「N 张图 / N 个视频 / N 项」，
+// 单图节点维持分辨率角标；没有可显示内容就不渲染。
+function nodeBarMetaHtml(node, imgs=[]){
+    const isGroupLike = node?.type === 'smart-group' || (Array.isArray(imgs) && imgs.length > 1);
+    if(!isGroupLike) return nodeResolutionHtml(node, imgs);
+    if(!Array.isArray(imgs) || !imgs.length) return '';
+    let pic = 0, vid = 0;
+    imgs.forEach(it => { (mediaKindForItem(it) === 'video') ? vid++ : pic++; });
+    const label = (vid && pic) ? `${imgs.length} 项` : (vid ? `${vid} 个视频` : `${pic} 张图`);
     return `<span class="node-resolution" data-node-resolution="1">${escapeHtml(label)}</span>`;
 }
 function smartNodeTitleIcon(node, imgs=[]){
@@ -6633,9 +6656,11 @@ function syncPromptLlmComposer(node=activePromptLlmComposerNode()){
     const running = node.running === true;
     if(promptLlmRun){
         // 2026-10-19（用户要求简化）：一个按钮两种状态 —— 生成中再点一次 = 取消
+        // 2026-10-30（用户要求）与运行按钮统一：纯箭头图标按钮，不再带「生成」文字
         promptLlmRun.classList.toggle('is-running', running);
         promptLlmRun.title = running ? '生成中，点击取消' : '生成';
-        promptLlmRun.innerHTML = `<i data-lucide="${running ? 'loader-2' : 'arrow-up'}"></i><span>${running ? '生成中' : '生成'}</span>`;
+        promptLlmRun.setAttribute('aria-label', running ? '生成中，点击取消' : '生成');
+        promptLlmRun.innerHTML = `<i data-lucide="${running ? 'loader-2' : 'arrow-up'}"></i>`;
     }
     positionPromptLlmComposer(node);
     setPromptLlmComposerOpen(true);
@@ -7279,6 +7304,10 @@ function applySmartNodeCulling(){
     });
 }
 
+// 2026-10-29（用户反馈平移掉帧）：网格尺寸/透明度只在真正变化时写回。
+// pan 时 scale 不变，这两个值每帧都相同；setProperty 即使同值也会让 shell 的
+// 样式失效、触发样式重算，平移期间等于白做全量样式工作。position 每帧必须写。
+let lastGridStyleSize = '', lastGridStyleAlpha = '';
 function applyViewport(options={}){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     const scale = safeScale(viewport.scale);
@@ -7292,11 +7321,27 @@ function applyViewport(options={}){
     // 2026-09-29（用户要求）点阵加密 1.3 倍 + 再淡一点：
     // 网格基准 24 → 18.5（≈24/1.3）并同步收窄钳制区间（22~56 → 17~43）；
     // alpha 基数 0.16 → 0.12（上限 0.30 → 0.24，下限 0.02 → 0.015）
-    const gridSize = Math.max(17, Math.min(43, 18.5 * scale));
-    const gridAlpha = Math.max(0.015, Math.min(0.24, 0.12 * Math.pow(scale, 1.3)));
-    shell.style.setProperty('background-size', `${gridSize}px ${gridSize}px`, 'important');
+    // 2026-10-28（用户要求）点阵再弱化，别太抢眼：
+    // alpha 基数 0.12 → 0.065（上限 0.24 → 0.13，下限 0.015 → 0.01）；
+    // 网格间距与缩放的曲线保持不动，只降强度。
+    // 2026-10-28（用户要求）点阵加密淡化：
+    // 间距基准 18.5 → 14（约再密 25%），钳制 17~43 → 13~32；
+    // alpha 基数 0.065 → 0.045（上限 0.13 → 0.09，下限 0.01 → 0.007），
+    // 淡化幅度略大于加密幅度，保证整体观感是"更细更淡"而不是"更密更闹"。
+    // 2026-10-28（用户要求）点阵再淡化一档：
+    // alpha 基数 0.045 → 0.028（上限 0.09 → 0.055，下限 0.007 → 0.004）；
+    // 间距保持 14 × scale 不动，只降强度。深底上点最亮处只比背景亮约 5 级灰，
+    // 属于"知道有点、但不干扰内容"的存在感水平。
+    // 2026-10-29（用户要求）点阵调明显一档：
+    // alpha 基数 0.028 → 0.05（上限 0.055 → 0.09，下限 0.004 → 0.012），
+    // 间距保持 14 × scale 不动，只提强度，回到"淡化前"与"再淡化"之间的水平。
+    const gridSize = Math.max(13, Math.min(32, 14 * scale));
+    const gridAlpha = Math.max(0.012, Math.min(0.09, 0.05 * Math.pow(scale, 1.3)));
+    const gridSizeCss = `${gridSize}px ${gridSize}px`;
+    const gridAlphaCss = `rgba(255,255,255,${gridAlpha.toFixed(3)})`;
+    if(gridSizeCss !== lastGridStyleSize){ shell.style.setProperty('background-size', gridSizeCss, 'important'); lastGridStyleSize = gridSizeCss; }
+    if(gridAlphaCss !== lastGridStyleAlpha){ shell.style.setProperty('--smart-grid-dot', gridAlphaCss, 'important'); lastGridStyleAlpha = gridAlphaCss; }
     shell.style.setProperty('background-position', `${viewport.x % gridSize}px ${viewport.y % gridSize}px`, 'important');
-    shell.style.setProperty('--smart-grid-dot', `rgba(255,255,255,${gridAlpha.toFixed(3)})`, 'important');
     positionPromptLlmComposer();
     if(options.minimap !== false) renderMinimap();
     updateSmartZoomPanel();
@@ -9121,12 +9166,15 @@ function syncJimengModelPillForRefs(){
     try { renderDynamicParams(); } finally { _jimengModelRefreshing = false; }
 }
 // 即梦各视频指令支持的模型集合不同，按当前参考素材推断指令并过滤模型下拉。
-const JIMENG_SEEDANCE_VIDEO_MODELS = ['seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0', 'seedance2.0fast'];
+// 2026-10-29（dreamina CLI 1.4.22）：seedance 家族补齐 2.5 / 2.0mini，
+// 旧的 3.0 / 3.0fast / 3.0pro / 3.5pro 视频模型已下线（CLI 会直接拒绝）；
+// image2video 额外支持 seedance1.5pro / seedance1.0fast，frames2video 只到 seedance1.5pro。
+const JIMENG_SEEDANCE_VIDEO_MODELS = ['seedance2.5', 'seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0', 'seedance2.0fast', 'seedance2.0mini'];
 const JIMENG_VIDEO_MODELS_BY_COMMAND = {
     text2video: JIMENG_SEEDANCE_VIDEO_MODELS,
     multimodal2video: JIMENG_SEEDANCE_VIDEO_MODELS,
-    image2video: ['3.0', '3.0fast', '3.0pro', '3.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
-    frames2video: ['3.0', '3.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
+    image2video: ['seedance1.5pro', 'seedance1.0fast', ...JIMENG_SEEDANCE_VIDEO_MODELS],
+    frames2video: ['seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
 };
 function jimengVideoCommand(){
     const node = activeComposerNode() || selectedNode();
@@ -9385,14 +9433,14 @@ function h3OptimizerRequestForActiveComposer(fallbackPrompt=''){
         return {prompt:String(fallbackPrompt || '').trim(), refs:[]};
     }
 }
-async function runPromptOptimize(btn, prompt, refs=[]){
+async function runPromptOptimize(btn, prompt, refs=[], ruleKind='video'){
     btn.classList.add('optimizing');
     var icon = btn.querySelector('i');
     if(icon) icon.setAttribute('data-lucide', 'loader-2');
     if(window.lucide) lucide.createIcons();
     try {
         var effectiveRefs = h3EffectiveOptimizerRefs(refs, settings);
-        var optimized = await optimizeH3PromptForRun(prompt, settings, null, effectiveRefs);
+        var optimized = await optimizeH3PromptForRun(prompt, settings, null, effectiveRefs, ruleKind);
         if(optimized && optimized !== prompt){
             _cachedOptimizedPrompt = optimized;
             toast('提示词已优化完成');
@@ -9521,7 +9569,8 @@ function currentH3OptimizePreviewState(){
     return {prompt, original, at, status};
 }
 function syncH3OptimizePreviewButton(){
-    const btn = document.querySelector('[data-toggle-h3-prompt-optimizer]');
+    // 2026-10-30 合并按钮：优先同步新的 data-prompt-opt 按钮，旧 H3 开关按钮保留兜底
+    const btn = document.querySelector('[data-prompt-opt]') || document.querySelector('[data-toggle-h3-prompt-optimizer]');
     if(!btn) return;
     const state = currentH3OptimizePreviewState();
     const hasResult = !!state.prompt;
@@ -9600,15 +9649,215 @@ function showH3OptimizeHover(anchorEl){
     popup.style.left = left + 'px';
     popup.style.top = top + 'px';
 }
-function renderVideoEnhancePromptControl(){
-    const hasResult = !!_cachedOptimizedPrompt;
-    // 2026-10-13（用户要求）：优化失败 → 红点（opt-failed），成功仍是绿点。
-    const failed = !hasResult && /失败/.test(String(_cachedOptimizedPromptStatus || ''));
-    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (hasResult ? ' has-result' : '') + (failed ? ' opt-failed' : '') + '" data-manual-optimize-prompt title="' + (failed ? '提示词优化失败，悬停查看详情' : 'AI 优化提示词') + '">'
+// ===== 2026-10-30（用户要求）：「AI 优化提示词」与「优化规则」合并成一个图标按钮 =====
+// 左键 = 启停优化；右键 = 展开面板（开关 / 规则选择 / 立即润色）。2026-10-30 由长按改为右键。
+// API 生视频、火山引擎、本地 H3 三处工具栏统一使用；状态与 H3 旧开关 f_h3_prompt_optimizer 双写兼容。
+// 2026-10-30（用户要求）：API 生图单独一个开关（settings.promptOptImageEnabled），规则列表与润色缓存仍共用。
+function promptOptEnabled(kind='video'){
+    if(kind === 'image'){
+        if(settings.promptOptImageEnabled === true) return true;
+        if(settings.promptOptImageEnabled === false) return false;
+        return false;
+    }
+    if(settings.promptOptEnabled === true) return true;
+    if(settings.promptOptEnabled === false) return false;
+    return Boolean(settings.comfyParams?.['f_h3_prompt_optimizer']);
+}
+function setPromptOptEnabled(on, kind='video'){
+    if(kind === 'image'){
+        settings.promptOptImageEnabled = !!on;
+    } else {
+        settings.promptOptEnabled = !!on;
+        settings.comfyParams = settings.comfyParams || {};
+        settings.comfyParams.f_h3_prompt_optimizer = !!on;   // H3 运行链路仍读这个键，双写保持兼容
+    }
+    persistActiveSmartSettings();
+    scheduleSave();
+}
+function promptOptRuleName(kind='video'){
+    try { return getCurrentOptimizeRule(kind)?.name || ''; } catch(e){ return ''; }
+}
+function renderPromptOptControl(kind='video'){
+    const on = promptOptEnabled(kind);
+    const state = currentH3OptimizePreviewState();
+    const hasResult = !!state.prompt;
+    const failed = !hasResult && /失败/.test(String(state.status || ''));
+    const ruleName = promptOptRuleName(kind);
+    const label = failed
+        ? '提示词优化失败，悬停查看详情（右键选规则）'
+        : hasResult
+            ? '已优化，悬停查看润色结果（右键选规则）'
+            : (on
+                ? `已启动：运行前按「${ruleName || '规则'}」润色，输入框保持原文（右键选规则）`
+                : '提示词优化已关闭：左键开启，右键选择规则');
+    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (on ? ' active' : '') + (hasResult ? ' has-result' : '') + (failed ? ' opt-failed' : '') + '" data-prompt-opt="1" data-prompt-opt-kind="' + escapeAttr(kind) + '" title="' + escapeAttr(label) + '" aria-label="' + escapeAttr(label) + '">'
         + '<i data-lucide="wand-2"></i>'
         + ((hasResult || failed) ? '<span class="opt-dot"></span>' : '')
         + '</button>';
 }
+let promptOptPanelEl = null;
+let promptOptRuleDragGuard = false;
+function closePromptOptPanel(){
+    if(promptOptPanelEl){ promptOptPanelEl.remove(); promptOptPanelEl = null; }
+}
+function openPromptOptPanel(anchorEl, kind='video'){
+    closePromptOptPanel();
+    const on = promptOptEnabled(kind);
+    const cur = getCurrentOptimizeRule(kind);
+    const state = currentH3OptimizePreviewState();
+    const rows = getOptimizeRules(kind).map(r =>
+        '<div class="po-row' + (cur && r.name === cur.name ? ' on' : '') + '" data-po-rule="' + escapeAttr(r.name) + '">'
+        + '<span class="po-grip" data-po-grip title="拖动排序"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>'
+        + '<span class="po-radio"></span><span class="po-name">' + escapeHtml(r.name) + '</span>'
+        + '<button type="button" class="po-pen" data-po-edit="' + escapeAttr(r.name) + '" title="查看/编辑规则"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L8 20H4v-4z"/></svg></button>'
+        + '</div>').join('');
+    const timeLabel = state.at ? new Date(state.at).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
+    const statusText = state.prompt
+        ? (timeLabel ? `上次润色 ${timeLabel}` : '已有润色结果')
+        : (state.status || '还没有润色结果');
+    const dotCls = state.prompt ? ' g' : (/失败/.test(String(state.status || '')) ? ' r' : '');
+    const el = document.createElement('div');
+    el.className = 'prompt-opt-panel';
+    el.innerHTML =
+        '<div class="po-head"><span class="po-title">提示词优化' + (kind === 'image' ? ' · 生图' : '') + '</span>'
+        + (cur && cur.name ? '<span class="po-rule">' + escapeHtml(cur.name) + '</span>' : '')
+        + '<button type="button" class="po-switch' + (on ? ' on' : '') + '" data-po-toggle aria-label="启停优化"><i></i></button></div>'
+        + '<div class="po-hint">运行前按规则润色，生成优先用润色结果，输入框保持原文。</div>'
+        + '<div class="po-hr"></div>'
+        + '<div class="po-list-label">优化规则<span class="po-list-tip">按住左侧手柄拖动排序</span></div>'
+        + '<div class="po-list">' + rows + '</div>'
+        + '<div class="po-actions"><button type="button" class="po-add" data-po-add><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>添加自定义规则</button>'
+        + '<button type="button" class="po-batch" data-po-batch title="一次编辑全部规则">批量编辑</button></div>'
+        + '<div class="po-hr"></div>'
+        + '<div class="po-foot"><span class="po-meta"><span class="po-dot' + dotCls + '"></span>' + escapeHtml(statusText) + '</span>'
+        + '<button type="button" class="po-run" data-po-run><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L4 14h6l-1 7 9-11h-6z"/></svg>立即润色</button></div>';
+    el.querySelector('[data-po-toggle]').onclick = event => {
+        event.preventDefault(); event.stopPropagation();
+        setPromptOptEnabled(!promptOptEnabled(kind), kind);
+        renderDynamicParams();
+        openPromptOptPanel(document.querySelector('[data-prompt-opt]') || anchorEl, kind);
+        toast(promptOptEnabled(kind) ? '已启动：运行前自动润色' : '已关闭：使用输入框原文');
+    };
+    el.querySelectorAll('[data-po-rule]').forEach(row => {
+        row.addEventListener('click', event => {
+            if(promptOptRuleDragGuard){ promptOptRuleDragGuard = false; return; }
+            if(event.target.closest('[data-po-edit]') || event.target.closest('[data-po-grip]')) return;
+            event.preventDefault(); event.stopPropagation();
+            localStorage.setItem(optimizeRuleStorageKey(kind), row.dataset.poRule);
+            renderDynamicParams();
+            openPromptOptPanel(document.querySelector('[data-prompt-opt]') || anchorEl, kind);
+        });
+    });
+    el.querySelectorAll('[data-po-edit]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault(); event.stopPropagation();
+            const rule = getOptimizeRules(kind).find(r => r.name === btn.dataset.poEdit);
+            if(rule){ closePromptOptPanel(); openRuleEditor(rule, false, kind); }
+        };
+    });
+    el.querySelector('[data-po-add]').onclick = event => {
+        event.preventDefault(); event.stopPropagation();
+        closePromptOptPanel();
+        openRuleEditor({name:'', content:''}, true, kind);
+    };
+    el.querySelector('[data-po-batch]').onclick = event => {
+        event.preventDefault(); event.stopPropagation();
+        closePromptOptPanel();
+        openRulesBatchEditor(kind);
+    };
+    el.querySelector('[data-po-run]').onclick = async event => {
+        event.preventDefault(); event.stopPropagation();
+        const req = h3OptimizerRequestForActiveComposer((promptInput.textContent || '').trim());
+        if(!req.prompt){ toast('请先输入提示词'); return; }
+        closePromptOptPanel();
+        await runPromptOptimize(document.querySelector('[data-prompt-opt]'), req.prompt, req.refs, kind);
+    };
+    document.body.appendChild(el);
+    promptOptPanelEl = el;
+    const rect = anchorEl.getBoundingClientRect();
+    const pw = el.offsetWidth, ph = el.offsetHeight;
+    let left = rect.right - pw;
+    left = Math.max(12, Math.min(window.innerWidth - pw - 12, left));
+    let top = rect.top - ph - 10;
+    if(top < 12) top = Math.min(window.innerHeight - ph - 12, rect.bottom + 10);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    if(window.lucide) lucide.createIcons();
+    bindPromptOptRuleDrag(el, kind, anchorEl);
+}
+// 2026-10-30（用户要求）规则可拖动排序：按住 ≡ 上下拖，紫色横线指示落点，松手即存顺序。
+function bindPromptOptRuleDrag(el, kind, anchorEl){
+    const listEl = el.querySelector('.po-list');
+    if(!listEl) return;
+    listEl.classList.add('po-list-drag');
+    let drag = null;
+    const line = document.createElement('div');
+    line.className = 'po-drop-line';
+    line.style.display = 'none';
+    listEl.appendChild(line);
+    function placeLine(clientY){
+        if(!drag) return;
+        const rects = drag.rows.map(r => r.getBoundingClientRect());
+        let idx = rects.length;
+        for(let i = 0; i < rects.length; i++){
+            if(clientY < rects[i].top + rects[i].height / 2){ idx = i; break; }
+        }
+        drag.to = idx;
+        const last = drag.rows[drag.rows.length - 1];
+        const y = idx >= drag.rows.length ? (last.offsetTop + last.offsetHeight) : drag.rows[idx].offsetTop;
+        line.style.display = 'block';
+        line.style.top = Math.max(0, y - 1) + 'px';
+    }
+    function onMove(event){
+        if(!drag) return;
+        event.preventDefault();
+        if(Math.abs(event.clientY - drag.startY) > 3) drag.moved = true;
+        placeLine(event.clientY);
+    }
+    function onUp(){
+        document.removeEventListener('pointermove', onMove, true);
+        document.removeEventListener('pointerup', onUp, true);
+        document.removeEventListener('pointercancel', onUp, true);
+        const state = drag;
+        drag = null;
+        line.style.display = 'none';
+        listEl.classList.remove('po-dragging');
+        if(!state) return;
+        state.row.classList.remove('dragging');
+        promptOptRuleDragGuard = state.moved;
+        setTimeout(() => { promptOptRuleDragGuard = false; }, 260);
+        if(!state.moved || state.to === state.from || state.to === state.from + 1) return;
+        const names = state.rows.map(r => r.dataset.poRule);
+        const movedName = names.splice(state.from, 1)[0];
+        const target = state.to > state.from ? state.to - 1 : state.to;
+        names.splice(target, 0, movedName);
+        saveOptimizeRuleOrder(kind, names);
+        renderDynamicParams();
+        openPromptOptPanel(anchorEl || document.querySelector('[data-prompt-opt]'), kind);
+    }
+    listEl.querySelectorAll('[data-po-grip]').forEach(grip => {
+        grip.addEventListener('pointerdown', event => {
+            if(event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const row = grip.closest('[data-po-rule]');
+            const rows = Array.from(listEl.querySelectorAll('[data-po-rule]'));
+            drag = { row: row, rows: rows, from: rows.indexOf(row), to: rows.indexOf(row), startY: event.clientY, moved: false };
+            row.classList.add('dragging');
+            listEl.classList.add('po-dragging');
+            placeLine(event.clientY);
+            document.addEventListener('pointermove', onMove, true);
+            document.addEventListener('pointerup', onUp, true);
+            document.addEventListener('pointercancel', onUp, true);
+        });
+    });
+}
+// 捕获阶段监听：点面板/按钮之外就关（其他控件多在 onclick 里 stopPropagation，冒泡阶段收不到）
+document.addEventListener('click', e => {
+    if(!promptOptPanelEl) return;
+    if(e.target.closest('.prompt-opt-panel') || e.target.closest('[data-prompt-opt]')) return;
+    closePromptOptPanel();
+}, true);
 // 2026-10-11（用户要求）：时长滑块拖动时，下方药丸摘要（如 "16:9 · 768P · 12s"）的秒数实时同步。
 // 只改文本不重渲染，避免拖动中弹层被重建。
 function syncPackedDurPillSummary(input){
@@ -10060,7 +10309,7 @@ function renderApiParams(){
         ${renderModelControl(models)}
         ${renderSizePickerControl('', true)}
         ${renderCountVisualControl()}
-        ${renderQualityControl()}
+        ${renderPromptOptControl('image')}
     `;
 }
 function renderApiVideoParams(){
@@ -10073,8 +10322,7 @@ function renderApiVideoParams(){
         ${renderVideoModelControl(models)}
         ${renderVideoModeControl()}
         ${renderVideoPackedControl()}
-        ${renderVideoEnhancePromptControl()}
-        ${renderOptimizeRuleControl()}
+        ${renderPromptOptControl()}
     `;
 }
 // 2026-09-27 音频生成（TTS）：只列 API 平台里带 audio_models 的平台/模型，
@@ -10147,7 +10395,6 @@ function renderVolcengineParams(){
         ${renderModelControl(models)}
         ${renderSizePickerControl('', true)}
         ${renderCountVisualControl()}
-        ${renderQualityControl()}
     `;
 }
 function renderVolcengineVideoParams(){
@@ -10161,8 +10408,7 @@ function renderVolcengineVideoParams(){
         ${renderVideoModelControl(models)}
         ${renderVideoModeControl()}
         ${renderVideoPackedControl()}
-        ${renderVideoEnhancePromptControl()}
-        ${renderOptimizeRuleControl()}
+        ${renderPromptOptControl()}
     `;
 }
 function renderRunningHubParams(){
@@ -10305,26 +10551,78 @@ var H3_OFFICIAL_SKELETON = [
     '  · 不新增原文没有的人物、品牌、道具、场景；参考素材与文本冲突时以素材可见内容为准'
 ].join('\n');
 
+// 2026-10-30（用户要求）：生视频内置规则只留两条 —— H3 通用骨架 + Seedance 2.0 书写规则；其余全部手动添加。
+var SEEDANCE_20_PROMPT_SKELETON = [
+    '【Seedance 2.0 提示词结构】',
+    '一、先写一句总览：主体 + 核心动作 + 场景 + 风格；多镜头时按「镜头1 / 镜头2」分段展开，每段自成一段。',
+    '二、每个镜头内按顺序写：景别与运镜（如：特写，缓慢推近）→ 主体与动作（按时间顺序，动作要可拍摄）→ 环境与光线 → 音效/对白（需要时）。',
+    '三、运镜用具体词：push in / pull back / pan / tilt / tracking / handheld / orbit；幅度与速度写明（缓慢/快速、小幅度/大幅度），不堆砌术语。',
+    '四、风格词前置：cinematic / live-action / anime / 3D CG / documentary 等；写实题材不写抽象形容词，全部展开成可拍摄的画面细节。',
+    '五、多镜头一致性：人物外观、服装、场景在镜头间保持一致；转场写明方式（硬切 / 叠化 / 匹配剪辑）。',
+    '六、音频：需要时单独一行写音效与配乐氛围（例：环境风声渐起 + 低频鼓点渐强），对白写明说话人与语气。',
+    '七、长度与纪律：5-15 秒一般 1-2 个镜头；只输出提示词本身，不要解释、不要标题、不要 Markdown 标记。',
+    '八、参考素材：结合参考图/视频/音频的主体、构图与光线改写，不要只依赖文字描述。'
+].join('\n');
 var BUILTIN_OPTIMIZE_RULES = [
     {name:'H3官方', content:H3_OFFICIAL_SKELETON},
-    {name:'极简', content:'保持提示词简短精炼，只保留核心画面描述和运镜，去掉多余形容词和解释，总长度不超过80字。不要写环境细节和配乐。'},
-    {name:'产品TVC', content:'强调产品外观特写、材质质感、使用场景。镜头以产品为中心，多用 push in 和特写。突出产品卖点和视觉冲击力。不要写人物情绪和心理活动。'},
-    {name:'电影感', content:'强化 cinematic 风格：宽银幕构图、自然光、浅景深、慢节奏运镜。加入天气、时间、光线氛围描写。配乐用 ambient 或管弦乐。'},
-    {name:'动画风格', content:'用 2D-animated 或 anime 风格描述，线条干净、色彩明快。人物动作夸张流畅，适合卡通/动画表现。'},
-    {name:'写实纪实', content:'用 documentary 风格，手持拍摄感、真实光线、生活场景。不要戏剧化运镜，保持自然观察视角。'},
-    {name:'快节奏', content:'快节奏剪辑，多用快速剪辑点、短镜头、快速运镜。能量感强，配乐节奏感强。适合产品展示和广告。'},
-    {name:'慢镜头', content:'慢动作运镜，慢速推拉，强调细节和氛围。配乐舒缓，画面有呼吸感。'}
+    {name:'Seedance 2.0', content:SEEDANCE_20_PROMPT_SKELETON}
 ];
-function getUserOptimizeRules(){
+// 2026-10-30（用户要求）API 生图 / API 生视频各用一套规则：列表、增删、排序全部独立。
+// 生图首次使用时把视频那边用户自建/改过的规则复制一份过来（H3官方除外），之后两边互不影响。
+var BUILTIN_OPTIMIZE_RULES_IMAGE = [
+    {name:'精准还原', content:'忠实保留参考图的构图、主体、光影和材质，只补全缺失的细节与清晰度，不改风格、不新增元素、不换背景。'},
+    {name:'产品图', content:'电商产品图：纯净背景（纯白或浅灰）、柔和均匀布光、主体居中、轮廓清晰、材质反射真实。除产品自带 logo 外不加任何文字和装饰道具。'},
+    {name:'人像写真', content:'自然肤质与真实光影，85mm 人像视角、浅景深，主体眼神聚焦、姿态自然。不要过度磨皮，不要塑料感皮肤。'},
+    {name:'电影感', content:'宽银幕构图、自然光与体积光、浅景深，加轻微胶片颗粒和冷暖对比，画面有电影剧照质感。'},
+    {name:'插画', content:'2D 插画风格：干净线条、明快配色、平面化光影，避免写实照片质感。'},
+    {name:'极简', content:'只保留主体、构图、光线、风格四项描述，去掉修饰词和解释，总长度不超过 80 字。'}
+];
+function optimizeRulesListKey(kind){ return kind === 'image' ? 'smart_optimize_rules_image' : 'smart_optimize_rules'; }
+function optimizeDeletedBuiltinKey(kind){ return kind === 'image' ? 'smart_optimize_deleted_builtin_image' : 'smart_optimize_deleted_builtin'; }
+function optimizeRuleOrderKey(kind){ return kind === 'image' ? 'smart_optimize_rules_order_image' : 'smart_optimize_rules_order'; }
+function builtinOptimizeRules(kind){ return kind === 'image' ? BUILTIN_OPTIMIZE_RULES_IMAGE : BUILTIN_OPTIMIZE_RULES; }
+function isBuiltinOptimizeRule(name, kind){
+    return builtinOptimizeRules(kind).some(function(r){ return r.name === name; });
+}
+function ensureImageOptimizeRulesSeeded(){
     try {
-        var raw = localStorage.getItem('smart_optimize_rules');
+        if(localStorage.getItem('smart_optimize_rules_image_seeded') === '1') return;
+        localStorage.setItem('smart_optimize_rules_image_seeded', '1');
+        if(localStorage.getItem(optimizeRulesListKey('image'))) return;
+        var copied = getUserOptimizeRules('video').filter(function(r){ return r && r.name && r.name !== 'H3官方'; });
+        if(copied.length) saveOptimizeRules(copied, 'image');
+    } catch(e){}
+}
+function getUserOptimizeRules(kind){
+    try {
+        if(kind === 'image') ensureImageOptimizeRulesSeeded();
+        var raw = localStorage.getItem(optimizeRulesListKey(kind));
         var arr = raw ? JSON.parse(raw) : null;
         return Array.isArray(arr) ? arr : [];
     } catch(e){ return []; }
 }
-function getDeletedBuiltinRules(){
-    try { return JSON.parse(localStorage.getItem('smart_optimize_deleted_builtin') || '[]'); }
+function getDeletedBuiltinRules(kind){
+    try { return JSON.parse(localStorage.getItem(optimizeDeletedBuiltinKey(kind)) || '[]'); }
     catch(e){ return []; }
+}
+function getOptimizeRuleOrder(kind){
+    try {
+        var arr = JSON.parse(localStorage.getItem(optimizeRuleOrderKey(kind)) || '[]');
+        return Array.isArray(arr) ? arr : [];
+    } catch(e){ return []; }
+}
+function saveOptimizeRuleOrder(kind, names){
+    try { localStorage.setItem(optimizeRuleOrderKey(kind), JSON.stringify((names || []).filter(function(n){ return !!n; }))); } catch(e){}
+}
+// H3 官方固定骨架不放进编辑框：编辑时只显示用户自己追加的那部分，保存时再拼回骨架。
+function splitH3Skeleton(content){
+    var text = String(content || '');
+    if(text.indexOf(H3_OFFICIAL_SKELETON) !== 0) return { head:'', body:text };
+    return { head:H3_OFFICIAL_SKELETON, body:text.slice(H3_OFFICIAL_SKELETON.length).replace(/^\n+/, '') };
+}
+function joinH3Skeleton(head, body){
+    if(!head) return body;
+    return body && body.trim() ? head + '\n\n' + body : head;
 }
 // 2026-10-20：判断这条同名覆盖是不是「过期的 H3官方」。
 // 旧内置版是 ~110 字中文摘要；另有用户误把官方 skill 的 frontmatter 描述整段粘进来当规则。
@@ -10360,49 +10658,53 @@ function migrateStaleH3Rule(){
         if(changed) saveOptimizeRules(arr);
     }catch(e){}
 }
-function getOptimizeRules(){
+function getOptimizeRules(kind){
+    kind = kind || 'video';
     // 2026-09-26 修：编辑内置规则后保存被 saveOptimizeRules 过滤掉导致"改了不生效"。
     // 现在同名用户规则作为内置规则的"覆盖版"参与合并：用户改过 content 就用用户的。
-    migrateStaleH3Rule();
-    var deleted = getDeletedBuiltinRules();
-    var userRules = getUserOptimizeRules();
-    var merged = BUILTIN_OPTIMIZE_RULES
+    if(kind !== 'image') migrateStaleH3Rule();
+    var deleted = getDeletedBuiltinRules(kind);
+    var userRules = getUserOptimizeRules(kind);
+    var merged = builtinOptimizeRules(kind)
         .filter(function(r){ return deleted.indexOf(r.name) < 0; })
         .map(function(r){
-            var override = userRules.find(function(u){ return u.name === r.name; });
+            var override = userRules.find(function(u){ return u && u.name === r.name; });
             if(override && r.name === 'H3官方' && isStaleH3OfficialOverride(override.content)){
                 override = null;
             }
             return override ? {name:r.name, content:override.content} : r;
         });
     userRules.forEach(function(u){
-        if(!merged.find(function(m){ return m.name === u.name; })) merged.push(u);
+        if(u && u.name && !merged.find(function(m){ return m.name === u.name; })) merged.push(u);
     });
+    var order = getOptimizeRuleOrder(kind);
+    if(order.length){
+        merged = merged.map(function(r, i){ return {r:r, i:i}; })
+            .sort(function(a, b){
+                var ia = order.indexOf(a.r.name), ib = order.indexOf(b.r.name);
+                if(ia < 0) ia = 1e6 + a.i;
+                if(ib < 0) ib = 1e6 + b.i;
+                return ia - ib;
+            }).map(function(o){ return o.r; });
+    }
+    if(!merged.length) merged = [builtinOptimizeRules(kind)[0]];
     return merged;
 }
-function saveOptimizeRules(rules){
+function saveOptimizeRules(rules, kind){
     // 2026-09-26 修：不再过滤与内置规则同名的条目 —— 同名即视为对内置规则的覆盖（编辑内置规则要能存下来）。
-    localStorage.setItem('smart_optimize_rules', JSON.stringify(Array.isArray(rules) ? rules : []));
+    localStorage.setItem(optimizeRulesListKey(kind || 'video'), JSON.stringify(Array.isArray(rules) ? rules : []));
 }
-function getCurrentOptimizeRule(){
-    var rules = getOptimizeRules();
-    var cur = localStorage.getItem('smart_optimize_rule_current') || rules[0].name;
+// 2026-10-30（用户要求）生图与生视频的润色规则各自记忆：
+// 视频沿用老键，生图用 _image 后缀；生图第一次使用时继承视频当前规则，避免刚打开就没有选中项。
+function optimizeRuleStorageKey(kind='video'){
+    return kind === 'image' ? 'smart_optimize_rule_current_image' : 'smart_optimize_rule_current';
+}
+function getCurrentOptimizeRule(kind='video'){
+    var rules = getOptimizeRules(kind);
+    var cur = localStorage.getItem(optimizeRuleStorageKey(kind));
+    if(!cur && kind === 'image') cur = localStorage.getItem('smart_optimize_rule_current');
+    cur = cur || rules[0].name;
     return rules.find(function(r){ return r.name === cur; }) || rules[0];
-}
-function renderOptimizeRuleControl(){
-    var cur = getCurrentOptimizeRule();
-    var html = '<div class="smart-control opt-rule-control">'
-        + '<button class="smart-pill icon-only" type="button" title="优化规则：' + escapeHtml(cur.name) + '"><i data-lucide="sliders-horizontal"></i></button>'
-        + '<div class="smart-popover compact-popover"><div class="smart-popover-title">优化规则</div><div class="model-list">';
-    getOptimizeRules().forEach(function(r){
-        html += '<div class="rule-row' + (r.name === cur.name ? ' active' : '') + '" data-opt-rule="' + escapeHtml(r.name) + '">'
-            + '<button type="button" class="rule-select"><span>' + escapeHtml(r.name) + '</span></button>'
-            + '<button type="button" class="rule-edit-btn" data-opt-edit="' + escapeHtml(r.name) + '" title="查看/编辑规则"><i data-lucide="pencil"></i></button>'
-            + '</div>';
-    });
-    html += '<button type="button" class="direct-option" data-opt-rule-add="1"><span>+ 添加自定义规则</span></button>'
-        + '</div></div></div>';
-    return html;
 }
 function renderH3ModeControl(){
     const mode = settings?.comfyParams?.['f_h3_mode'] || '全能参考';
@@ -10447,15 +10749,6 @@ function renderH3PackedControl(){
     // renderCountVisualControl()（「N 张」胶囊 + 弹出 1-8 宫格），见 renderComfyParams()。
     h += '</div></div>';
     return h;
-}
-function renderH3OptimizeControl(){
-    const on = !!settings?.comfyParams?.['f_h3_prompt_optimizer'];
-    const state = currentH3OptimizePreviewState();
-    const hasResult = !!state.prompt;
-    // 2026-10-13（用户要求）：优化失败 → 红点（opt-failed），成功 → 绿点，均悬停可看详情。
-    const failed = !hasResult && /失败/.test(state.status || '');
-    const label = hasResult ? '已优化，悬停查看优化后提示词' : (failed ? '提示词优化失败，已用原文继续，悬停查看详情' : (on ? '关闭运行时提示词优化' : '开启运行时提示词优化'));
-    return '<button type="button" class="smart-pill icon-only opt-prompt-btn' + (on ? ' active' : '') + (hasResult ? ' has-result' : '') + (failed ? ' opt-failed' : '') + '" data-toggle-h3-prompt-optimizer="1" title="' + escapeAttr(label) + '" aria-label="' + escapeAttr(label) + '"><i data-lucide="wand-2"></i>' + ((hasResult || failed) ? '<span class="opt-dot"></span>' : '') + '</button>';
 }
 function renderComfyParams(){
     settings.comfyMode = 'custom';
@@ -10513,8 +10806,7 @@ function renderComfyParams(){
             html += renderH3PackedControl();
             // 2026-10-12 下午（用户要求）：去掉种子；数量与 API 生图同款（胶囊 + 1-8 宫格弹层）
             html += renderCountVisualControl();
-            html += renderH3OptimizeControl();
-            html += renderOptimizeRuleControl();
+            html += renderPromptOptControl();
         } else {
             html += renderComfyWorkflowControl();
             html += fieldHtml;
@@ -11482,6 +11774,9 @@ function renderInlineCustomSizeFields(prefix=''){
         <input type="number" data-param="${hKey}" value="${escapeHtml(settings[hKey] || '')}" placeholder="${escapeHtml(tr('smart.height'))}">
     </div>`;
 }
+// 2026-10-30 用户要求去掉输入面板底栏的「质量」按钮，renderApiParams / renderApiVideoParams
+// 已不再调用本函数（settings.quality 仍保留，默认 auto 照常提交）。要恢复就在那两处加回
+// ${renderQualityControl()}。
 function renderQualityControl(){
     const value = settings.quality || 'auto';
     const labels = {auto:tr('smart.qualityAuto'), low:tr('smart.qualityLow'), medium:tr('smart.qualityMid'), high:tr('smart.qualityHigh')};
@@ -12346,6 +12641,29 @@ function bindDynamicParams(){
             scheduleSave();
         };
     });
+    // 2026-10-30 合并按钮：左键启停优化，右键展开规则面板
+    dynamicParams.querySelectorAll('[data-prompt-opt]').forEach(btn => {
+        // 2026-10-30（用户要求）长按改为右键：左键启停，右键展开规则面板；生图按钮带独立开关类型
+        const optKind = btn.dataset.promptOptKind === 'image' ? 'image' : 'video';
+        btn.oncontextmenu = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            hideH3OptimizeHover(true);
+            openPromptOptPanel(btn, optKind);
+        };
+        btn.onmouseenter = () => showH3OptimizeHover(btn);
+        btn.onfocus = () => showH3OptimizeHover(btn);
+        btn.onmouseleave = () => hideH3OptimizeHover();
+        btn.onblur = () => hideH3OptimizeHover(true);
+        btn.onclick = event => {
+            event.preventDefault(); event.stopPropagation();
+            setPromptOptEnabled(!promptOptEnabled(optKind), optKind);
+            renderDynamicParams();
+            toast(promptOptEnabled(optKind)
+                ? `已启动：运行前按「${promptOptRuleName(optKind) || '规则'}」润色，输入框保持原文`
+                : '已关闭：生成直接使用输入框原文');
+        };
+    });
     dynamicParams.querySelectorAll('[data-manual-optimize-prompt]').forEach(btn => {
         btn.onclick = async event => {
             event.preventDefault();
@@ -12395,16 +12713,16 @@ function bindDynamicParams(){
         btn.onclick = function(e){
             e.preventDefault(); e.stopPropagation();
             var name = btn.dataset.optEdit;
-            var rule = getOptimizeRules().find(function(r){ return r.name === name; });
+            var rule = getOptimizeRules('video').find(function(r){ return r.name === name; });
             if(!rule) return;
-            openRuleEditor(rule);
+            openRuleEditor(rule, false, 'video');
         };
     });
     dynamicParams.querySelectorAll('[data-opt-rule-add]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            openRuleEditor({name:'', content:''}, true);
+            openRuleEditor({name:'', content:''}, true, 'video');
         };
     });
     // close popup when clicking elsewhere
@@ -13565,6 +13883,16 @@ function canH3RequeueRun(node, runSettings=null){
     const sourceSettings = runSettings || smartSettingsForNode(node);
     return isMinimaxH3RunSettings(sourceSettings);
 }
+// 2026-10-30（用户要求）API 生视频并发：节点已有任务在跑时仍可再次点「运行」，
+// 新任务并行提交，结果按追加模式落进同一节点（与并发生图 / H3 排队重提同一口径）。
+// 之前视频被 canStartConcurrentImageRun 明确排除（apiKind==='video' 直接 false），
+// 所以提交一个后按钮就变灰，用户误以为「一次只能生一个」。
+function canRequeueApiVideoRun(node, runSettings=null){
+    if(!node || !isSmartRunnableNode(node)) return false;
+    if(node.jimengPending || smartRecoverableImageTask(node) || smartCascadeIsLoopRunning(node.id)) return false;
+    const sourceSettings = runSettings || smartSettingsForNode(node);
+    return isApiLikeEngine(sourceSettings.engine) && sourceSettings.apiKind === 'video';
+}
 function smartNodeHasDisplayResult(node){
     return Boolean((node?.images || []).some(img => img?.url && !img.loopInputPreview));
 }
@@ -13917,7 +14245,7 @@ function smartRunRequestForButton(node, runSettings){
 }
 function smartRunButtonReadiness(node=selectedNode()){
     if(!node || !isSmartRunnableNode(node)) return {canRun:false, hasPrompt:false, hasRefs:false};
-    if(smartNodeInFlight(node) && !canStartConcurrentImageRun(node, smartSettingsForNode(node)) && !canH3RequeueRun(node)){
+    if(smartNodeInFlight(node) && !canStartConcurrentImageRun(node, smartSettingsForNode(node)) && !canH3RequeueRun(node) && !canRequeueApiVideoRun(node)){
         return {canRun:false, hasPrompt:false, hasRefs:false, busy:true};
     }
     if(smartCascadeIsLoopRunning(node.id)){
@@ -13958,16 +14286,12 @@ function syncRunButtonState(node=selectedNode()){
     runBtn.disabled = !readiness.canRun;
     runBtn.classList.toggle('is-ready', readiness.canRun);
     runBtn.setAttribute('aria-disabled', readiness.canRun ? 'false' : 'true');
-    // 画布末尾还有一套历史中性灰覆盖，单靠 class 可能被旧的 !important
-    // 规则压住；这里把最终状态直接落到按钮，确保“可运行=紫色、不可运行=灰色”。
-    const buttonColor = readiness.canRun ? '#7c3aed' : '#555';
-    const buttonBorder = readiness.canRun ? '#8b5cf6' : '#6a6a6a';
-    runBtn.style.setProperty('background', buttonColor, 'important');
-    runBtn.style.setProperty('border-color', buttonBorder, 'important');
-    runBtn.style.setProperty('color', readiness.canRun ? '#fff' : '#bcbcbc', 'important');
-    runBtn.style.setProperty('box-shadow', readiness.canRun ? '0 6px 18px rgba(124,58,237,.28)' : 'none', 'important');
-    runBtn.style.setProperty('cursor', readiness.canRun ? 'pointer' : 'not-allowed', 'important');
-    runBtn.style.setProperty('opacity', readiness.canRun ? '1' : '.78', 'important');
+    // 2026-10-30（用户要求）运行按钮改成箭头图标按钮（参考第三方画布面板）。
+    // 尺寸与配色全部交给 smart-canvas.css 末尾那组 #runBtn 规则，这里不再写 inline
+    // !important —— 历史那套「可运行=紫色胶囊 / 不可运行=灰底大字」会把图标按钮又顶回去。
+    ['background','border-color','color','box-shadow','cursor','opacity','width','min-width','height','padding','border-radius']
+        .forEach(prop => runBtn.style.removeProperty(prop));
+
     runBtn.title = readiness.canRun
         ? '运行生成'
         : (readiness.busy ? '当前节点正在生成' : '请输入提示词或连接可运行的上游提示词');
@@ -15455,31 +15779,152 @@ function setSmartFrameOpacity(value, options={}){
 }
 setSmartFrameOpacity(smartFrameOpacity, {render:false, force:true});
 const WORKFLOW_GROUP_COLOR_PRESETS = [
-    // 2026-10-28（用户要求）：默认改纯灰（原石墨带暖黄调）；彩色预设统一降饱和约 50%。
-    {key:'default', label:'石墨', bg:'rgba(52,52,52,.7)', border:'rgba(150,150,150,.6)', dot:'rgba(150,150,150,0)', swatch:'#9a9a9a'},
-    {key:'clay', label:'陶土', bg:'rgba(70,51,46,.7)', border:'rgba(196,146,129,.78)', dot:'rgba(196,146,129,0)', swatch:'#c39181'},
-    {key:'rose', label:'玫瑰', bg:'rgba(71,46,55,.7)', border:'rgba(195,135,153,.78)', dot:'rgba(195,135,153,0)', swatch:'#c38799'},
-    {key:'sand', label:'琥珀', bg:'rgba(68,58,39,.7)', border:'rgba(193,169,116,.78)', dot:'rgba(193,169,116,0)', swatch:'#c1a974'},
-    {key:'sage', label:'青绿', bg:'rgba(44,62,48,.7)', border:'rgba(134,176,139,.78)', dot:'rgba(134,176,139,0)', swatch:'#86b08b'},
-    {key:'teal', label:'松石', bg:'rgba(37,64,67,.7)', border:'rgba(112,173,178,.78)', dot:'rgba(112,173,178,0)', swatch:'#70adb2'},
-    {key:'mistblue', label:'钢蓝', bg:'rgba(48,60,77,.7)', border:'rgba(135,159,199,.78)', dot:'rgba(135,159,199,0)', swatch:'#879fc7'},
-    {key:'iris', label:'鸢尾', bg:'rgba(62,54,79,.7)', border:'rgba(170,146,202,.78)', dot:'rgba(170,146,202,0)', swatch:'#aa92ca'},
-    {key:'mauve', label:'梅紫', bg:'rgba(65,47,61,.7)', border:'rgba(186,136,172,.78)', dot:'rgba(186,136,172,0)', swatch:'#ba88ac'}
+    // 2026-10-29（用户要求）颜色板对齐参考图：10 个鲜艳纯色，5 列 × 2 行。
+    // 圆点直接用参考图采样值；填充色 bg 是同一色相与 #141414 按 38% 混合的暗版，
+    // 避免整块组框被高饱和色铺满（bg 的 alpha 会被 frameColorWithOpacity 按全局
+    // 框不透明度重算，这里写的 .7 只是占位）。
+    // 2026-10-29（用户要求）彩色组框填充再降饱和 ~38%（S×0.62，明度不变），
+    // 大面积色块不再那么"艳"；border/cap 不动（描边本来就是低饱和，胶囊面积小）。
+    // 2026-10-29（用户要求）再调三件事，全部由同一个 swatch 色相推出：
+    //   · border 降饱和：S×0.38、明度 0.285，只比填充亮一档（原来 rgba 高饱和亮色，画出来是一条艳边）
+    //   · capBg  胶囊标签底：S×0.80、明度 0.19（参考图 Group 3 的深酒红 #4e1714）
+    //   · capFg  胶囊标签字：S×0.34、明度 0.86，同色相浅色 —— 字色跟随组色，不用纯白
+    // 2026-10-29（用户要求）默认灰调浅一档：填充 59→84→100、描边 #494949→#585858→#666666、
+    // 胶囊底 #303030→#3a3a3a→#444444，让默认组框在 #161616 画布上能明确"读"出一块面板，
+    // 而不是糊进背景。（swatch 是色板圆点，保持 #7a7a7a 不动）
+    {key:'default', label:'灰',   bg:'rgba(100,100,100,.7)', border:'#666666', capBg:'#444444', capFg:'#e8e8e8', swatch:'#7a7a7a'},
+    {key:'red',     label:'红',   bg:'rgba(88,51,47,.7)',   border:'#5e3733', capBg:'#4f1812', capFg:'#e5d4d2', swatch:'#e74c3c'},
+    {key:'orange',  label:'橙',   bg:'rgba(90,66,44,.7)',   border:'#614730', capBg:'#532e0e', capFg:'#e6dbd1', swatch:'#f28a2e'},
+    {key:'yellow',  label:'黄',   bg:'rgba(92,78,50,.7)',   border:'#615130', capBg:'#533c0e', capFg:'#e6dfd0', swatch:'#f4b740'},
+    {key:'green',   label:'绿',   bg:'rgba(41,79,57,.7)',    border:'#375a46', capBg:'#18492d', capFg:'#d4e3da', swatch:'#2ecc71'},
+    {key:'cyan',    label:'青',   bg:'rgba(30,71,81,.7)',    border:'#2f5962', capBg:'#0c4755', capFg:'#d0e2e7', swatch:'#08b6dd'},
+    {key:'blue',    label:'蓝',   bg:'rgba(48,65,93,.7)',   border:'#2f4362', capBg:'#0d2854', capFg:'#d0d9e6', swatch:'#3b82f6'},
+    {key:'purple',  label:'紫',   bg:'rgba(69,58,95,.7)',   border:'#3f3061', capBg:'#230e53', capFg:'#d7d0e6', swatch:'#8b5cf6'},
+    {key:'pink',    label:'粉',   bg:'rgba(93,48,70,.7)',   border:'#622f48', capBg:'#540d30', capFg:'#e6d0db', swatch:'#f63b97'},
+    {key:'white',   label:'白',   bg:'rgba(118,118,118,.7)', border:'#757575', capBg:'#4c4c4c', capFg:'#ededed', swatch:'#e6e6e6'}
 ];
+// 旧画布存的是 2026-10-28 那套低饱和 key（clay/rose/sand/…），直接映射到最接近的新色，
+// 避免用户已有的组框颜色在升级后掉回默认灰。
+const WORKFLOW_GROUP_COLOR_ALIASES = {
+    clay:'red', rose:'pink', sand:'yellow', sage:'green',
+    teal:'cyan', mistblue:'blue', iris:'purple', mauve:'purple'
+};
 function workflowGroupColorPreset(key){
-    return WORKFLOW_GROUP_COLOR_PRESETS.find(item => item.key === key) || WORKFLOW_GROUP_COLOR_PRESETS[0];
+    const normalized = WORKFLOW_GROUP_COLOR_ALIASES[key] || key;
+    return WORKFLOW_GROUP_COLOR_PRESETS.find(item => item.key === normalized) || WORKFLOW_GROUP_COLOR_PRESETS[0];
 }
 function workflowGroupFrameStyle(node){
     const color = workflowGroupColorPreset(node?.workflowColor || 'default');
-    return `--workflow-group-bg:${frameColorWithOpacity(color.bg)};--workflow-group-border:${color.border};--workflow-group-dot:${color.dot};`;
+    return `--workflow-group-bg:${frameColorWithOpacity(color.bg)};--workflow-group-border:${color.border};--workflow-group-cap-bg:${color.capBg};--workflow-group-cap-fg:${color.capFg};--workflow-group-dot:${color.dot || 'transparent'};`;
 }
 function smartGroupFrameStyle(node){
     const color = workflowGroupColorPreset(node?.groupColor || 'default');
-    return `--smart-group-bg:${frameColorWithOpacity(color.bg)};--smart-group-border:${color.border};--smart-group-dot:${color.dot};`;
+    return `--smart-group-bg:${frameColorWithOpacity(color.bg)};--smart-group-border:${color.border};--smart-group-cap-bg:${color.capBg};--smart-group-cap-fg:${color.capFg};--smart-group-dot:${color.dot || 'transparent'};`;
 }
 function imageGroupFrameStyle(node){
     const color = workflowGroupColorPreset(node?.groupColor || 'default');
-    return `--image-group-bg:${frameColorWithOpacity(color.bg)};--image-group-border:${color.border};--image-group-dot:${color.dot};`;
+    return `--image-group-bg:${frameColorWithOpacity(color.bg)};--image-group-border:${color.border};--image-group-cap-bg:${color.capBg};--image-group-cap-fg:${color.capFg};--image-group-dot:${color.dot || 'transparent'};`;
+}
+// 2026-10-29（用户要求）：工作流组四角拉伸手柄。
+// 手柄不能放在组框元素内部：组框 z-index:0，组内素材是它的兄弟节点且画在它上面，
+// 一旦框缩到贴着内容，角上的手柄就会被素材盖住、点不到。这里用一个 world 级覆盖层，
+// 位置/尺寸跟着组框走，z-index 高于普通节点，指针事件只落在手柄本身上。
+function workflowGroupResizeOverlayHtml(hiddenIds){
+    return nodes.filter(node => isWorkflowGroupNode(node) && !(hiddenIds && hiddenIds.has(node.id))).map(node => {
+        const r = nodeRectRaw(node);
+        const handles = ['nw', 'ne', 'sw', 'se'].map(dir => `<div class="wf-resize-handle" data-wf-resize-dir="${dir}" data-wf-resize-node="${escapeAttr(node.id)}"></div>`).join('');
+        return `<div class="wf-resize-overlay" data-wf-group="${escapeAttr(node.id)}" style="left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px">${handles}</div>`;
+    }).join('');
+}
+function syncWorkflowGroupResizeOverlay(node){
+    if(!isWorkflowGroupNode(node)) return;
+    const ov = world.querySelector(`.wf-resize-overlay[data-wf-group="${CSS.escape(node.id)}"]`);
+    if(!ov) return;
+    const r = nodeRectRaw(node);
+    ov.style.left = `${r.x}px`;
+    ov.style.top = `${r.y}px`;
+    ov.style.width = `${r.width}px`;
+    ov.style.height = `${r.height}px`;
+}
+function beginWorkflowGroupResize(nodeId, dir, e){
+    if(!e || e.button !== 0) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if(!isWorkflowGroupNode(node)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = nodeRect(node);
+    resizeState = {
+        id:node.id,
+        dir:dir || 'se',
+        workflowGroupResize:true,
+        startX:e.clientX,
+        startY:e.clientY,
+        startW:rect.width,
+        startH:rect.height,
+        startLeft:Number(node.x) || 0,
+        startTop:Number(node.y) || 0
+    };
+    // 组内素材的坐标/尺寸全程不动，这里只记一份「内容包围盒」当作缩放下限，
+    // 防止把框缩到把素材切在框外（那会让素材看起来掉出分组）。
+    let bl = Infinity, bt = Infinity, br = -Infinity, bb = -Infinity, hasMember = false;
+    workflowGroupMembers(node).forEach(member => {
+        const mr = nodeRect(member);
+        if(!mr || !mr.width || !mr.height) return;
+        hasMember = true;
+        bl = Math.min(bl, mr.x);
+        bt = Math.min(bt, mr.y);
+        br = Math.max(br, mr.x + mr.width);
+        bb = Math.max(bb, mr.y + mr.height);
+    });
+    resizeState.contentBox = hasMember ? {left:bl, top:bt, right:br, bottom:bb} : null;
+    document.body.classList.add('smart-node-resize');
+    capturePendingUndo();
+}
+// 2026-10-29（用户确认）：角标平时不显示，鼠标停在某个组上（或压在角标本身上）才浮现。
+// 覆盖层和组框是兄弟元素，CSS 选不到彼此，这里用事件委托在 world 上做一次判定。
+function markWorkflowGroupOverlayHover(groupEl){
+    const id = groupEl?.dataset?.id || '';
+    const cur = world.querySelector('.wf-resize-overlay.is-hover');
+    if(cur && cur.dataset.wfGroup === id) return;
+    world.querySelectorAll('.wf-resize-overlay.is-hover').forEach(ov => ov.classList.remove('is-hover'));
+    if(!id) return;
+    const ov = world.querySelector(`.wf-resize-overlay[data-wf-group="${CSS.escape(id)}"]`);
+    if(ov) ov.classList.add('is-hover');
+}
+function bindWorkflowGroupResizeHandles(){
+    world.querySelectorAll('.wf-resize-handle').forEach(handle => {
+        if(handle.__wfResizeBound) return;
+        handle.__wfResizeBound = true;
+        handle.addEventListener('mousedown', e => {
+            beginWorkflowGroupResize(handle.dataset.wfResizeNode, handle.dataset.wfResizeDir, e);
+        });
+    });
+    if(!world.__wfHoverBound){
+        world.__wfHoverBound = true;
+        // 绑在 document 上：鼠标移出画布（点到 shell / 右侧面板）时也要能把角标收起来
+        document.addEventListener('pointerover', e => {
+            const t = e.target instanceof Element ? e.target : null;
+            if(!t) return;
+            // 鼠标压在手柄本身上：保持不变，别把它清掉（否则自己会消失，拖不动）
+            if(t.closest('.wf-resize-overlay')) return;
+            const direct = t.closest('.image-node.workflow-group-node');
+            if(direct){ markWorkflowGroupOverlayHover(direct); return; }
+            // 组内素材是独立节点、盖在组框之上，DOM 上找不到组框祖先，
+            // 所以这里按坐标判断鼠标是否还落在某个组框的矩形里。
+            const x = e.clientX, y = e.clientY;
+            let hit = null;
+            if(world.contains(t)){
+                world.querySelectorAll('.image-node.workflow-group-node').forEach(el => {
+                    if(hit) return;
+                    const r = el.getBoundingClientRect();
+                    if(x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hit = el;
+                });
+            }
+            markWorkflowGroupOverlayHover(hit);
+        });
+    }
+    // render 会重建覆盖层，class 会丢；鼠标此刻若还停在这个组上就补回来
+    markWorkflowGroupOverlayHover(world.querySelector('.image-node.workflow-group-node:hover'));
 }
 function cloneSmartNode(node, dx=0, dy=0){
     const copy = JSON.parse(JSON.stringify(node));
@@ -15834,13 +16279,15 @@ function renderConnections(){
             : pendingLineMode === 'replace'
             ? 'rgba(156,156,156,0.76)'
             : isHistory ? 'rgba(140,140,140,0.26)'
-            // 2026-10-27（用户确认 D2）：默认线降调成发丝线（配合 stroke-opacity .62 ≈ 12% 白），选中关系线才亮。
-            : 'rgba(255,255,255,0.19)';
+            // 2026-10-27（用户确认 D2）：默认线降调成发丝线（配合 stroke-opacity），选中关系线才亮。
+            // 2026-10-29（用户要求「白线明显一点」）：0.19 → 0.34，配合 .74 不透明度 ≈ 25% 白。
+            : 'rgba(255,255,255,0.34)';
         const opacity = isPendingLine ? '.82' : '1';
         // 2026-10-11（用户要求）：连线加粗 1.3 倍（1.2→1.56 / 1.05→1.37）。
         // 2026-10-12（用户要求「连线变粗一点」）：在 10-11 基础上再 ×1.4（1.56→2.2 / 1.37→1.9）。
         // 2026-10-27（用户确认 D2 参考向）：默认线整体降细（1.9→1.2 / 2.2→1.6），选中线走独立样式。
-        const width = kind === 'input' ? '1.6' : '1.2';
+        // 2026-10-29（用户要求「白线明显一点」）：1.2→1.5 / 1.6→1.9。
+        const width = kind === 'input' ? '1.9' : '1.5';
         // 2026-10-27（用户要求）：执行进度线统一为「贯穿流光」（与选中线 D2 同语言），
         // 旧「蓝色彗星点」（animateMotion）退役——群组执行、生成中都走同一套流光。
         const flowLine = selGradId
@@ -15848,7 +16295,7 @@ function renderConnections(){
             : '';
         return `<g class="conn-edge"><path class="conn-path ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path>${flowLine}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle class="conn-endpoint" cx="${tx}" cy="${ty}" r="4.4" fill="${color}" opacity="0"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})" opacity="0"><circle r="12" fill="var(--card)" stroke="#a78bfa" stroke-width="1.6"></circle><g transform="scale(1.5)"><circle cx="-2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><circle cx="2.6" cy="3" r="1.35" fill="none" stroke="#a78bfa" stroke-width="1.25"></circle><path d="M-1.65 2.1 L3.8 -4 M1.65 2.1 L-3.8 -4" stroke="#a78bfa" stroke-width="1.35" stroke-linecap="round"></path></g></g></g>`;
     }).join('');
-    const interactionStyles = `<style>.conn-path{stroke-opacity:.62!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke-opacity:.85!important;stroke-width:1.4!important}.conn-flowline{opacity:.95;filter:drop-shadow(0 0 2.5px rgba(186,230,253,.75)) drop-shadow(0 0 7px rgba(56,189,248,.4));pointer-events:none}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path:not(.conn-selected){stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.35!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
+    const interactionStyles = `<style>.conn-path{stroke-opacity:.74!important;stroke-linecap:round;stroke-linejoin:round;transition:stroke .14s ease,stroke-opacity .14s ease,stroke-width .14s ease,filter .14s ease}.conn-path.conn-selected{stroke-opacity:.9!important;stroke-width:1.6!important}.conn-flowline{opacity:.95;filter:drop-shadow(0 0 2.5px rgba(186,230,253,.75)) drop-shadow(0 0 7px rgba(56,189,248,.4));pointer-events:none}.conn-hit{cursor:crosshair}.conn-endpoint{opacity:0!important;transform-box:fill-box;transform-origin:center;transform:scale(.72);transition:opacity .14s ease,transform .14s ease;pointer-events:none}.conn-cut{opacity:0!important;transition:opacity .14s ease;pointer-events:none}.conn-edge.is-hover .conn-path:not(.conn-selected){stroke:#d4d4d4!important;stroke-opacity:1!important;stroke-width:2.4!important;filter:drop-shadow(0 0 2px rgba(220,220,220,.18))}.conn-edge.is-hover .conn-endpoint{opacity:1!important;transform:scale(1)}.conn-edge.is-hover .conn-cut{opacity:1!important;pointer-events:auto}</style>`;
     return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${interactionStyles}<defs><linearGradient id="connCometGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b82f6" stop-opacity="0"/><stop offset="0.45" stop-color="#3b82f6" stop-opacity="0.45"/><stop offset="0.8" stop-color="#93c5fd" stop-opacity="0.95"/><stop offset="1" stop-color="#e0f2fe" stop-opacity="1"/></linearGradient>${selGrads.join('')}</defs>${paths}</svg>`;
 }
 function refreshConnectionLayer(){
@@ -15909,6 +16356,9 @@ function moveNodeElementsDuringDrag(){
         if(n){
             el.style.left = `${n.x || 0}px`;
             el.style.top = `${n.y || 0}px`;
+            // 2026-10-29（用户反馈）：拖动工作流组时四角角标要跟着走。
+            // 角标在独立覆盖层里，不会跟着节点元素移动，必须每帧同步一次。
+            if(isWorkflowGroupNode(n)) syncWorkflowGroupResizeOverlay(n);
         }
     });
     const active = selectedNode();
@@ -16349,7 +16799,36 @@ function updateImageResolutionBadgeElement(itemEl, img){
     if(!itemEl) return;
     const isVideo = isVideoMediaItem(img);
     const label = imageResolutionLabel(img);
-    const outside = itemEl.classList?.contains('image-wrap') && !itemEl.classList?.contains('smart-group-single-thumb');
+    // 2026-10-29（B 方案）上传节点的 .upload-preview-card / .upload-preview-media 也走标题栏分辨率：
+    // measureSmartNodeImages 里 itemEl 取的是最近的 [data-image-index]（= .upload-preview-card），
+    // 上传视频元数据加载后同样把尺寸写进 .node-resolution，与单素材节点行为一致。
+    const outside = (itemEl.classList?.contains('image-wrap') || itemEl.classList?.contains('upload-preview-card') || itemEl.classList?.contains('upload-preview-media')) && !itemEl.classList?.contains('smart-group-single-thumb');
+    // 2026-10-29（用户反馈"字号一会大一会小"）：单图节点的分辨率只留一个来源 —— 节点标题栏。
+    // 图片外侧旧角标（.image-resolution-badge-outside）是 14px/500，标题栏是 10px；
+    // 图片异步加载确认尺寸后这里会补出旧角标，于是同一节点在 10px / 14px 之间来回跳。
+    // 现在统一把 label 写进标题栏 .node-resolution（没有就补一个），旧角标一律清掉。
+    if(outside){
+        const head = itemEl.closest('.image-node')?.querySelector(':scope > .node-head');
+        const outsideBadge = itemEl.nextElementSibling?.classList?.contains('image-resolution-badge-outside')
+            ? itemEl.nextElementSibling
+            : itemEl.querySelector('.image-resolution-badge-outside');
+        if(head){
+            outsideBadge?.remove();
+            let headBadge = head.querySelector(':scope > .node-resolution');
+            if(!label){ headBadge?.remove(); return; }
+            if(!headBadge){
+                headBadge = document.createElement('span');
+                headBadge.className = 'node-resolution';
+                headBadge.dataset.nodeResolution = '1';
+                const actions = head.querySelector(':scope > .node-actions');
+                if(actions) head.insertBefore(headBadge, actions);
+                else head.appendChild(headBadge);
+            }
+            headBadge.textContent = label;
+            return;
+        }
+        // 没有标题栏的极少数结构（如独立缩略图）才继续用旧角标
+    }
     // 视频的分辨率已经显示在节点标题栏，卡片外侧不再重复渲染。
     // 这里也要清理动态加载元数据后可能补回来的旧角标。
     if(outside && isVideo){
@@ -16509,11 +16988,13 @@ function transplantSmartMediaElements(oldNodeEl, newNodeEl){
             oldMedia.alt = newMedia.getAttribute('alt') || oldMedia.getAttribute('alt') || '';
             oldMedia.style.cssText = newMedia.style.cssText;
             oldMedia.dataset.originalSrc = newMedia.dataset?.originalSrc || oldMedia.dataset?.originalSrc || '';
-            newMedia.replaceWith(oldMedia);
+            // 2026-10-29：目标元素若已脱离文档（上一次渲染刚摘下），replaceWith 会抛 NotFoundError，
+            // 打断整次 render 导致后续节点没挂上。这里退化为跳过移植（下次渲染再补）。
+            if(newMedia.parentNode) newMedia.replaceWith(oldMedia);
             return;
         }
         const state = captureMediaPlaybackState(oldMedia);
-        newMedia.replaceWith(oldMedia);
+        if(newMedia.parentNode) newMedia.replaceWith(oldMedia);
         restoreMediaPlaybackState(oldMedia, state);
         requestAnimationFrame(() => restoreMediaPlaybackState(oldMedia, state));
     });
@@ -17502,20 +17983,50 @@ function promptNodeTitleHtml(node){
     const llmIcon = '';
     return `<div class="prompt-node-title-row ${node?.llmEnabled === true ? 'is-llm' : 'is-handwrite'}"><div class="prompt-node-title prompt-node-control" data-prompt-node-title="${escapeAttr(node.id)}" title="双击编辑标题">${llmIcon}<span>${escapeHtml(promptNodeTitleText(node))}</span></div>${promptNodeKindBadgeHtml(node)}</div>`;
 }
-const PROMPT_NODE_BG_COLORS = ['#202020', '#342b2d', '#3c2c30', '#443522', '#4b4528', '#2d4635', '#2d454a', '#2d3d52', '#41344d'];
+// 2026-10-29（用户要求）参考图：提示词正文底色调深一档 #202020 → #171717（首项即默认色）。
+// 2026-10-30（用户要求）「节点颜色统一右边的灰度」：画布上所有节点卡片统一到
+// 同一档中性灰（深色主题 #262626 / 浅色主题 #f7f7f7，与 skin.css 的
+// --gbz-node-bg 同值），不再允许单个节点自带深色/彩色底盘。色板保留常量
+// 仅为兼容历史数据与可能的回滚，渲染侧已不再读取它。
+const PROMPT_NODE_BG_COLORS = ['#171717', '#342b2d', '#3c2c30', '#443522', '#4b4528', '#2d4635', '#2d454a', '#2d3d52', '#41344d'];
+// 节点统一底色：直接读 skin.css 的 --gbz-node-bg（深色 #262626 / 浅色 #f7f7f7），
+// 这样自定义主题改了变量也能自动跟随；读不到时按主题类名兜底。
+// 用缓存避免每次渲染都触发 getComputedStyle（节点多、重绘频繁）。
+let __canvasNodeBaseColorCache = { key: '', value: '' };
+function canvasNodeBaseColor(){
+    const key = `${document.documentElement.className}|${document.body.className}`;
+    if(__canvasNodeBaseColorCache.key === key) return __canvasNodeBaseColorCache.value;
+    let value = '';
+    try { value = String(getComputedStyle(document.body).getPropertyValue('--gbz-node-bg') || '').trim(); } catch(e) { value = ''; }
+    if(!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)){
+        const light = document.body.classList.contains('theme-light') || document.documentElement.classList.contains('theme-light');
+        value = light ? '#f7f7f7' : '#262626';
+    }
+    __canvasNodeBaseColorCache = { key, value };
+    return value;
+}
 const PROMPT_NODE_SIZE_PRESETS = [
-    {key:'p', label:'P', size:12},
-    {key:'h3', label:'H3', size:16},
-    {key:'h2', label:'H2', size:21},
-    {key:'h1', label:'H1', size:28}
+    {key:'p', label:'P', size:17},
+    {key:'h3', label:'H3', size:20},
+    {key:'h2', label:'H2', size:24},
+    {key:'h1', label:'H1', size:31}
 ];
+// 2026-10-29（用户要求）提示词正文大 2 号：实际渲染原被 skin.css 写死的 12px 卡住，
+// 这里把「节点字号」真正接通（skin 内改为跟随 --prompt-node-font-size）。
+// 2026-10-30（用户要求）整体再大 3 号：默认 14 → 17，旧档位同步 +3。
 function promptNodeStyle(node){
     const raw = node && typeof node.promptStyle === 'object' ? node.promptStyle : {};
-    const bg = PROMPT_NODE_BG_COLORS.includes(String(raw.bg || '')) ? String(raw.bg) : '#202020';
-    const fontSize = Math.max(9, Math.min(28, Number(raw.fontSize || 12) || 12));
+    // 2026-10-30（用户要求）统一灰度：无视节点自带的 promptStyle.bg（历史 #171717
+    // 与各种彩色底盘），一律返回画布节点底色，保证所有卡片观感一致。
+    const bg = canvasNodeBaseColor();
+    let baseFontSize = Math.max(9, Math.min(32, Number(raw.fontSize || 17) || 17));
+    // 旧节点存量里 ≤14（历史默认 12/14）归一到 17 档，即本轮「大 3 号」。
+    if(baseFontSize <= 14) baseFontSize = 17;
+    const fontSize = baseFontSize;
     return {
         bg,
         fontSize,
+        baseFontSize,
         bold: raw.bold === true,
         italic: raw.italic === true
     };
@@ -17581,14 +18092,12 @@ function placeCaretAtEnd(el){
 }
 function promptFormatControlsHtml(node, {includeExpand=true}={}){
     const style = promptNodeStyle(node);
+    // 2026-10-30（用户要求）节点底色已统一为画布灰，色板按钮失去意义且会误导
+    // （点了不变），这里整块停用；需要恢复时把下面注释的模板放回即可。
+    const colorControlHtml = '';
     return `
-        <div class="prompt-color-control">
-            <button class="prompt-format-btn prompt-color-current" type="button" data-prompt-bg-current title="背景颜色" aria-label="背景颜色" style="--swatch:${escapeAttr(style.bg)}"></button>
-            <div class="prompt-color-palette">
-                ${PROMPT_NODE_BG_COLORS.map(color => `<button type="button" class="${color === style.bg ? 'active' : ''}" data-prompt-bg="${escapeAttr(color)}" style="--swatch:${escapeAttr(color)}" title="${escapeAttr(color)}"></button>`).join('')}
-            </div>
-        </div>
-        ${PROMPT_NODE_SIZE_PRESETS.map(item => `<button class="prompt-format-btn ${Math.abs(style.fontSize - item.size) < 0.2 ? 'active' : ''}" type="button" data-prompt-size="${item.size}" title="字号 ${item.label}">${item.label}</button>`).join('')}
+        ${colorControlHtml}
+        ${PROMPT_NODE_SIZE_PRESETS.map(item => `<button class="prompt-format-btn ${Math.abs((style.baseFontSize ?? style.fontSize) - item.size) < 0.2 ? 'active' : ''}" type="button" data-prompt-size="${item.size}" title="字号 ${item.label}">${item.label}</button>`).join('')}
         <span class="prompt-format-divider"></span>
         <button class="prompt-format-btn ${style.bold ? 'active' : ''}" type="button" data-prompt-bold title="加粗"><b>B</b></button>
         <button class="prompt-format-btn ${style.italic ? 'active' : ''}" type="button" data-prompt-italic title="倾斜"><i>I</i></button>
@@ -18896,8 +19405,15 @@ function uploadEntryPreviewHtml(node, imgs){
         </div>`
         : `<div class="upload-preview-file">${smartFileIconHtml(img)}<strong>${escapeHtml(label)}</strong></div>`;
     const resolutionBadge = (kind === 'image' || kind === 'video') ? imageResolutionBadgeHtml(img, {outside:true}) : '';
+    // 2026-10-29（用户要求）：上传资源节点右上角补「替换」按钮。
+    // 上传节点只承载唯一素材，替换 = 原地换掉这一张：handleFiles 的 uploadEntry 分支
+    // 恒取 normalizedImages.slice(0,1)，所以不需要 replaceIndex；节点位置/尺寸/圆角/标题都不动。
+    // 外观与生图节点的右上角上传角标（.smart-run-upload-fab.smart-run-corner-upload）一致：
+    // 38×38 圆角方块 + 18px upload 图标 + 10% 白底，无文字。只保留自己的类名，
+    // 避免被 24228 行 .smart-run-upload-fab 的绑定抢走点击。
+    const replaceBtn = `<button class="upload-replace-btn" type="button" data-upload-replace="1" title="替换该资源" aria-label="替换该资源"><i data-lucide="upload"></i></button>`;
     return `<div class="upload-preview-card" data-image-index="0" data-media-signature="${escapeAttr(`${kind}:${img?.url || ''}`)}">
-        <div class="upload-preview-media">${preview}</div>
+        <div class="upload-preview-media">${preview}</div>${replaceBtn}
         <button class="mini-x image-delete" type="button" data-image-index="0" title="删除资源" aria-label="删除资源"><i data-lucide="trash-2"></i></button>
     </div>${resolutionBadge}`;
 }
@@ -20750,7 +21266,7 @@ function smartNodeToolbarHtml(node){
         <button class="workflow-group-color-trigger" type="button" title="背景颜色" aria-label="背景颜色" aria-expanded="${colorPickerOpen ? 'true' : 'false'}"><i data-lucide="palette"></i></button>
         <div class="workflow-group-color-popover">
             ${WORKFLOW_GROUP_COLOR_PRESETS.map(color => `
-                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-image-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)}"></button>
+                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-image-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)};background:${escapeAttr(color.swatch)} !important"></button>
             `).join('')}
         </div>
     </div>` : '';
@@ -20842,7 +21358,7 @@ function gridSplitGroupToolbarHtml(node){
         <button class="workflow-group-color-trigger" type="button" title="背景颜色" aria-label="背景颜色" aria-expanded="${colorPickerOpen ? 'true' : 'false'}"><i data-lucide="palette"></i></button>
         <div class="workflow-group-color-popover">
             ${WORKFLOW_GROUP_COLOR_PRESETS.map(color => `
-                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-image-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)}"></button>
+                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-image-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)};background:${escapeAttr(color.swatch)} !important"></button>
             `).join('')}
         </div>
     </div>`;
@@ -21176,7 +21692,7 @@ function smartGroupToolbarHtml(node){
         <button class="workflow-group-color-trigger" type="button" title="背景颜色" aria-label="背景颜色" aria-expanded="${colorPickerOpen ? 'true' : 'false'}"><i data-lucide="palette"></i></button>
         <div class="workflow-group-color-popover">
             ${WORKFLOW_GROUP_COLOR_PRESETS.map(color => `
-                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-smart-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)}"></button>
+                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-smart-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)};background:${escapeAttr(color.swatch)} !important"></button>
             `).join('')}
         </div>
     </div>`;
@@ -21482,12 +21998,47 @@ async function runWorkflowGroupProcessNodes(group){
     scheduleSave();
     return true;
 }
+// 2026-10-28（用户要求）工作流组支持「打包批量下载」：
+// 组内成员可能是普通生图/生视频节点、多图 Group、宫格分镜组、智能分组、上传节点……
+// 取图口径按成员类型分流，统一收敛成 imageForDisplay 之后的媒体条目。
+// 注意：这是渲染/下载两条路径共用的唯一口径，别在别处再写一套，否则按钮可用态和实际打包内容会不一致。
+function workflowGroupMemberMediaItems(member){
+    if(!member) return [];
+    if(isSmartGroupNode(member)) return (smartGroupImageItems(member) || []).filter(item => item?.url);
+    const own = (member.images || []).filter(img => imageForDisplay(img)?.url);
+    const list = own.length ? own : (member.manualInputRefs || []);
+    return list.map(imageForDisplay).filter(item => item?.url);
+}
+function workflowGroupDownloadItems(group){
+    if(!isWorkflowGroupNode(group)) return [];
+    const items = [];
+    const seen = new Set();
+    // 按画布阅读顺序（先上下后左右）排，zip 里同名文件加序号时顺序才和视觉一致
+    const members = workflowGroupMembers(group).slice().sort((a, b) => {
+        const ra = nodeRect(a), rb = nodeRect(b);
+        const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
+        if(Math.abs(dy) > 24) return dy;
+        return (Number(ra.x) || 0) - (Number(rb.x) || 0);
+    });
+    members.forEach(member => {
+        workflowGroupMemberMediaItems(member).forEach(item => {
+            const url = smartOriginalMediaUrl(item) || item.url || '';
+            if(!url || seen.has(url)) return;
+            seen.add(url);
+            items.push({...item, url});
+        });
+    });
+    return items;
+}
 function workflowGroupToolbarHtml(node){
     if(!isWorkflowGroupNode(node)) return '';
-    const hasMembers = workflowGroupMembers(node).length > 0;
+    const members = workflowGroupMembers(node);
+    const hasMembers = members.length > 0;
+    const hasMedia = members.some(member => workflowGroupMemberMediaItems(member).length > 0);
     const actions = [
         {key:'run', icon:'play', label:'执行小组', enabled:hasMembers},
         {key:'edit', icon:'pencil', label:'编辑', enabled:true},
+        {key:'download-all', icon:'archive', label:'批量下载', enabled:hasMedia},
         {key:'ungroup', icon:'ungroup', label:'解开组件', enabled:hasMembers},
         {key:'createAsset', icon:'copy-plus', label:'创建资产', enabled:hasMembers},
         {key:'copyGroup', icon:'copy', label:'复制组', enabled:hasMembers},
@@ -21499,7 +22050,7 @@ function workflowGroupToolbarHtml(node){
         <button class="workflow-group-color-trigger" type="button" title="背景颜色" aria-label="背景颜色" aria-expanded="${colorPickerOpen ? 'true' : 'false'}"><i data-lucide="palette"></i></button>
         <div class="workflow-group-color-popover">
             ${WORKFLOW_GROUP_COLOR_PRESETS.map(color => `
-                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-workflow-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)}"></button>
+                <button class="workflow-group-color-swatch ${color.key === activeColor ? 'active' : ''}" type="button" data-workflow-group-color="${escapeAttr(color.key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(color.label)}" style="--swatch:${escapeAttr(color.swatch)};background:${escapeAttr(color.swatch)} !important"></button>
             `).join('')}
         </div>
     </div>`;
@@ -21526,6 +22077,15 @@ function setWorkflowGroupColor(nodeId, colorKey){
     render();
     scheduleSave();
 }
+// 2026-10-29（用户要求）组标题编辑框宽度按"实际字宽"算：
+// 1 个汉字/全角 ≈ 2ch（ch = 数字 0 的宽度 ≈ 0.5em），半角 ≈ 1ch。
+// 之前统一按 length + 2 算，"开形态"只拿到 5ch，第 3 个字直接被裁掉。
+function titleInputChWidth(text){
+    const units = [...String(text || '')].reduce((sum, ch) => {
+        return sum + (/[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\u3000-\u303F]/.test(ch) ? 2 : 1);
+    }, 0);
+    return Math.max(8, Math.min(28, units + 2));
+}
 function startWorkflowGroupTitleEdit(nodeId, titleEl){
     const group = nodes.find(n => n.id === nodeId);
     if(!isWorkflowGroupNode(group) || !titleEl) return;
@@ -21534,6 +22094,8 @@ function startWorkflowGroupTitleEdit(nodeId, titleEl){
     input.value = group.title || '新建分组';
     input.setAttribute('aria-label', '工作流组名称');
     titleEl.replaceWith(input);
+    // 2026-10-29：宽度跟名字长度走，见 startCanvasNodeTitleEdit 注释。
+    input.style.setProperty('width', titleInputChWidth(input.value) + 'ch', 'important');
     input.focus();
     input.select();
     let done = false;
@@ -21558,6 +22120,69 @@ function startWorkflowGroupTitleEdit(nodeId, titleEl){
     });
     input.addEventListener('blur', () => finish(true));
 }
+// 2026-10-28（用户要求）组框（图片/视频多图组）标题双击改名。
+// 与工作流组标题编辑同构：原地换成 input、回车/失焦提交、Esc 取消，提交后 render 重建节点。
+// 标题来源 smartNodeTitle()：多图分支优先用 node.title（非自动名时），所以写回 node.title 即可持久生效。
+function startCanvasNodeTitleEdit(nodeId, titleEl){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !titleEl) return;
+    // 2026-10-29（用户要求）：多图组 / 智能分组 / 单图·视频·音频素材节点统一走这套原地改名。
+    // （素材节点是否可编辑由渲染端 titleEditAttr 决定，这里不再设门槛。）
+    // 标题写回 node.title：组与智能分组显示端直接透传；单素材节点 smartMaterialNodeTitle()
+    // 对非自动名（不在 MATERIAL_AUTO_TITLES 里）也直接透传，所以改名持久生效。
+    // 兜底名维持方案 A："图片节点 N" 这类自动名照旧显示，不受影响。
+    const input = document.createElement('input');
+    input.className = 'node-title-input';
+    input.value = String(titleEl.textContent || '').trim();
+    input.setAttribute('aria-label', '素材名称');
+    titleEl.replaceWith(input);
+    // 2026-10-29（用户要求）：输入框宽度跟名字长度走（否则短名字配 200px 固定宽，
+    // 又变成一条长横条）。1ch ≈ 一个字符宽，+2 给光标和留白，28ch 封顶。
+    input.style.setProperty('width', titleInputChWidth(input.value) + 'ch', 'important');
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = save => {
+        if(done) return;
+        done = true;
+        document.removeEventListener('pointerdown', outsidePointer, true);
+        const next = String(input.value || '').trim();
+        const changed = save && next && next !== node.title;
+        if(changed){
+            pushUndo();
+            node.title = next;
+            scheduleSave();
+        }
+        // 2026-10-29（同提示词标题那处）：差量渲染会复用未变化的节点 DOM，输入框会一直留着。
+        // 未改动就原地换回原标题元素；有改动交给 render() 重建。
+        if(input.isConnected && !changed && titleEl){
+            input.replaceWith(titleEl);
+        } else {
+            render();
+            if(input.isConnected && titleEl){
+                const span = titleEl.querySelector('span');
+                if(span) span.textContent = smartNodeTitle(node, node.images || []);
+                else titleEl.textContent = smartNodeTitle(node, node.images || []);
+                input.replaceWith(titleEl);
+            }
+        }
+    };
+    // 点击编辑框以外的任意位置即提交收起（不依赖 blur，见上）。
+    function outsidePointer(e){
+        if(e.target === input || input.contains(e.target)) return;
+        finish(true);
+    }
+    document.addEventListener('pointerdown', outsidePointer, true);
+    input.addEventListener('mousedown', e => e.stopPropagation(), true);
+    input.addEventListener('click', e => e.stopPropagation(), true);
+    input.addEventListener('dblclick', e => e.stopPropagation(), true);
+    input.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if(e.key === 'Enter'){ e.preventDefault(); finish(true); }
+        if(e.key === 'Escape'){ e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+}
 async function runWorkflowGroupToolbarAction(nodeId, action){
     const group = nodes.find(n => n.id === nodeId);
     if(!isWorkflowGroupNode(group)) return;
@@ -21578,6 +22203,14 @@ async function runWorkflowGroupToolbarAction(nodeId, action){
             render();
             scheduleSave();
         }
+        return;
+    }
+    if(action === 'download-all'){
+        // 2026-10-28（用户要求）打包批量下载：组内全部成员的产物打包成一个 zip
+        const items = workflowGroupDownloadItems(group);
+        if(!items.length){ toast('组内还没有可下载的素材'); return; }
+        toast(`正在打包 ${items.length} 个素材…`);
+        await zipDownloadImageItems(group.title || 'workflow-group', items);
         return;
     }
     if(action === 'createAsset'){ openSmartWorkflowSaveModal(group); return; }
@@ -22114,16 +22747,29 @@ function render(){
         // 不再渲染右下角缩放手柄；但多图生成组框（isGroup：多图/追加中/等待组）
         // 是框不是卡片，10-15 误伤后按用户反馈恢复手柄（10-14 二次反馈）。
         // 非媒体节点（提示词/循环/智能分组/工作流组等）及其生成中状态保留手柄。
-        const canResizeNode = isGroup
+        // 2026-10-29（用户要求）：工作流组改为四角拉伸，手柄由独立覆盖层绘制（浮在素材之上），
+        // 框内不再渲染单个右下角手柄，避免两个手柄叠在一起。
+        const canResizeNode = (isGroup
             || (!isImageNode
-            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup || isWorkflowGroup));
+            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup))) && !isWorkflowGroup;
         const nodeStyleExtra = isWorkflowGroup ? workflowGroupFrameStyle(node) : (isSmartGroup ? smartGroupFrameStyle(node) : (isGroup ? imageGroupFrameStyle(node) : ''));
         // 2026-10-12（用户要求：成组后与普通 Group 节点同款）：生成型智能分组也恢复显示外部标题，
         // 卡片内不再有「N 图片」摘要行（hideGeneratedGroupHead 已无意义，恒 false 保留结构）。
         const hideGeneratedGroupHead = false;
         const portInHtml = isUploadEntry ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>';
+        // 2026-10-28（用户要求）组框标题可双击改名的标记；非组框仍只挂文件名提示。
+        // 2026-10-29（用户要求）：智能分组 + 单图/单视频/单音频素材节点同样挂改名标记。
+        // 素材节点排除：多图组（isGroup 已含）、生成中/排队、空节点、上传入口；
+        // minimax-h3 生成节点不挂（兜底名方案 A：生成产物维持"图片节点 N"）。
+        // 2026-10-29（B 方案）上传节点有图后与单素材节点统一：同样挂标题栏，
+        // 文件名 / 分辨率 / 双击改名走同一套逻辑，不再把 upload-entry 排除在外。
+        const isSingleMediaTitle = isImageNode && !isGroup && !isSmartGroup && !isEmpty && !isPending && !isH3 && imgs.length === 1;
+        // 单素材节点：文件名被截断时保留完整文件名提示，与"双击修改名称"合并成一条 tooltip。
+        const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
+            ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
+            : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
         const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
-            ${uploadPreviewOnly || hideGeneratedGroupHead || isWorkflowGroup ? '' : uploadPreviewOnly ? `<div class="node-head upload-entry-node-head"><div class="node-title"${titleTip ? ` title="${escapeAttr(titleTip)}"` : ''}>${titleHtml}</div></div>` : `<div class="node-head"><div class="node-title"${titleTip ? ` title="${escapeAttr(titleTip)}"` : ''}>${titleHtml}</div>${nodeResolutionHtml(node, imgs)}<div class="node-actions">${deleteBtn}${smartGroupResizeBtn}</div></div>`}
+            ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${isPending ? '' : (isGridSplitGroup ? gridSplitGroupToolbarHtml(node) : smartNodeToolbarHtml(node))}${smartTransformEditorHtml(node)}${smartGroupToolbarHtml(node)}${workflowGroupToolbarHtml(node)}
@@ -22184,7 +22830,11 @@ function render(){
     });
     // 用户正在提示词框输入时不要移动 composer:移动 DOM 会打断输入法合成、中断输入。
     // composer 已在 keepEls 中(未被移除),不重排也不影响显示(z-index 固定)。
-    if(composerEl && !promptHadFocus) world.appendChild(composerEl);
+    // 2026-10-30（用户报「拖动/上传图片后面板消失、只剩一片黑」）：
+    // 大面板展开时 composer 是临时挂在 body 下的（#world 的 transform 会让 fixed 失效）。
+    // 这里一旦把它挪回 world，面板就按画布坐标定位跑到屏幕外，遮罩却还在 → 用户看到全黑。
+    // 上传按钮会让输入框失焦（promptHadFocus=false），恰好命中这条路径，所以必须排除展开态。
+    if(composerEl && !promptHadFocus && !isPromptExpanded()) world.appendChild(composerEl);
     nodeHtmlEntries.forEach(entry => {
         // 差量复用：appendChild 保序挪动（DOM 移动 ≠ 重建，播放态/焦点/监听全保留）
         if(entry.reuseEl){ world.appendChild(entry.reuseEl); return; }
@@ -22194,7 +22844,12 @@ function render(){
         const reusable = reusableNodes.get(entry.node.id);
         if(reusable){
             transplantSmartMediaElements(reusable, fresh);
-            if(reusable !== fresh) reusable.remove();
+            // 2026-10-29：旧元素可能已被前面某步摘掉（父子指针不同步时 remove 会抛
+            // NotFoundError 并打断整次 render），这里兜住，避免后面的节点挂不上。
+            if(reusable !== fresh){
+                try { reusable.remove(); }
+                catch(_e){ try { reusable.parentNode?.removeChild?.(reusable); } catch(__e){} }
+            }
         }
     });
     // 节点尺寸和位置先写入 DOM，再计算连线端点，避免改尺寸后线路仍使用旧边界。
@@ -22208,10 +22863,14 @@ function render(){
         }
     }
     world.insertAdjacentHTML('beforeend', smartSelectionToolbarHtml());
+    // 2026-10-29（用户要求）：工作流组四角缩放手柄覆盖层，每次 render 重建（先清旧的，避免叠加）。
+    world.querySelectorAll('.wf-resize-overlay').forEach(el => el.remove());
+    world.insertAdjacentHTML('beforeend', workflowGroupResizeOverlayHtml(hiddenBranchSourceIds));
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
     bindConnectionEvents();
     bindSmartSelectionToolbar();
+    bindWorkflowGroupResizeHandles();
     updateComposer();
     renderSmartAgentContext();
     renderSmartAgentSelectedPreview();
@@ -22378,7 +23037,7 @@ function bindConnectionEvents(){
             const iconScale = Math.max(1, Math.min(5.5, 1 / svgScale));
             path.style.setProperty('stroke', '#d4d4d4', 'important');
             path.style.setProperty('stroke-opacity', '1', 'important');
-            path.style.setProperty('stroke-width', '1.9', 'important');
+            path.style.setProperty('stroke-width', '2.2', 'important');
             path.style.setProperty('filter', 'drop-shadow(0 0 3px rgba(220,220,220,.2))', 'important');
             endpoint.setAttribute('opacity', '1');
             endpoint.style.setProperty('opacity', '1', 'important');
@@ -22637,14 +23296,37 @@ function startPromptNodeTitleEdit(nodeId, titleEl){
     const finish = save => {
         if(done) return;
         done = true;
+        document.removeEventListener('pointerdown', outsidePointer, true);
         const next = String(input.value || '').trim().slice(0, 40) || '提示词';
-        if(save && next !== promptNodeTitleText(node)){
+        const changed = save && next !== promptNodeTitleText(node);
+        if(changed){
             pushUndo();
             node.title = next;
             scheduleSave();
         }
-        render();
+        // 2026-10-29（用户反馈）点空白处输入框不消失的根因：render() 是差量渲染，
+        // 节点 HTML 串没变就直接复用旧 DOM（连我们塞进去的 input 一起留着），
+        // 所以「取消改名」时节点永远不重建，输入框就一直挂在标题行上。
+        // 未改动：把原标题元素原地换回来（零重建）；有改动：让 render() 按新数据重建该节点。
+        if(input.isConnected && !changed && titleEl){
+            input.replaceWith(titleEl);
+        } else {
+            render();
+            if(input.isConnected && titleEl){
+                const span = titleEl.querySelector('span');
+                if(span) span.textContent = promptNodeTitleText(node);
+                else titleEl.textContent = promptNodeTitleText(node);
+                input.replaceWith(titleEl);
+            }
+        }
     };
+    // 点击编辑框以外的地方直接提交（不依赖 blur：画布 pointerdown 里 preventDefault/重新渲染
+    // 会让 focus 变化时序不可靠，之前就是靠 blur 兜不住才留下框）。
+    function outsidePointer(e){
+        if(e.target === input || input.contains(e.target)) return;
+        finish(true);
+    }
+    document.addEventListener('pointerdown', outsidePointer, true);
     input.addEventListener('mousedown', e => e.stopPropagation(), true);
     input.addEventListener('click', e => e.stopPropagation(), true);
     input.addEventListener('dblclick', e => e.stopPropagation(), true);
@@ -22856,7 +23538,10 @@ function bindPromptFormatControls(scope, node){
     });
     const updateBackplate = patch => {
         pushUndo();
-        node.promptStyle = {...promptNodeStyle(node), ...patch};
+        // 只合并存储字段：promptNodeStyle() 返回的是「显示值」（fontSize 已含 +2 渲染偏移），
+        // 直接铺回去会让字号在每次改颜色时累积变大。
+        const rawStyle = node && typeof node.promptStyle === 'object' ? node.promptStyle : {};
+        node.promptStyle = {...rawStyle, ...patch};
         if(promptExpandState?.nodeId === node.id) applyPromptExpandStyle(node);
         applyPromptNodeStyleToDom(node, scope);
         scheduleSave();
@@ -23797,6 +24482,15 @@ function bindNodeEvents(){
             return;
         };
         if(nodeForControls?.type !== 'smart-group' && nodeForControls?.type !== 'smart-storyboard') el.ondblclick = e => e.stopPropagation();
+        // 2026-10-29（用户要求）：标题平时只显示名字，**双击名字**才进入改名。
+        // 名字上不再拦 mousedown/click，单击照常选中节点、按住照常拖动整组。
+        el.querySelectorAll('[data-node-title-edit]').forEach(titleEl => {
+            titleEl.addEventListener('dblclick', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                startCanvasNodeTitleEdit(titleEl.dataset.nodeTitleEdit || id, titleEl);
+            }, true);
+        });
         el.querySelectorAll('[data-storyboard-generate]').forEach(btn => {
             btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
             btn.addEventListener('click', async e => { e.preventDefault(); e.stopPropagation(); btn.disabled = true; try { await generateStoryboardScriptForNode(btn.dataset.storyboardGenerate || id, {openAfter:true}); } finally { btn.disabled = false; } });
@@ -23979,8 +24673,8 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
             });
         });
         el.querySelectorAll('[data-workflow-group-title]').forEach(titleEl => {
-            titleEl.addEventListener('mousedown', e => { e.stopPropagation(); }, true);
-            titleEl.addEventListener('click', e => { e.stopPropagation(); }, true);
+            // 2026-10-29（用户要求）：与组标题一致，双击才改名；mousedown 不再拦截，
+            // 单击名字即选中节点、按住可拖整组。
             titleEl.addEventListener('dblclick', e => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -24104,6 +24798,19 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 e.stopImmediatePropagation();
                 uploadTargetId = id;
                 uploadReplaceIndex = Number(btn.dataset.replaceIndex ?? -1);
+                if(fileInput){ fileInput.multiple = false; fileInput.click(); }
+            }, true);
+        });
+        // 2026-10-29（用户要求）：上传资源节点右上角「替换」。走 fileInput 单文件流程，
+        // uploadEntry 分支会原地覆盖唯一素材，不追加、不新建节点。
+        el.querySelectorAll('.upload-replace-btn').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                uploadTargetId = id;
+                uploadReplaceIndex = 0;
                 if(fileInput){ fileInput.multiple = false; fileInput.click(); }
             }, true);
         });
@@ -24520,13 +25227,16 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 capturePendingUndo();
             });
         });
+        // 2026-10-29（用户要求）：工作流组四角拉伸走独立覆盖层（见 workflowGroupResizeOverlayHtml），
+        // 因为它必须浮在组内素材之上，而组框自身 z-index:0，框内的手柄会被素材盖住。
         el.querySelector('.node-resize-handle')?.addEventListener('mousedown', e => {
             if(e.button !== 0) return;
             e.preventDefault(); e.stopPropagation();
             const node = nodes.find(n => n.id === id);
             if(!node) return;
             const rect = nodeRect(node);
-            resizeState = {id, startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height};
+            resizeState = {id, dir:'se', startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height,
+                startLeft:Number(node.x) || 0, startTop:Number(node.y) || 0};
             if(node.type === 'smart-prompt') document.body.classList.add('smart-prompt-node-resizing');
             // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
             // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
@@ -29109,6 +29819,8 @@ function loadPromptDraft(subject){
 }
 function positionComposerForNode(node){
     if(!node) return;
+    // 大面板展开时位置由 positionExpandedComposer() 接管，这里不能再按节点覆盖 left/top
+    if(isPromptExpanded()) return;
     const rect = nodeRect(node);
     const gap = 14;
     const cardW = node?.type === 'smart-storyboard' ? 840 : (isSmartRunnableNode(node) ? 880 : 840);
@@ -29145,6 +29857,95 @@ function syncComposerFixedEngine(node){
     composer.dataset.panelKind = panelKind || '';
     engineSelect.hidden = panelKind === 'comfy';
     syncApiKindToggleVisibility();
+    syncEngineChip();
+}
+
+/* ===== 2026-10-30（用户要求）引擎下拉自绘化 =====
+   原生 <select> 展开的弹层由操作系统绘制，CSS 管不到：深色主题下高亮项被画成白块，
+   而文字是我们设的浅灰 → 白底浅字看不清。改成 engine-chip + engine-menu 自绘外观，
+   原生 select 保留在 DOM 里作数据源（视觉隐藏），value/option/onchange 全部沿用：
+   点菜单项 = 写 engineSelect.value + dispatchEvent('change')，applySmartPanelKindLock
+   对 option 的 hidden/disabled 增删照常生效，业务逻辑零改动。 */
+const engineChip = document.getElementById('engineChip');
+const engineMenu = document.getElementById('engineMenu');
+function syncEngineChip(){
+    if(!engineChip || !engineMenu || !engineSelect) return;
+    if(engineSelect.hidden){
+        engineChip.hidden = true;
+        closeEngineMenu();
+        return;
+    }
+    engineChip.hidden = false;
+    const cur = engineSelect.options[engineSelect.selectedIndex];
+    engineChip.textContent = cur ? cur.textContent.trim() : '';
+    // 每次面板渲染都重建菜单：applySmartPanelKindLock 可能刚改过 option 的 hidden/disabled
+    const visible = [...engineSelect.options].filter(o => !o.hidden && o.style.display !== 'none');
+    engineMenu.innerHTML = visible.map(o => {
+        const sel = o.selected ? ' selected' : '';
+        const check = o.selected
+            ? '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.2 5 9l4.8-5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            : '';
+        return `<button type="button" role="option" aria-selected="${o.selected ? 'true' : 'false'}" class="engine-option${sel}" data-engine-value="${escapeAttr(o.value)}"><span>${escapeHtml(o.textContent.trim())}</span>${check}</button>`;
+    }).join('');
+    engineMenu.querySelectorAll('.engine-option').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if(String(engineSelect.value) === btn.dataset.engineValue){ closeEngineMenu(); return; }
+            engineSelect.value = btn.dataset.engineValue;
+            engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            closeEngineMenu();
+            syncEngineChip();
+        };
+    });
+}
+function openEngineMenu(){
+    if(!engineMenu || !engineChip || engineChip.hidden) return;
+    engineMenu.hidden = false;
+    // 强制一帧后再挂 open 类，保证 opacity 过渡生效
+    requestAnimationFrame(() => engineMenu.classList.add('open'));
+    engineChip.classList.add('open');
+    engineChip.setAttribute('aria-expanded', 'true');
+}
+function closeEngineMenu(){
+    if(!engineMenu || !engineChip) return;
+    engineMenu.classList.remove('open');
+    engineMenu.hidden = true;
+    engineChip.classList.remove('open');
+    engineChip.setAttribute('aria-expanded', 'false');
+}
+function engineMenuIsOpen(){ return !!(engineMenu && !engineMenu.hidden); }
+if(engineChip){
+    engineChip.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        engineMenuIsOpen() ? closeEngineMenu() : openEngineMenu();
+    });
+    // 键盘：方向键直接切换（与原生 select 手感一致），Enter/空格展开菜单
+    engineChip.addEventListener('keydown', event => {
+        if(event.key === 'ArrowDown' || event.key === 'ArrowUp'){
+            event.preventDefault();
+            const visible = [...engineSelect.options].filter(o => !o.hidden && o.style.display !== 'none');
+            const idx = visible.indexOf(engineSelect.options[engineSelect.selectedIndex]);
+            const next = visible[(idx + (event.key === 'ArrowDown' ? 1 : visible.length - 1)) % visible.length];
+            if(next && next.value !== engineSelect.value){
+                engineSelect.value = next.value;
+                engineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                syncEngineChip();
+            }
+        } else if((event.key === 'Enter' || event.key === ' ') && !engineMenuIsOpen()){
+            event.preventDefault();
+            openEngineMenu();
+        } else if(event.key === 'Escape' && engineMenuIsOpen()){
+            event.preventDefault();
+            closeEngineMenu();
+        }
+    });
+    document.addEventListener('pointerdown', event => {
+        if(engineMenuIsOpen() && !event.target.closest('#engineSelectWrap')) closeEngineMenu();
+    });
+    // 切换语言时 option 文案被 i18n 改写，chip 文本要跟着刷新
+    window.addEventListener('studio-lang-change', () => syncEngineChip());
 }
 function syncImageOutputModeToggle(){
     // 2026-09-27 用户要求：替换/追加切换按钮整个去掉不显示，默认（且唯一）追加模式。
@@ -29155,16 +29956,122 @@ function syncImageOutputModeToggle(){
 // 2026-09-29（用户反馈）单张图生图长提示词显示不全：提示词框高度只由 settings.promptH（默认 124）
 // 或手动拖拽决定，从不随内容变化，长提示词只能内部滚动。这里做内容自适应增高：
 // 下限 = 用户手动设定值（settings.promptH），上限 = 380（与手动拖拽上限一致）；清空文字可回缩。
+/* ===== 2026-10-30（用户要求）提示词大面板 =====
+   长提示词不再撑高输入框（见 autoGrowPromptInput 的 200 上限），改为点右上角按钮把
+   同一个 composer 放大到屏幕居中。不克隆 DOM：输入框、缩略图、参数栏全部复用，
+   不存在"两套输入框内容同步"的问题。
+   位置必须按画布坐标反算 —— composer 在 #world 内，而 world 带 translate + scale，
+   fixed 定位会跟着画布一起跑；尺寸则用 --canvas-inverse-scale 抵消缩放。 */
+let promptExpandedNodeId = '';
+let composerHomeParent = null;
+function isPromptExpanded(){ return !!composer?.classList.contains('prompt-expanded'); }
+function setPromptExpanded(on){
+    if(!composer) return;
+    const next = !!on && !!selectedNode();
+    if(next === isPromptExpanded()) return;
+    composer.classList.toggle('prompt-expanded', next);
+    document.body.classList.toggle('prompt-expanded-open', next);
+    if(composerExpandMask) composerExpandMask.hidden = !next;
+    promptExpandBtn?.setAttribute('aria-expanded', next ? 'true' : 'false');
+    if(promptExpandBtn) promptExpandBtn.title = next ? '收起编辑面板' : '扩大编辑提示词';
+    if(next){
+        // 展开态挂在 body 下：world 的 transform 会把它变成 fixed 的包含块，
+        // 留在 world 里既不能真居中，遮罩也没法同时压住画布且不压面板。
+        composerHomeParent = composer.parentElement;
+        document.body.appendChild(composer);
+        promptExpandedNodeId = selectedNode()?.id || '';
+        // 展开态高度交给 CSS，清掉自动增高的内联值，避免两条规则打架
+        promptInput?.style.removeProperty('--prompt-h');
+        requestAnimationFrame(() => { promptInput?.focus?.(); syncPromptScrollbar(); });
+    } else {
+        // 先移回 world 再算位置，否则 positionComposerForNode 的坐标会落在 body 坐标系里
+        if(composerHomeParent && composer.parentElement !== composerHomeParent){
+            composerHomeParent.appendChild(composer);
+        }
+        promptExpandedNodeId = '';
+        const node = selectedNode();
+        if(node && composer.classList.contains('open')) {
+            composer.style.width = `${node?.type === 'smart-storyboard' ? 840 : (isSmartRunnableNode(node) ? 880 : 840)}px`;
+            positionComposerForNode(node);
+        }
+        promptInput?.style.removeProperty('--prompt-h');
+        autoGrowPromptInput();
+        syncPromptScrollbar();
+    }
+}
+if(promptExpandBtn){
+    promptExpandBtn.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setPromptExpanded(!isPromptExpanded());
+    });
+}
+// 2026-10-30（用户要求）大面板只能靠右上角按钮关闭：
+// 点遮罩不再收起，遮罩只用于拦截点击，避免误操作到背后的画布（点它就当点了个空白）。
+if(composerExpandMask){
+    composerExpandMask.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+}
+// Esc 同样不收起。但必须在 capture 阶段吞掉：否则 Esc 会落到画布自己的处理
+// （取消连线 / 清选区），选区一清 updateComposer 就找不到节点，面板会跟着消失。
+document.addEventListener('keydown', event => {
+    if(event.key === 'Escape' && isPromptExpanded()){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }
+}, true);
+
 function autoGrowPromptInput(){
     if(!promptInput || promptInput.dataset.promptLocked === '1') return;
-    const prev = promptInput.style.getPropertyValue('--prompt-h');
-    // 先把高度压到最小再量内容：scrollHeight 恒 >= clientHeight，不压就直接量会永远等于当前高度、无法回缩
-    promptInput.style.setProperty('--prompt-h', '0px');
-    const content = Math.ceil(promptInput.scrollHeight);
-    if(prev) promptInput.style.setProperty('--prompt-h', prev); else promptInput.style.removeProperty('--prompt-h');
-    const base = Math.max(60, Math.min(380, Number(settings?.promptH) || 124));
-    const next = Math.max(base, Math.min(380, content + 2));
-    promptInput.style.setProperty('--prompt-h', `${next}px`);
+    // 2026-10-30（用户要求）输入框恒定 3 行（≈110px），不再随内容增高，超出在框内滚动：
+    // 84 = 3 行 × 17px × 1.65 行高；+19 余量（实测 26 会让第 4 行露出半截字，105 仍有 2px 残影，103 归零），与 CSS 的 calc(3 * 1.65em + 19px) 一致。
+    // 想看全文/编辑长文点右上角扩大按钮（展开态不受此限制，吃满剩余高度）。
+    // settings.promptH 字段保留但不再生效（高度固定后拖拽无意义）；要恢复自适应，把本函数换回量
+    // scrollHeight 的旧逻辑（备份 smart-canvas.js.bak-20261030-fixed3row 可对照）。
+    if(composer?.classList.contains('prompt-expanded')) return;
+    promptInput.style.setProperty('--prompt-h', '103px');
+}
+/* ===== 2026-10-30 提示词框自绘滚动条 =====
+   3 行固定高度后，长文靠这条 4px 指示条表达"还有多少没看到"。
+   不用 UA 滚动条的原因：Chrome 121+ 的 overlay 滚动条不占布局、静止时不绘制，
+   实测 offsetWidth-clientWidth 恒为 0、截图里完全看不到；自绘条能保证各缩放下宽度恒定、颜色可控。
+   元素单条即 thumb（不是轨道+thumb 两层），高度与位置按 scrollHeight 比例算。 */
+let promptScrollbarEl = null;
+function ensurePromptScrollbar(){
+    if(promptScrollbarEl || !promptInput) return promptScrollbarEl;
+    const row = promptInput.closest('.prompt-row');
+    if(!row) return null;
+    promptScrollbarEl = document.createElement('div');
+    promptScrollbarEl.className = 'prompt-scrollbar';
+    promptScrollbarEl.setAttribute('aria-hidden', 'true');
+    row.appendChild(promptScrollbarEl);
+    if(typeof ResizeObserver === 'function'){
+        new ResizeObserver(() => syncPromptScrollbar()).observe(promptInput);
+    }
+    promptInput.addEventListener('scroll', syncPromptScrollbar, { passive: true });
+    return promptScrollbarEl;
+}
+function syncPromptScrollbar(){
+    const bar = ensurePromptScrollbar();
+    if(!bar || !promptInput) return;
+    const sh = promptInput.scrollHeight;
+    const ch = promptInput.clientHeight;
+    const cs = getComputedStyle(promptInput);
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const trackH = Math.max(0, ch - padTop - padBottom);
+    if(sh - ch <= 2 || trackH <= 0){
+        bar.dataset.show = '0';
+        return;
+    }
+    const thumbH = Math.max(18, Math.min(trackH, Math.round(trackH * ch / sh)));
+    const maxTop = Math.max(0, trackH - thumbH);
+    const ratio = Math.min(1, Math.max(0, promptInput.scrollTop / Math.max(1, sh - ch)));
+    bar.style.top = `${padTop + Math.round(maxTop * ratio)}px`;
+    bar.style.height = `${thumbH}px`;
+    bar.dataset.show = '1';
 }
 function updatePromptWordCount(){
     if(!promptWordCount || !promptInput) return;
@@ -29176,6 +30083,16 @@ function updatePromptWordCount(){
 }
 function updateComposer(){
     const node = selectedNode();
+    // 大面板展开时换了选中节点（或面板已关闭），自动收起，避免内容与标题对不上
+    if(isPromptExpanded() && (!node || (promptExpandedNodeId && node.id !== promptExpandedNodeId))){
+        setPromptExpanded(false);
+    }
+    // 兜底：展开态必须挂在 body 下（world 的 transform 会破坏 fixed 定位）。
+    // 任何路径（render 重排、别的面板逻辑）把 composer 挪走，这里立刻拉回来，
+    // 避免出现「遮罩还在、面板跑到画布坐标系外」的死黑状态。
+    if(isPromptExpanded() && composer.parentElement !== document.body){
+        document.body.appendChild(composer);
+    }
     const isStoryboardComposer = node?.type === "smart-storyboard";
     document.body.classList.toggle("storyboard-composer-mode", isStoryboardComposer);
     if(promptInput && isStoryboardComposer){ promptInput.setAttribute("data-placeholder","描述剧情片段、故事，为你生成分镜脚本"); promptInput.setAttribute("aria-label","脚本内容"); }
@@ -29235,6 +30152,7 @@ function updateComposer(){
     updateProviderModels();
     syncImageOutputModeToggle();
     syncRunButtonState(node);
+    syncPromptScrollbar();
 }
 function renderInputPromptPreview(node){
     if(!inputPromptPreview) return;
@@ -29416,6 +30334,40 @@ function bindInputThumbVideoMeta(root){
         else v.addEventListener('loadedmetadata', fill, { once:true });
     });
 }
+// 2026-10-30（用户要求）双击引用缩略图（图/视频/音频）→ 选中并定位到来源节点
+function locateSourceNodeForReferenceThumb(thumbEl){
+    if(!thumbEl) return false;
+    const nodeId = String(thumbEl.dataset.nodeId || '').trim();
+    const sourceUrl = String(thumbEl.dataset.sourceUrl || thumbEl.dataset.url || '');
+    let source = nodeId ? nodes.find(n => n.id === nodeId) : null;
+    // 旧素材没有 nodeId 时按 URL 反查（同一张图挂在多个节点上时取第一个）
+    if(!source && sourceUrl){
+        source = nodes.find(n => (n.images || []).some(im => im && (im.url === sourceUrl || im.originalLocalUrl === sourceUrl)));
+    }
+    if(!source){
+        toast('这条引用没有对应的画布节点（本地素材）');
+        return false;
+    }
+    selectedId = source.id;
+    selectedIds = [];
+    const idxText = thumbEl.dataset.imageIndex;
+    const idx = idxText === '' || idxText == null ? NaN : Number(idxText);
+    selectedImage = Number.isFinite(idx) && idx >= 0 ? { nodeId: source.id, index: idx } : { nodeId: '', index: -1 };
+    render();
+    if(typeof updateComposer === 'function') updateComposer();
+    const rect = nodeRect(source);
+    // 缩得太小时抬到 50%，保证落点卡片可读；本来就更近则保持用户当前比例
+    if(viewport.scale < 0.5) viewport.scale = 0.5;
+    centerViewportOnWorldPoint({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+    // 落点闪一圈：远距离跳转后也能一眼看到目标
+    requestAnimationFrame(() => {
+        const el = Array.from(document.querySelectorAll('.image-node')).find(n => n.dataset.id === source.id);
+        if(!el) return;
+        el.classList.add('locate-flash');
+        setTimeout(() => el.classList.remove('locate-flash'), 1500);
+    });
+    return true;
+}
 function bindInputThumbReferenceActions(){
     inputThumbsRow?.querySelectorAll('[data-input-add-reference]').forEach(btn => {
         btn.addEventListener('click', event => {
@@ -29451,6 +30403,15 @@ function bindInputThumbReferenceActions(){
             const img = visibleReferenceImagesFor(node).find(item => inputRefKey(item) === key)
                 || manualReferenceImagesFor(node).find(item => inputRefKey(item) === key);
             if(img) toggleInputRefBlocked(node, img);
+        });
+    });
+    // 2026-10-30（用户要求）双击缩略图 → 定位到引用素材的来源节点（× 按钮上双击不触发）
+    inputThumbsRow?.querySelectorAll('.input-thumb').forEach(el => {
+        el.addEventListener('dblclick', event => {
+            if(event.target.closest('.input-thumb-remove')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            locateSourceNodeForReferenceThumb(el);
         });
     });
     bindInputThumbHoverPreview();
@@ -32288,7 +33249,9 @@ function slashGroups(){
             .map(id => all.find(t => t.id === id || t.sourceId === id))
             .filter(Boolean).slice(0, 3);
         if(recents.length){
-            recents.forEach(t => seen.add(t.id));
+            // 2026-10-29（用户反馈）「最近使用」只作为顶部快捷入口，不再把条目从原分组里剔除。
+            // 之前用 seen 去重，最近用过的模板会从「产品/分镜」等分组里消失，
+            // 表现为「产品里有 3 条，面板只显示 1 条」。
             groups.push({id:'recent', label:tr('smart.slashRecent'), items:recents});
         }
     }
@@ -32394,7 +33357,7 @@ function renderSlashMenu(){
     slashMenu.innerHTML = `
         <div class="slash-head">
             <span class="slash-query">/${escapeHtml(slashState.query)}</span>
-            <span>${flat.length ? trf('smart.slashHits', {n:flat.length}) : ''}</span>
+            <span>${flat.length ? trf('smart.slashHits', {n:new Set(flat.map(f => f.tpl.id)).size}) : ''}</span>
             <span class="slash-esc">Esc</span>
         </div>
         <div class="slash-body">${flat.length ? listHtml : `<div class="slash-empty">${escapeHtml(tr('smart.slashNoMatch'))}</div>`}</div>
@@ -33849,6 +34812,39 @@ function finalizeH3QueuedRun(pendingNode, out, meta, kind='video', runInfo={}){
         pendingNode.pending = Math.max(1, remainingRuns);
     }
     render();
+}
+// 2026-10-30（用户要求）API 生视频并发：同一节点可以同时有多个视频任务在飞
+// （用户反复点「运行」即并发提交）。这里按 H3 排队重提的口径落地：最后一个任务
+// 收尾时才走 finalizePendingNode 完整清态，其余任务只把结果追加进节点、摘掉自己
+// 的占位，保证先完成的任务不会把后完成任务的结果覆盖掉。
+const smartApiVideoActiveRunCounts = new Map();
+function finalizeApiVideoQueuedRun(pendingNode, out, meta, runInfo={}){
+    pendingNode = liveSmartNode(pendingNode);
+    if(!pendingNode) return;
+    const nodeId = pendingNode.id;
+    const remainingRuns = Math.max(0, (smartApiVideoActiveRunCounts.get(nodeId) || 0) - 1);
+    if(remainingRuns > 0) smartApiVideoActiveRunCounts.set(nodeId, remainingRuns);
+    else smartApiVideoActiveRunCounts.delete(nodeId);
+    if(remainingRuns <= 0){
+        finalizePendingNode(pendingNode, out, meta, 'video');
+        return;
+    }
+    const baseBox = pendingBaseBoxForStorage({node:pendingNode, baseBox:pendingNode.pendingBaseBox});
+    const placeholdersSnapshot = (Array.isArray(pendingNode.pendingPlaceholders) ? pendingNode.pendingPlaceholders : []).filter(Boolean);
+    appendOutputsToNode(pendingNode, out, 'video', {meta, limit:SMART_APPEND_OUTPUT_MAX, skipShift:true, baseBox});
+    const runToken = runInfo?.runToken;
+    const keptPlaceholders = placeholdersSnapshot.filter(item => (!runToken || item.runToken !== runToken));
+    if(keptPlaceholders.length){
+        pendingNode.pendingPlaceholders = keptPlaceholders;
+        pendingNode.pending = Math.max(1, keptPlaceholders.length, remainingRuns);
+    } else {
+        pendingNode.pending = Math.max(1, remainingRuns);
+    }
+    // appendOutputsToNode 内部会清 busy 态，其它任务还在跑 → 重新挂上，等待态不能断。
+    pendingNode.appendPendingOutput = true;
+    pendingNode.running = true;
+    render();
+    scheduleSave();
 }
 function restoreFromExtraction(node, extracted){
     if(!node || !extracted) return;
@@ -35652,7 +36648,8 @@ async function runGeneration(){
     const visibleCount = clampSmartGenerationCount(settings.count, 1);
     const runSettings = smartSettingsForNode(node);
     // 2026-10-12（用户要求）H3 排队重提：H3 节点在生成中/排队中仍允许再次提交（追加进队列）。
-    const concurrentImageRun = smartNodeInFlight(node) && (canStartConcurrentImageRun(node, runSettings) || canH3RequeueRun(node, runSettings));
+    // 2026-10-30（用户要求）API 生视频并发：同样放行，多次点运行 = 多个任务并行提交。
+    const concurrentImageRun = smartNodeInFlight(node) && (canStartConcurrentImageRun(node, runSettings) || canH3RequeueRun(node, runSettings) || canRequeueApiVideoRun(node, runSettings));
     if(smartNodeInFlight(node) && !concurrentImageRun) return;
     const previousSettings = cloneSmartSettings(settings);
     settings = {...settings, ...cloneSmartSettings(runSettings || {}), count:visibleCount};
@@ -35898,15 +36895,41 @@ async function runGeneration(){
             return;
         }
         if(isApiLikeEngine(settings.engine) && settings.apiKind === 'video'){
-            const outVideos = await runApiVideoGeneration(prompt, refs, submitSettings);
-            if(!outVideos.length) throw new Error(tr('smart.errNoOutVideos'));
-            finalizePendingNode(pendingNode, outVideos, pendingMeta, 'video');
-            if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
-            addSmartGenerationLog({run:runLog, outputs:outVideos, runMs:nowMs() - runLogStart});
-            clearPromptInput({preserveDraft:true});
-            restoreSettingsAfterRun();
-            scheduleSave();
-            return;
+            // 2026-10-30（用户要求）API 生视频支持并发多任务：同一节点可同时有多个提交在飞。
+            // 计数口径与 H3 排队重提一致，只有最后一个落地才做完整收尾，其余只追加结果 + 摘自己占位。
+            const videoRunKey = pendingNode.id;
+            smartApiVideoActiveRunCounts.set(videoRunKey, (smartApiVideoActiveRunCounts.get(videoRunKey) || 0) + 1);
+            try {
+                const outVideos = await runApiVideoGeneration(prompt, refs, submitSettings);
+                if(!outVideos.length) throw new Error(tr('smart.errNoOutVideos'));
+                finalizeApiVideoQueuedRun(pendingNode, outVideos, pendingMeta, {runToken:pendingRunToken});
+                if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
+                addSmartGenerationLog({run:runLog, outputs:outVideos, runMs:nowMs() - runLogStart});
+                clearPromptInput({preserveDraft:true});
+                restoreSettingsAfterRun();
+                scheduleSave();
+                return;
+            } catch(videoError) {
+                const remaining = Math.max(0, (smartApiVideoActiveRunCounts.get(videoRunKey) || 0) - 1);
+                restoreSettingsAfterRun();
+                // 还有别的视频任务在跑：只摘掉本次的占位，节点继续显示「生成中」，
+                // 不能交给外层 catch（它会把 pending/running 全清掉，另一个任务就"消失"了）。
+                if(remaining > 0){
+                    smartApiVideoActiveRunCounts.set(videoRunKey, remaining);
+                    pendingNode.pendingPlaceholders = (Array.isArray(pendingNode.pendingPlaceholders) ? pendingNode.pendingPlaceholders : [])
+                        .filter(item => item && item.runToken !== pendingRunToken);
+                    pendingNode.pending = Math.max(1, pendingNode.pendingPlaceholders.length, remaining);
+                    const videoErrorMessage = String(videoError?.message || videoError || tr('smart.errRunFailed')).trim();
+                    pendingNode.runError = videoErrorMessage.slice(0, 160);
+                    if(!videoError?.smartGenerationLogged) addSmartGenerationLog({run:runLog, outputs:[], runMs:nowMs() - runLogStart, error:videoErrorMessage});
+                    toast(videoErrorMessage.slice(0, 160));
+                    render();
+                    scheduleSave();
+                    return;
+                }
+                smartApiVideoActiveRunCounts.delete(videoRunKey);
+                throw videoError;
+            }
         }
         // 2026-09-27 音频生成：同步接口直接返回音频文件地址，不走任务轮询
         if(audioApiRun){
@@ -36331,8 +37354,22 @@ function comfyFieldKind(field){
     if(field?.type === 'textarea' || /prompt|text|提示词|正向|负向/.test(key)) return 'prompt';
     return 'setting';
 }
+// 2026-10-30（用户要求）运行前润色的公共入口：开关开启且有原文时，优先用润色结果提交；输入框原文不改写。
+// 缓存里的润色结果与本次原文一致时直接复用（不重复多一次 LLM 调用）；润色失败 optimizeH3PromptForRun 会回退原文。
+// kind='video' 读视频开关（含 H3 双写），kind='image' 读生图独立开关 settings.promptOptImageEnabled。
+async function optimizePromptForRunSubmit(prompt, refs, kind='video'){
+    if(!promptOptEnabled(kind) || !String(prompt || '').trim()) return prompt;
+    const rawPrompt = String(prompt).trim();
+    const state = currentH3OptimizePreviewState();
+    const cachedHit = !!state.prompt && String(state.original || '').trim() === rawPrompt;
+    const optimized = cachedHit
+        ? state.prompt
+        : await optimizeH3PromptForRun(rawPrompt, settings, null, h3EffectiveOptimizerRefs(refs, settings), kind);
+    return (optimized && optimized !== rawPrompt) ? optimized : prompt;
+}
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
+    prompt = await optimizePromptForRunSubmit(prompt, refs, 'image');
     refs = refsAllowedForRunSettings(refs, runSettings);
     const effectiveSettings = smartImageRunSettingsForPreview(runSettings, refs);
     const count = clampSmartGenerationCount(effectiveSettings.count, 1);
@@ -36389,6 +37426,10 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
 }
 async function runApiVideoGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
+    // 2026-10-30（用户要求）优化开关开启时：先按当前规则润色，再提交生成；输入框原文不改写。
+    if(promptOptEnabled() && String(prompt || '').trim()){
+        prompt = await optimizePromptForRunSubmit(prompt, refs, 'video');
+    }
     try {
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
@@ -37204,7 +38245,7 @@ function h3OptimizerMessage(rawPrompt, runSettings, mediaRefs){
     ].join('\n');
     return {message, images:media.images, videos:media.videos, mediaCount:media.lines.length};
 }
-async function optimizeH3PromptForRun(prompt, runSettings, noticeNode=null, mediaRefs=[]){
+async function optimizeH3PromptForRun(prompt, runSettings, noticeNode=null, mediaRefs=[], ruleKind='video'){
     const raw = String(prompt || '').trim();
     if(!raw) return raw;
     const provider = h3OptimizerProviderId(runSettings);
@@ -37217,7 +38258,7 @@ async function optimizeH3PromptForRun(prompt, runSettings, noticeNode=null, medi
     }
     const model = h3OptimizerModelId(runSettings, provider);
     // 2026-09-26：toast 里带上右侧「优化规则」下拉当前选中的规则名，让用户看到优化确实按该规则执行。
-    const optRuleName = (function(){ try { return getCurrentOptimizeRule()?.name || ''; } catch(e){ return ''; } })();
+    const optRuleName = (function(){ try { return getCurrentOptimizeRule(ruleKind)?.name || ''; } catch(e){ return ''; } })();
     const mediaPayload = h3OptimizerMessage(raw, runSettings, mediaRefs);
     const mediaHint = mediaPayload.mediaCount ? `，并结合 ${mediaPayload.mediaCount} 个引用素材` : '';
     toast(optRuleName ? `正在用 ${model} 按「${optRuleName}」规则优化提示词${mediaHint}…` : `正在用 ${model} 优化提示词${mediaHint}…`);
@@ -37235,7 +38276,7 @@ async function optimizeH3PromptForRun(prompt, runSettings, noticeNode=null, medi
                 model,
                 provider,
                 ms_model: provider === 'modelscope' ? model : '',
-                system_prompt:H3_PROMPT_OPTIMIZER_SYSTEM + (function(){ var r=getCurrentOptimizeRule(); return r && r.content ? ('\n\n—— 当前生效的自定义规则（'+r.name+'）：优先级最高，与上面任何默认规则冲突时，一律以本规则为准 ——\n'+r.content) : ''; })()
+                system_prompt:H3_PROMPT_OPTIMIZER_SYSTEM + (function(){ var r=getCurrentOptimizeRule(ruleKind); return r && r.content ? ('\n\n—— 当前生效的自定义规则（'+r.name+'）：优先级最高，与上面任何默认规则冲突时，一律以本规则为准 ——\n'+r.content) : ''; })()
             })
         });
         if(!res.ok) throw new Error(await res.text());
@@ -39318,6 +40359,49 @@ window.onmousemove = e => {
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
+        if(node.type === 'workflow-group'){
+            // 2026-10-29（用户要求）：工作流组四角拉伸 —— 拖动哪个角，就固定它的对角。
+            // 只改框自身的 x/y/w/h；组内素材的位置和尺寸全程不动（框是一个独立的“面板”）。
+            const dir = resizeState.dir || 'se';
+            const startLeft = Number(resizeState.startLeft) || 0;
+            const startTop = Number(resizeState.startTop) || 0;
+            const startRight = startLeft + (resizeState.startW || 0);
+            const startBottom = startTop + (resizeState.startH || 0);
+            let left = startLeft, top = startTop, right = startRight, bottom = startBottom;
+            if(dir.includes('w')) left = startLeft + dx;
+            if(dir.includes('e')) right = startRight + dx;
+            if(dir.includes('n')) top = startTop + dy;
+            if(dir.includes('s')) bottom = startBottom + dy;
+            // 缩放下限：框不能缩到把内容切在外面（内容本来就在框外时不做这条限制，避免反向强制放大）。
+            const box = resizeState.contentBox;
+            if(box){
+                if(dir.includes('w') && box.left >= startLeft) left = Math.min(left, box.left);
+                if(dir.includes('n') && box.top >= startTop) top = Math.min(top, box.top);
+                if(dir.includes('e') && box.right <= startRight) right = Math.max(right, box.right);
+                if(dir.includes('s') && box.bottom <= startBottom) bottom = Math.max(bottom, box.bottom);
+            }
+            if(right - left < WORKFLOW_GROUP_MIN_WIDTH){
+                if(dir.includes('w')) left = right - WORKFLOW_GROUP_MIN_WIDTH;
+                else right = left + WORKFLOW_GROUP_MIN_WIDTH;
+            }
+            if(bottom - top < WORKFLOW_GROUP_MIN_HEIGHT){
+                if(dir.includes('n')) top = bottom - WORKFLOW_GROUP_MIN_HEIGHT;
+                else bottom = top + WORKFLOW_GROUP_MIN_HEIGHT;
+            }
+            node.x = Math.round(left);
+            node.y = Math.round(top);
+            node.w = Math.round(right - left);
+            node.h = Math.round(bottom - top);
+            node.scale = 1;
+            const wfEl = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
+            if(wfEl){
+                wfEl.style.left = `${node.x}px`;
+                wfEl.style.top = `${node.y}px`;
+            }
+            syncWorkflowGroupResizeOverlay(node);
+            updateNodeElementDuringResize(node);
+            return;
+        }
         const minW = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_WIDTH : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
         const minH = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_HEIGHT : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
@@ -41159,6 +42243,7 @@ promptInput.addEventListener('input', () => {
     dropAppliedTemplateIfNoChip();
     markPromptDraftDirty();
     autoGrowPromptInput();
+    syncPromptScrollbar();
     savePromptDraftForCurrent();
     refreshMentionRefLabels();
     updatePromptWordCount();
@@ -41980,17 +43065,22 @@ function customConfirm(msg){
         m.querySelector('.confirm-backdrop').onclick = () => done(false);
     });
 }
-function openRuleEditor(rule, isNew){
+function openRuleEditor(rule, isNew, kind){
+    kind = kind || 'video';
     let old = document.getElementById('ruleEditorModal');
     if(old) old.remove();
+    // 2026-10-30（用户要求）：H3 官方的固定骨架不显示在编辑框里，只编辑用户附加的部分。
+    const split = splitH3Skeleton(rule.content || '');
     const m = document.createElement('div');
     m.id = 'ruleEditorModal';
     m.className = 'confirm-modal';
     m.innerHTML = '<div class="confirm-backdrop"></div><div class="confirm-box" style="width:440px;text-align:left">'
         + '<label style="font-size:12px;color:#888;display:block;margin-bottom:4px">规则名称</label>'
         + '<input id="ruleEditorName" value="' + escapeHtml(rule.name) + '" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:12px">'
-        + '<label style="font-size:12px;color:#888;display:block;margin-bottom:4px">规则内容（优先级高于默认优化规则，冲突时以此为准）</label>'
-        + '<textarea id="ruleEditorText" style="width:100%;height:180px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px;color:#eee;font-size:13px;resize:vertical;font-family:inherit;box-sizing:border-box">' + escapeHtml(rule.content || '') + '</textarea>'
+        + (split.head
+            ? '<div class="rule-skel-hint">H3 官方固定骨架已内置，始终先生效，此处无需维护；下面的附加要求会追加在骨架之后、以更高优先级执行（可留空）。</div>'
+            : '<label style="font-size:12px;color:#888;display:block;margin-bottom:4px">规则内容（优先级高于默认优化规则，冲突时以此为准）</label>')
+        + '<textarea id="ruleEditorText" style="width:100%;height:180px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px;color:#eee;font-size:13px;resize:vertical;font-family:inherit;box-sizing:border-box">' + escapeHtml(split.body) + '</textarea>'
         + '<div class="confirm-btns" style="margin-top:16px;justify-content:space-between">'
         + (isNew ? '<span></span>' : '<button class="confirm-cancel" id="ruleEditorDel" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)">删除</button>')
         + '<div style="display:flex;gap:8px"><button class="confirm-cancel" id="ruleEditorCancel">取消</button><button class="confirm-ok" id="ruleEditorSave">保存</button></div>'
@@ -41998,37 +43088,112 @@ function openRuleEditor(rule, isNew){
     document.body.appendChild(m);
     m.querySelector('#ruleEditorCancel').onclick = () => m.remove();
     m.querySelector('.confirm-backdrop').onclick = () => m.remove();
-    // 2026-09-26 修：新增模式不渲染删除按钮，之前直接 querySelector('#ruleEditorDel').onclick
-    // 拿到 null 抛 TypeError，导致后面「保存」按钮的绑定永远执行不到 —— 添加规则没法保存。
     var ruleEditorDelBtn = m.querySelector('#ruleEditorDel');
     if(ruleEditorDelBtn) ruleEditorDelBtn.onclick = function(){
-        var isBuiltin = BUILTIN_OPTIMIZE_RULES.some(function(x){ return x.name === rule.name; });
-        if(isBuiltin){
-            var deleted = getDeletedBuiltinRules();
+        if(isBuiltinOptimizeRule(rule.name, kind)){
+            var deleted = getDeletedBuiltinRules(kind);
             if(deleted.indexOf(rule.name) < 0) deleted.push(rule.name);
-            localStorage.setItem('smart_optimize_deleted_builtin', JSON.stringify(deleted));
+            localStorage.setItem(optimizeDeletedBuiltinKey(kind), JSON.stringify(deleted));
         } else {
-            var rules = getUserOptimizeRules().filter(function(x){ return x.name !== rule.name; });
-            saveOptimizeRules(rules);
+            saveOptimizeRules(getUserOptimizeRules(kind).filter(function(x){ return x.name !== rule.name; }), kind);
         }
-        if(localStorage.getItem('smart_optimize_rule_current') === rule.name) localStorage.removeItem('smart_optimize_rule_current');
+        var selKey = optimizeRuleStorageKey(kind);
+        if(localStorage.getItem(selKey) === rule.name) localStorage.removeItem(selKey);
+        saveOptimizeRuleOrder(kind, getOptimizeRuleOrder(kind).filter(function(n){ return n !== rule.name; }));
         m.remove();
         renderDynamicParams();
         toast('已删除');
     };
     m.querySelector('#ruleEditorSave').onclick = () => {
         var newName = m.querySelector('#ruleEditorName').value.trim();
-        var newContent = m.querySelector('#ruleEditorText').value;
+        var newBody = m.querySelector('#ruleEditorText').value;
         if(!newName){ toast('名称不能为空'); return; }
-        var rules = getUserOptimizeRules();
+        var newContent = joinH3Skeleton(split.head, newBody);
+        var rules = getUserOptimizeRules(kind);
         var existing = rules.find(function(x){ return x.name === rule.name; });
         if(existing){ existing.name = newName; existing.content = newContent; }
-        else { rules.push({name: newName, content: newContent}); localStorage.setItem('smart_optimize_rule_current', newName); }
-        saveOptimizeRules(rules);
-        if(localStorage.getItem('smart_optimize_rule_current') === rule.name) localStorage.setItem('smart_optimize_rule_current', newName);
+        else { rules.push({name: newName, content: newContent}); }
+        if(newName !== rule.name && isBuiltinOptimizeRule(rule.name, kind)){
+            var deleted = getDeletedBuiltinRules(kind);
+            if(deleted.indexOf(rule.name) < 0){ deleted.push(rule.name); localStorage.setItem(optimizeDeletedBuiltinKey(kind), JSON.stringify(deleted)); }
+        }
+        saveOptimizeRules(rules, kind);
+        var selKey = optimizeRuleStorageKey(kind);
+        if(isNew || localStorage.getItem(selKey) === rule.name) localStorage.setItem(selKey, newName);
+        var order = getOptimizeRuleOrder(kind);
+        var oi = order.indexOf(rule.name);
+        if(oi >= 0){ order[oi] = newName; saveOptimizeRuleOrder(kind, order); }
         m.remove();
         renderDynamicParams();
         toast('已保存');
+    };
+}
+// 2026-10-30（用户要求）批量编辑：一次编辑当前类型（生图/生视频）的全部规则，清空名称即删除。
+function openRulesBatchEditor(kind){
+    kind = kind || 'video';
+    let old = document.getElementById('rulesBatchModal');
+    if(old) old.remove();
+    const rules = getOptimizeRules(kind);
+    const m = document.createElement('div');
+    m.id = 'rulesBatchModal';
+    m.className = 'confirm-modal';
+    const rowHtml = rules.map(function(r){
+        const split = splitH3Skeleton(r.content || '');
+        return '<div class="rb-row" data-rb-row data-rb-name="' + escapeAttr(r.name) + '"' + (split.head ? ' data-rb-head="1"' : '') + '>'
+            + '<div class="rb-row-top"><input class="rb-name" value="' + escapeHtml(r.name) + '" placeholder="规则名称">'
+            + '<button type="button" class="rb-del" title="删除该规则">&times;</button></div>'
+            + (split.head ? '<div class="rb-note">H3 官方固定骨架已内置，此处只显示/编辑附加要求</div>' : '')
+            + '<textarea class="rb-text" placeholder="规则内容（留空名称即删除该条）">' + escapeHtml(split.body) + '</textarea>'
+            + '</div>';
+    }).join('');
+    m.innerHTML = '<div class="confirm-backdrop"></div><div class="confirm-box rules-batch-box">'
+        + '<div class="rb-head"><span class="rb-title">批量编辑规则 · ' + (kind === 'image' ? '生图' : '生视频') + '</span><span class="rb-hint">清空名称 = 删除；改完一次保存全部</span></div>'
+        + '<div class="rb-list">' + rowHtml + '</div>'
+        + '<div class="rb-foot"><button type="button" class="rb-add" data-rb-add>+ 添加规则</button>'
+        + '<div style="display:flex;gap:8px"><button type="button" class="confirm-cancel" data-rb-cancel>取消</button><button type="button" class="confirm-ok" data-rb-save>保存全部</button></div></div>'
+        + '</div>';
+    document.body.appendChild(m);
+    function bindRow(row){ row.querySelector('.rb-del').onclick = () => row.remove(); }
+    m.querySelectorAll('[data-rb-row]').forEach(bindRow);
+    m.querySelector('.confirm-backdrop').onclick = () => m.remove();
+    m.querySelector('[data-rb-cancel]').onclick = () => m.remove();
+    m.querySelector('[data-rb-add]').onclick = () => {
+        const list = m.querySelector('.rb-list');
+        const row = document.createElement('div');
+        row.className = 'rb-row';
+        row.setAttribute('data-rb-row', '');
+        row.setAttribute('data-rb-name', '');
+        row.innerHTML = '<div class="rb-row-top"><input class="rb-name" value="" placeholder="规则名称"><button type="button" class="rb-del" title="删除该规则">&times;</button></div><textarea class="rb-text" placeholder="规则内容"></textarea>';
+        list.appendChild(row);
+        bindRow(row);
+        row.querySelector('.rb-name').focus();
+        list.scrollTop = list.scrollHeight;
+    };
+    m.querySelector('[data-rb-save]').onclick = () => {
+        const out = [];
+        let dup = null;
+        m.querySelectorAll('[data-rb-row]').forEach(row => {
+            const name = row.querySelector('.rb-name').value.trim();
+            if(!name) return;
+            if(out.some(o => o.name === name) && !dup) dup = name;
+            const head = row.dataset.rbHead === '1' ? H3_OFFICIAL_SKELETON : '';
+            const content = joinH3Skeleton(head, row.querySelector('.rb-text').value);
+            // 与内置定义完全相同的条目不落用户覆盖，内置内容升级时能继续生效
+            const builtinDef = builtinOptimizeRules(kind).find(b => b.name === name);
+            if(builtinDef && builtinDef.content === content) return;
+            out.push({name: name, content: content});
+        });
+        if(dup){ toast('规则名称重复：' + dup); return; }
+        const names = Array.from(m.querySelectorAll('[data-rb-row]')).map(row => row.querySelector('.rb-name').value.trim()).filter(n => !!n);
+        const missing = builtinOptimizeRules(kind).map(r => r.name).filter(n => names.indexOf(n) < 0);
+        localStorage.setItem(optimizeDeletedBuiltinKey(kind), JSON.stringify(missing));
+        saveOptimizeRules(out, kind);
+        const selKey = optimizeRuleStorageKey(kind);
+        if(names.indexOf(localStorage.getItem(selKey)) < 0) localStorage.setItem(selKey, names[0] || '');
+        saveOptimizeRuleOrder(kind, names);
+        m.remove();
+        renderDynamicParams();
+        toast('已保存 ' + names.length + ' 条规则');
     };
 }
 async function openTrashPanel(){
