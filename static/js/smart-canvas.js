@@ -7173,24 +7173,43 @@ function arrangeSmartIdsByConnections(ids){
     });
     return true;
 }
+// 2026-10-31 排列间距统一 50：参考用户给的三张排列截图量出来，
+// 卡缝 ≈ 卡片宽度的 16%（168 宽配 28 缝），画布节点短边 280 → 约 45~50。
+const SMART_ARRANGE_GAP = 50;
+// 宫格/横排的取序：先按画面阅读顺序（自上而下分行，行内自左而右），
+// 不再用节点数组顺序 —— 数组顺序≈创建顺序，和画面上看到的排布无关，排出来会「乱」。
+function smartArrangeReadOrder(rects){
+    const items = rects.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    const rows = [];
+    items.forEach(item => {
+        const last = rows[rows.length - 1];
+        if(last && Math.abs(item.rect.y - last.y) <= 60) last.items.push(item);
+        else rows.push({ y: item.rect.y, items: [item] });
+    });
+    return rows.flatMap(row => row.items.sort((a, b) => a.rect.x - b.rect.x));
+}
 function arrangeSelectedNodesManual(ids, mode){
     const idSet = new Set(smartArrangeAtomicIds(ids));
     const selected = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
     if(selected.length < 2) return false;
-    const rects = selected.map(node => ({node, rect:nodeRect(node)}));
+    const rects = smartArrangeReadOrder(selected.map(node => ({node, rect:nodeRect(node)})));
     const startX = Math.min(...rects.map(item => item.rect.x));
     const startY = Math.min(...rects.map(item => item.rect.y));
-    const GAP_X = 180, GAP_Y = 90;
+    const GAP_X = SMART_ARRANGE_GAP, GAP_Y = SMART_ARRANGE_GAP;
     const count = selected.length;
+    const box = () => {
+        const rs = rects.map(item => nodeRect(item.node));
+        const x = Math.min(...rs.map(r => r.x)), y = Math.min(...rs.map(r => r.y));
+        return { x, y, w: Math.max(...rs.map(r => r.x + r.width)) - x, h: Math.max(...rs.map(r => r.y + r.height)) - y };
+    };
     if(mode === 'horizontal'){
         let x = startX;
-        const rowH = Math.max(...rects.map(item => Math.max(110, item.rect.height)));
-        rects.forEach((item, i) => {
+        rects.forEach(item => {
             const w = Math.max(180, item.rect.width);
             moveSmartNodeAtom(item.node, x, startY);
             x += w + GAP_X;
         });
-        return true;
+        return box();
     }
     if(mode === 'grid'){
         const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
@@ -7210,7 +7229,7 @@ function arrangeSelectedNodesManual(ids, mode){
             const c = i % cols, r = Math.floor(i / cols);
             moveSmartNodeAtom(item.node, startX + xOffsets[c], startY + yOffsets[r]);
         });
-        return true;
+        return box();
     }
     // vertical: 单列竖向
     let y = startY;
@@ -7218,7 +7237,7 @@ function arrangeSelectedNodesManual(ids, mode){
         moveSmartNodeAtom(item.node, startX, y);
         y += Math.max(110, item.rect.height) + GAP_Y;
     });
-    return true;
+    return box();
 }
 let _lastArrangeMode = 'vertical';
 function arrangeSelectedSmartNodes(anchorEl){
@@ -7264,14 +7283,31 @@ function openArrangeModePicker(ids, anchorEl){
             pushUndo();
             _lastArrangeMode = btn.dataset.mode;
             const label = {vertical:'竖向排列', horizontal:'横向排列', grid:'宫格排列'}[_lastArrangeMode];
-            arrangeSelectedNodesManual(ids, _lastArrangeMode);
+            const box = arrangeSelectedNodesManual(ids, _lastArrangeMode);
             render();
             scheduleSave();
             toast('已按' + label + '整理选中节点');
             close();
-            setTimeout(() => fitAllNodesViewport(), 50);
+            if(box) centerArrangedViewport(box);
         });
     });
+}
+// 排列后只「平移居中」，不做整画布 fit：
+// fitAllNodesViewport 会把画布上所有节点（含远处没选中的）一起算进包围盒，
+// 结果选中的那一组被压成中间一小条 —— 就是用户截图里「切最大化显示」的问题。
+// 这里档位等同预览里的「居中不缩放」：scale 不动，只有布局本身装不下时才按选中区域降。
+function centerArrangedViewport(box){
+    if(!box || !box.w || !box.h) return;
+    const vw = shell.clientWidth || window.innerWidth;
+    const vh = shell.clientHeight || window.innerHeight;
+    const pad = 72;
+    const fitScale = Math.min((vw - pad * 2) / box.w, (vh - pad * 2) / box.h);
+    const nextScale = clampSmartCanvasZoom(Math.max(0.06, Math.min(viewport.scale, fitScale)));
+    viewport.scale = nextScale;
+    viewport.x = vw / 2 - (box.x + box.w / 2) * nextScale;
+    viewport.y = vh / 2 - (box.y + box.h / 2) * nextScale;
+    applyViewport();
+    scheduleSave();
 }
 // 2026-10-27 视口外节点绘制裁剪（替代之前那条常开的 CSS content-visibility）。
 // 为什么不能给 .image-node 常开 CV：CV 会强制 paint containment，把节点边界外的浮层
