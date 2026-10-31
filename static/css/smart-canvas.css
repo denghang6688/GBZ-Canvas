@@ -9413,7 +9413,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 }
 .world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
     /* 选中 = 常态那圈灰线原地变白、屏幕 1px 加粗到 1.5px，位置不动 */
-    border-color: rgba(255, 255, 255, .95);
+    /* 2026-10-31（用户要求）选中线比纯白稍暗一点，暗底上不刺眼 */
+    border-color: rgba(244, 244, 245, .82);
     border-width: calc(1.5px * var(--canvas-inverse-scale, 1));
 }
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
