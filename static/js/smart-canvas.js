@@ -7214,21 +7214,24 @@ function arrangeSelectedNodesManual(ids, mode){
     if(mode === 'grid'){
         const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
         const rows = Math.ceil(count / cols);
-        const maxColW = new Array(cols).fill(0);
-        const rowH = new Array(rows).fill(0);
-        rects.forEach((item, i) => {
-            const c = i % cols, r = Math.floor(i / cols);
-            maxColW[c] = Math.max(maxColW[c], Math.max(180, item.rect.width));
-            rowH[r] = Math.max(rowH[r], Math.max(110, item.rect.height));
-        });
-        const xOffsets = [0];
-        for(let c = 1; c < cols; c++) xOffsets[c] = xOffsets[c-1] + maxColW[c-1] + GAP_X;
-        const yOffsets = [0];
-        for(let r = 1; r < rows; r++) yOffsets[r] = yOffsets[r-1] + rowH[r-1] + GAP_Y;
-        rects.forEach((item, i) => {
-            const c = i % cols, r = Math.floor(i / cols);
-            moveSmartNodeAtom(item.node, startX + xOffsets[c], startY + yOffsets[r]);
-        });
+        // 2026-10-31 宫格改成「行内流式」：每行按顺序紧挨着排，缝隙严格 = GAP_X，
+        // 行高取该行最高的那张、下一行从行底 + GAP_Y 起。
+        // 不再用「列宽取该列最宽」的对齐宫格 —— 那张算法在尺寸不一（280 与 678 混排）时，
+        // 窄图右侧会留出 150~285px 的大空档，视觉上像漏了一格。
+        // 所有卡片等宽时，流式结果与对齐宫格完全一致，所以等宽场景观感不变。
+        let y = startY;
+        for(let r = 0; r < rows; r++){
+            const rowItems = rects.slice(r * cols, r * cols + cols);
+            if(!rowItems.length) break;
+            const rowH = Math.max(...rowItems.map(it => Math.max(110, it.rect.height)));
+            let x = startX;
+            rowItems.forEach(it => {
+                const w = Math.max(180, it.rect.width);
+                moveSmartNodeAtom(it.node, x, y);
+                x += w + GAP_X;
+            });
+            y += rowH + GAP_Y;
+        }
         return box();
     }
     // vertical: 单列竖向
