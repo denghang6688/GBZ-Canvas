@@ -11853,7 +11853,9 @@ function sizePickerLabel(prefix=''){
             const sizeText = (resValue && resValue !== 'auto')
                 ? String(apiImageSize('source', resValue, customRatioValue, '') || '').replace('x', '×')
                 : '';
-            return `自动 · ${sizeText ? `${sizeText} · ` : ''}${resolutionLabel(prefix)}`;
+            // 2026-10-31 底栏胶囊最宽 148px，「适配」(4字) 比原来的「自动」长，去掉清晰度后缀
+            // 才放得下完整像素值；清晰度在弹层里照旧可切。
+            return `适配 · ${sizeText || resolutionLabel(prefix)}`;
         }
         return '自动';
     }
@@ -11876,9 +11878,11 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k'] : ['1k','2k','4k'];
     const currentRes = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const currentRatio = settings[ratioKey] || 'square';
-    // 2026-10-31 「自动」档改由能力档案决定（仅声明 auto 的模型可点，目前 GPT-Image-2）
-    const allowAuto = !prefix && includeSource && settings.apiKind !== 'video' && apiImageModelCaps(settings.model).auto === true;
+    // 2026-10-31 用户明确「自动就是适配输入」：可用性不再看能力档案的 auto 字段（那只代表上游 size=auto 参数），
+    // 而是看有没有输入图可适配。有参考图就能按它的比例出图，任何图片模型都成立。
     const sourceRatioText = sourceImageRatioLabel(prefix);
+    const allowAuto = !prefix && includeSource && settings.apiKind !== 'video'
+        && (!!sourceRatioText || settings[ratioKey] === 'source' || settings[resKey] === 'auto');
     const sourceRatioForSize = settings[prefix ? `${prefix}CustomRatio` : 'customRatio'] || sourceRatioText || '';
     // 与底部参数栏同一套分组：共用在上（无注释），模型独有在下（带归属注释）
     const ratioSubMap = {square:'正方形', portrait:'竖图', landscape:'横图', portrait43:'竖图', landscape43:'横图', '5:4':'横图', '4:5':'竖图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖', '2:1':'超宽', '1:2':'超竖', '3:1':'全景', '1:3':'长条', '4:1':'全景', '1:4':'长条'};
@@ -11892,13 +11896,13 @@ function renderSizePickerControl(prefix='', includeSource=false){
             <div class="size-picker-head">
                 <div class="smart-popover-title">尺寸选择</div>
                 <div class="size-picker-scope">
-                    <button type="button" class="${scope === 'auto' ? 'active' : ''}" data-size-scope="auto" data-size-prefix="${escapeHtml(prefix)}" ${allowAuto ? '' : 'disabled'}>自动</button>
+                    <button type="button" class="${scope === 'auto' ? 'active' : ''}" data-size-scope="auto" data-size-prefix="${escapeHtml(prefix)}" ${allowAuto ? '' : 'disabled'} title="${allowAuto ? '按输入图比例出图，只选清晰度' : '先在画布中选中一张参考图'}">适配输入</button>
                     <button type="button" class="${scope === 'preset' ? 'active' : ''}" data-size-scope="preset" data-size-prefix="${escapeHtml(prefix)}">系统参数</button>
                     <button type="button" class="${scope === 'custom' ? 'active' : ''}" data-size-scope="custom" data-size-prefix="${escapeHtml(prefix)}">自定义</button>
                 </div>
             </div>
             ${scope === 'auto' ? `<div class="size-picker-pane size-picker-auto">
-                <div class="size-picker-note"><strong>自动比例</strong><span>${sourceRatioText ? `按输入图 ${escapeHtml(sourceRatioText)} 自适应，连同当前清晰度生成。` : '未检测到输入图比例时，会先使用当前尺寸比例。'}</span></div>
+                <div class="size-picker-note"><strong>适配输入</strong><span>${sourceRatioText ? `按输入图 ${escapeHtml(sourceRatioText)} 自适应，连同当前清晰度生成。` : '未检测到输入图比例时，会先使用当前尺寸比例。'}</span></div>
                 <div class="size-picker-list">
                     ${options.filter(v => v !== 'auto').map(value => `<button type="button" class="size-picker-option ${value === currentRes ? 'active' : ''}" data-smart-param="${resKey}" data-smart-value="${value}"><span>${value.toUpperCase()}</span><small>${escapeHtml(apiImageSize('source', value, sourceRatioForSize, '') || '')}</small></button>`).join('')}
                 </div>
