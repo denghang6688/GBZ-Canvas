@@ -32599,12 +32599,37 @@ function isInputRefBlocked(node, img){
 function activeInputImagesFor(node, consume=false, ctx=smartLoopContext){
     return inputImagesFor(node, consume, ctx).filter(img => img?.url && !isInputRefBlocked(node, img));
 }
+// 2026-10-31（用户要求）引用图右上角 × = 真正删掉这个引用：若这张图来自某个上游节点、
+// 且该节点只贡献这一张图，就连同「来源节点 → 当前节点」的连线一起断开。
+// 多图来源（组节点/多图位）不动连线——那会把同源的其它图一起断掉，仍沿用「仅本张不参与」的旧行为。
+function disconnectSoleInputRefSource(node, img){
+    if(!node || !img || !canvas || !Array.isArray(canvas.connections)) return false;
+    const srcId = img.nodeId || '';
+    if(!srcId || srcId === node.id) return false;
+    const fromSrc = workflowInputImagesFor(node).filter(ref => ref?.url && (ref.nodeId || '') === srcId);
+    if(fromSrc.length > 1) return false;
+    const indices = [];
+    canvas.connections.forEach((conn, i) => {
+        if(!conn || conn.from !== srcId || conn.to !== node.id) return;
+        if(!['input', 'flow'].includes(conn.kind || 'flow')) return;
+        indices.push(i);
+    });
+    if(!indices.length) return false;
+    // disconnectConnections 内部已 pushUndo / 同步 inputNodeIds / render / scheduleSave
+    disconnectConnections(indices);
+    return true;
+}
 function toggleInputRefBlocked(node, img){
     if(!node || !img?.url) return;
     const key = inputRefKey(img);
     if(!key) return;
-    pushUndo();
     const blocked = blockedInputRefKeys(node);
+    if(!blocked.has(key) && disconnectSoleInputRefSource(node, img)){
+        renderInputThumbsRow(node);
+        toast('已删除引用图，并断开它到当前节点的连线');
+        return;
+    }
+    pushUndo();
     if(blocked.has(key)) blocked.delete(key);
     else blocked.add(key);
     node.blockedInputRefs = [...blocked];
