@@ -20593,7 +20593,7 @@ html body .snm-more-pop button i, html body .snm-more-pop button svg { width:14p
       外框 15px + 描边压到 .05；去掉 13px 内嵌输入壳（「框中框」），文字直接铺在面板上；
       服务商/模型原生 select 变幽灵灰字（appearance:none + 自绘箭头，悬停浮现浅底）；
       魔棒 / 规则 / 翻译变 30×30 透明图标键（内层 8px，与外框 15 形成「外 15 内 8」层级）；
-      生成键 #promptLlmRun 改 32 圆形白钮（主面板 #runBtn 的 38 方钮不动）。
+      生成键 #promptLlmRun / #runBtn 统一改 32 圆形白钮（见下方独立块）。
    全部写在文件最末，用 html body + 后置 + !important 压制前面的旧值，DOM / JS 不动。 */
 
 /* ① 主面板：收拢态 15px（压过 20308 / 20501 两处 8px） */
@@ -20697,7 +20697,12 @@ html body .prompt-llm-composer .prompt-llm-opt-rule:hover {
     color: #fff !important;
 }
 
-/* 生成键：38×38 r12 灰方钮（19767 共用规则）→ 32 圆形白钮，只动 #promptLlmRun */
+/* ===== 2026-10-31（用户确认）主面板运行键与 LLM 生成键统一为 32 圆形白钮 =====
+   19767 那条共用规则把两颗键钉成 38×38 r12 #939393 方钮；本轮 LLM 面板已改 32 圆白，
+   主面板 #runBtn 按用户要求跟齐。状态链：
+     不可运行(#runBtn:disabled) = 空心灰 → 可运行 = #F2F2F2 → 悬停 #FFF → 按下 #E2E2E2；
+     #promptLlmRun 生成中(is-running) = 空心转圈（再点即取消）。 */
+html body #runBtn,
 html body #promptLlmRun {
     width: 32px !important;
     min-width: 32px !important;
@@ -20707,13 +20712,29 @@ html body #promptLlmRun {
     color: #1d1d1d !important;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .28) !important;
 }
+html body #runBtn i,
+html body #runBtn svg,
 html body #promptLlmRun i,
 html body #promptLlmRun svg {
     width: 17px !important;
     height: 17px !important;
 }
+html body #runBtn:hover:not(:disabled),
 html body #promptLlmRun:hover:not(.is-running) {
     background: #ffffff !important;
+}
+html body #runBtn:active:not(:disabled),
+html body #promptLlmRun:active:not(.is-running) {
+    background: #e2e2e2 !important;
+    transform: scale(.94) !important;
+}
+/* 不可运行态保持幽灵空心（19828 原样，但要把本块的白底/投影压回去） */
+html body #runBtn:disabled,
+html body #runBtn[aria-disabled="true"] {
+    background: rgba(255, 255, 255, .10) !important;
+    color: rgba(246, 246, 246, .30) !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
 }
 /* 19836 的 is-running 透明底在本块之前，会被上面的白底压掉，这里按原样补回（转圈=空心） */
 html body #promptLlmRun.is-running {
