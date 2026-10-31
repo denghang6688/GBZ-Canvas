@@ -5033,12 +5033,7 @@ function syncSelectionUi(){
     smartGroupBtn?.classList.toggle('visible', ids.length > 0);
     smartWorkflowGroupBtn?.classList.toggle('visible', ids.length > 0);
     world.querySelectorAll('.image-node').forEach(el => {
-        const id = el.dataset.id || '';
-        el.classList.toggle('selected', isNodeSelected(id));
-        el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
-            const index = Number(item.dataset.imageIndex || 0);
-            item.classList.toggle('image-selected', selectedImage.nodeId === id && selectedImage.index === index);
-        });
+        applyNodeSelectionClasses(el, el.dataset.id || '');
     });
     syncSmartSelectedImageResolution(world);
     syncRunButtonState();
@@ -5048,6 +5043,19 @@ function syncSelectionUi(){
 }
 function isNodeSelected(id){
     return selectedId === id || selectedIds.includes(id);
+}
+/* 把「选中」相关的类对齐到单个节点元素上。
+   2026-10-31（用户报「点空白处线还是亮的」）：.selected 是由 syncSelectionUi() 直接
+   toggle 到元素上的，并不进 render 的 __smartHtml 缓存串。所以 render 走差量复用时
+   （html 串没变 → 直接沿用旧元素）谁也不会去摘这个类，取消选中后白线就永远摘不掉。
+   render 的复用分支现在也调这个函数对齐，两个入口共用一份判定。 */
+function applyNodeSelectionClasses(el, id){
+    if(!el) return;
+    el.classList.toggle('selected', isNodeSelected(id));
+    el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
+        const index = Number(item.dataset.imageIndex || 0);
+        item.classList.toggle('image-selected', selectedImage.nodeId === id && selectedImage.index === index);
+    });
 }
 function selectedNodeIds(){
     return selectedIds.length ? selectedIds.slice() : (selectedId ? [selectedId] : []);
@@ -23388,7 +23396,13 @@ function render(){
     if(composerEl && !promptHadFocus && !isPromptExpanded()) world.appendChild(composerEl);
     nodeHtmlEntries.forEach(entry => {
         // 差量复用：appendChild 保序挪动（DOM 移动 ≠ 重建，播放态/焦点/监听全保留）
-        if(entry.reuseEl){ world.appendChild(entry.reuseEl); return; }
+        if(entry.reuseEl){
+            // 2026-10-31：复用路径不重建 DOM，而 .selected 是直接 toggle 在元素上的、
+            // 不参与 __smartHtml 比较 → 必须显式对齐，否则取消选中后白线摘不掉。
+            applyNodeSelectionClasses(entry.reuseEl, entry.node.id);
+            world.appendChild(entry.reuseEl);
+            return;
+        }
         const fresh = renderedNodeEls.get(entry.node.id);
         if(!fresh) return;
         world.appendChild(fresh);
@@ -40779,6 +40793,9 @@ shell.onclick = e => {
     closeCreateMenu();
     closePortNextMenu();
     clearSelection();
+    // 2026-10-31（用户报「点空白线还是亮的 / 收线慢」）：先只做类切换把白线立刻收回，
+    // 再去跑全量 render（≈100ms+）。否则描边要排队等整棵画布重建完才变灰。
+    syncSelectionUi();
     render();
 };
 minimap?.addEventListener('mousedown', e => {
