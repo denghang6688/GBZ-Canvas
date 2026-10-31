@@ -20586,3 +20586,143 @@ html body .snm-more-pop button { width:100%; height:30px; padding:0 10px; border
 html body .snm-more-pop button:hover { background:var(--soft); color:#fff; }
 html body .snm-more-pop button:disabled { opacity:.36; cursor:not-allowed; }
 html body .snm-more-pop button i, html body .snm-more-pop button svg { width:14px; height:14px; stroke-width:2; flex:0 0 auto; }
+
+/* ===== 2026-10-31（用户要求）两个输入面板圆角统一 15px + LLM 面板极简化（A 方案定稿） =====
+   ① API 生图/生视频主面板 .composer-card：外框 8px → 15px，展开态 10px/16px 两处也统一到 15px；
+   ② LLM 编辑面板（.prompt-llm-composer-card）：按定稿预览 preview/llm-composer-preview.html 落地 ——
+      外框 15px + 描边压到 .05；去掉 13px 内嵌输入壳（「框中框」），文字直接铺在面板上；
+      服务商/模型原生 select 变幽灵灰字（appearance:none + 自绘箭头，悬停浮现浅底）；
+      魔棒 / 规则 / 翻译变 30×30 透明图标键（内层 8px，与外框 15 形成「外 15 内 8」层级）；
+      生成键 #promptLlmRun 改 32 圆形白钮（主面板 #runBtn 的 38 方钮不动）。
+   全部写在文件最末，用 html body + 后置 + !important 压制前面的旧值，DOM / JS 不动。 */
+
+/* ① 主面板：收拢态 15px（压过 20308 / 20501 两处 8px） */
+html body #composer .composer-card {
+    border-radius: 15px !important;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .40) !important;
+}
+/* 展开态也统一 15px（压过 20174 的 16px 与 20506 的 10px） */
+html body #composer.prompt-expanded .composer-card {
+    border-radius: 15px !important;
+}
+
+/* ② LLM 编辑面板：外框 15px + 细描边（压过 14380 的 #252525 实边与 19981 的 12px） */
+html body .prompt-llm-composer .prompt-llm-composer-card {
+    border-radius: 15px !important;
+    border-color: rgba(255, 255, 255, .05) !important;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .40) !important;
+}
+/* 去掉「框中框」：输入壳层透明无边框，focus-within 的描边/光圈一并关掉 */
+html body .prompt-llm-composer .prompt-llm-input-shell,
+html body .prompt-llm-composer .prompt-llm-input-shell:focus-within {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+/* 占位色对齐主面板（原 rgba(216,216,216,.42) 偏亮） */
+html body .prompt-llm-composer .prompt-llm-composer-input::placeholder {
+    color: #7d7d7d !important;
+}
+/* 输入区内边距对齐预览（原 10 14 12） */
+html body .prompt-llm-composer .prompt-llm-input-shell .prompt-llm-composer-input {
+    padding: 12px 16px 10px !important;
+}
+
+/* 服务商 / 模型下拉：999 粗胶囊 → 幽灵灰字。
+   原生 select 用 appearance:none 去掉系统箭头，自绘一枚 .45 白的细 chevron；
+   18020/18021 的弹性宽度规则保留（flex 布局不动），这里只改皮。 */
+html body .prompt-llm-composer .prompt-llm-provider-select,
+html body .prompt-llm-composer .prompt-llm-model-select {
+    height: 30px !important;
+    border: 1px solid transparent !important;
+    background-color: transparent !important;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.45)' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    background-size: 9px 9px !important;
+    border-radius: 8px !important;
+    color: rgba(246, 246, 246, .62) !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    padding: 0 22px 0 8px !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    cursor: pointer !important;
+}
+html body .prompt-llm-composer .prompt-llm-provider-select:hover,
+html body .prompt-llm-composer .prompt-llm-model-select:hover {
+    background-color: rgba(255, 255, 255, .06) !important;
+    color: rgba(255, 255, 255, .9) !important;
+}
+
+/* 魔棒 / 翻译：32×32 有底有边 → 30×30 透明图标键 */
+html body .prompt-llm-composer .prompt-llm-opt-toggle,
+html body .prompt-llm-composer .prompt-llm-translate {
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 8px !important;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: rgba(246, 246, 246, .72) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+}
+html body .prompt-llm-composer .prompt-llm-opt-toggle:hover,
+html body .prompt-llm-composer .prompt-llm-translate:hover {
+    background: rgba(255, 255, 255, .06) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+}
+/* 透明底规则用了 !important，会把 18005 的激活态底色一起打掉，这里显式补回 */
+html body .prompt-llm-composer .prompt-llm-opt-toggle.active {
+    background: rgba(255, 214, 64, .16) !important;
+    border-color: rgba(255, 214, 64, .42) !important;
+    color: #ffd640 !important;
+}
+
+/* 规则按钮（⚙ 指令清晰化）：同款透明化，⚙ 金色保留 */
+html body .prompt-llm-composer .prompt-llm-opt-rule {
+    height: 30px !important;
+    border-radius: 8px !important;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: rgba(246, 246, 246, .72) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    padding: 0 9px !important;
+}
+html body .prompt-llm-composer .prompt-llm-opt-rule:hover {
+    background: rgba(255, 255, 255, .06) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+}
+
+/* 生成键：38×38 r12 灰方钮（19767 共用规则）→ 32 圆形白钮，只动 #promptLlmRun */
+html body #promptLlmRun {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    border-radius: 999px !important;
+    background: #f2f2f2 !important;
+    color: #1d1d1d !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .28) !important;
+}
+html body #promptLlmRun i,
+html body #promptLlmRun svg {
+    width: 17px !important;
+    height: 17px !important;
+}
+html body #promptLlmRun:hover:not(.is-running) {
+    background: #ffffff !important;
+}
+/* 19836 的 is-running 透明底在本块之前，会被上面的白底压掉，这里按原样补回（转圈=空心） */
+html body #promptLlmRun.is-running {
+    background: rgba(255, 255, 255, .10) !important;
+    color: rgba(246, 246, 246, .82) !important;
+    box-shadow: none !important;
+}
+
+/* 底栏间距对齐主面板（原 gap 7） */
+html body .prompt-llm-composer .prompt-llm-composer-actions {
+    gap: 6px !important;
+}
