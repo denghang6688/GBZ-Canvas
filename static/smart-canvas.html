@@ -54,7 +54,7 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.31.1.1793410865">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.10.31.1.1793416422">
     <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.10.31.1.1793363264">
 </head>
 <body>
@@ -250,6 +250,8 @@
             <output id="smartZoomValue">100%</output>
             <!-- 2026-09-26 按需求移除「清理空节点」按钮（JS 端有空值保护，可安全移除） -->
         </div>
+        <!-- 2026-10-31 硬件监控条（GPU/显存/CPU/内存）：横版条，右下·小地图上方，数据来自 /api/sys-stats -->
+        <div id="sysHud" class="sys-hud" role="status" aria-label="硬件监控" aria-live="off"></div>
         <button id="presetWorkflowToggle" class="preset-workflow-toggle" type="button" title="预设工作流" aria-label="预设工作流"><i data-lucide="workflow"></i></button>
         <aside id="presetWorkflowPanel" class="preset-workflow-panel" aria-label="预设工作流">
             <div class="preset-workflow-dialog">
@@ -1045,7 +1047,7 @@
     <div id="slashPeek" class="slash-peek" aria-hidden="true"></div>
     <!-- 大面板遮罩：点它收起。放 world 之外，展开时把 #world 提到 z-index 100 才不会连面板一起盖住 -->
     <div id="composerExpandMask" class="composer-expand-mask" hidden></div>
-    <script src="/static/js/smart-canvas.js?v=V26.10.31.1.1793412317"></script>
+    <script src="/static/js/smart-canvas.js?v=V26.10.31.1.1793416422"></script>
 </body>
 </html>
 

@@ -312,6 +312,10 @@
         "smart.shortcutCreateMenu": { zh: "打开快捷菜单", en: "Open the quick create menu" },
         "smart.shortcutPan": { zh: "拖动画布", en: "Drag to pan the canvas" },
         "smart.shortcutZoom": { zh: "缩放画布或预览图片", en: "Zoom canvas or preview image" },
-        "smart.shortcutDelete": { zh: "删除选中节点", en: "Delete selected nodes" }
+        "smart.shortcutDelete": { zh: "删除选中节点", en: "Delete selected nodes" },
+        "smart.hudGpu": { zh: "GPU", en: "GPU" },
+        "smart.hudVram": { zh: "显存", en: "VRAM" },
+        "smart.hudCpu": { zh: "CPU", en: "CPU" },
+        "smart.hudRam": { zh: "内存", en: "RAM" }
     });
 })();

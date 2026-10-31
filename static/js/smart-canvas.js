@@ -23313,7 +23313,7 @@ function findIdlePortMagnet(e){
     // 34px 抓取半径会覆盖大半屏幕，用户想拖画布却总是误抓端口进入连线拖拽（比平移重得多，
     // 表现就是「拖画布又卡又不听使唤」）。连线是精细操作，缩放到 50% 以上再提供。
     if(safeScale(viewport.scale) < 0.5) return null;
-    if(e.target?.closest?.('.composer,.smart-back,.smart-project-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return null;
+    if(e.target?.closest?.('.composer,.smart-back,.smart-project-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap,.sys-hud')) return null;
     let best = null;
     const radius = 34;
     const expanded = 44;
@@ -24411,7 +24411,7 @@ function handlePortDrop(drag, e){
         }
         return;
     }
-    if(hit?.closest?.('.composer,.smart-back,.smart-project-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.smart-project-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap,.sys-hud')){
         discardPendingUndo(); render(); return;
     }
     const startWorld = drag.startWorld || screenToWorld({clientX:drag.startClientX || e.clientX, clientY:drag.startClientY || e.clientY});
@@ -40232,14 +40232,14 @@ function runSmartQuickAction(action){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap,.sys-hud')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap,.sys-hud')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -40256,8 +40256,8 @@ shell.addEventListener('mousedown', e => {
     if(target) beginPortDragFromPort(target.nodeId, target.portType, e);
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap,.sys-hud')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.smart-project-back,.smart-quickbar,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-agent-panel,.smart-agent-fab,.log-modal,.shortcut-modal,.create-menu,.port-next-menu,.storyboard-script-modal,.smart-minimap,.sys-hud')) return;
     closeCreateMenu();
     closePortNextMenu();
     if(e.button === 0 && isRKeyDown){
@@ -44615,3 +44615,130 @@ window.addEventListener('mousedown', e => {
     if(t?.closest?.('.snm-more') || t?.closest?.('.snm-more-pop')) return;
     closeSmartNodeMoreMenus();
 }, true);
+
+/* ===== 2026-10-31 硬件监控条（GPU / 显存 / CPU / 内存）=====
+   后端：GET /api/sys-stats（nvidia-smi + Win32 采样，服务端 0.6s 缓存）
+   前端：1s 轮询；页面隐藏时降频到 2s；连续失败 3 次显示 --，并退避重试。
+   形态：横版条，右下·小地图上方，纯展示（已加入画布事件守卫，不抢画布操作）。 */
+(function initSysHud(){
+    const hud = document.getElementById('sysHud');
+    if(!hud) return;
+
+    const label = (key, fallback) => {
+        try {
+            if(typeof tr === 'function'){
+                const v = tr(key);
+                if(v && v !== key) return v;
+            }
+        } catch(err) { /* i18n 未加载时直接用中文兜底 */ }
+        return fallback;
+    };
+
+    const ITEMS = [
+        { key: 'gpu',  label: label('smart.hudGpu', 'GPU'),   kind: 'pct' },
+        { key: 'vram', label: label('smart.hudVram', '显存'), kind: 'mem' },
+        { key: 'cpu',  label: label('smart.hudCpu', 'CPU'),   kind: 'pct' },
+        { key: 'ram',  label: label('smart.hudRam', '内存'),  kind: 'mem' }
+    ];
+
+    hud.innerHTML = ITEMS.map((it, i) => `${i ? '<span class="sh-sep"></span>' : ''}<div class="sh-item is-${it.kind} is-idle" data-hud="${it.key}"><span class="sh-k">${it.label}</span><span class="sh-bar"><i></i></span><span class="sh-v">--</span></div>`).join('');
+
+    const nodes = {};
+    hud.querySelectorAll('[data-hud]').forEach(el => { nodes[el.dataset.hud] = el; });
+
+    const levelOf = pct => (pct >= 90 ? 'crit' : (pct >= 75 ? 'warn' : ''));
+
+    function paint(key, pct, html, tip){
+        const el = nodes[key];
+        if(!el) return;
+        const bar = el.querySelector('.sh-bar i');
+        const val = el.querySelector('.sh-v');
+        const missing = (pct === null || pct === undefined || pct === '' || Number.isNaN(pct));
+        el.classList.toggle('is-idle', missing);
+        el.classList.remove('warn', 'crit');
+        if(missing){
+            val.textContent = '--';
+            if(bar){ bar.style.width = '0%'; bar.classList.remove('has'); }
+            if(tip) el.title = tip;
+            return;
+        }
+        const lv = levelOf(pct);
+        if(lv) el.classList.add(lv);
+        val.innerHTML = html;
+        if(bar){
+            bar.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + '%';
+            // 低占用时也留 2px 像素点，避免条形直接消失读不出“有活动”
+            bar.classList.toggle('has', pct > 0.2);
+        }
+        if(tip) el.title = tip;
+    }
+
+    // 24 → "24"；63.9 → "63.9"，避免 24.0G 这种冗余小数
+    const sizeText = v => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1));
+    const pctText = p => Math.round(p) + '%';
+
+    function render(data){
+        if(!data || !data.ok){
+            ['gpu', 'vram', 'cpu', 'ram'].forEach(k => paint(k, null, null, ''));
+            return;
+        }
+        const gpu = data.gpu;
+        paint('gpu', gpu ? gpu.util : null, gpu ? pctText(gpu.util) : null,
+            gpu ? `${gpu.name} · 利用率 ${Math.round(gpu.util)}%` : '未检测到 NVIDIA GPU');
+        paint('vram', gpu ? gpu.mem_percent : null,
+            gpu ? `${gpu.mem_used_gb.toFixed(1)}<em>/${sizeText(gpu.mem_total_gb)}G</em>` : null,
+            gpu ? `${gpu.name} · 显存 ${gpu.mem_used_gb.toFixed(1)} / ${gpu.mem_total_gb.toFixed(1)} GB` : '未检测到 NVIDIA GPU');
+        paint('cpu', (typeof data.cpu === 'number') ? data.cpu : null,
+            (typeof data.cpu === 'number') ? pctText(data.cpu) : null, '');
+        const mem = data.mem;
+        paint('ram', mem ? mem.percent : null,
+            mem ? `${mem.used_gb.toFixed(1)}<em>/${sizeText(mem.total_gb)}G</em>` : null,
+            mem ? `内存 ${mem.used_gb.toFixed(1)} / ${mem.total_gb.toFixed(1)} GB` : '');
+
+        if(gpu || mem || typeof data.cpu === 'number') hud.classList.add('ready');
+        hud.setAttribute('aria-label', [
+            gpu ? `GPU ${Math.round(gpu.util)}%` : 'GPU 不可用',
+            gpu ? `显存 ${gpu.mem_used_gb.toFixed(1)}G` : '',
+            (typeof data.cpu === 'number') ? `CPU ${Math.round(data.cpu)}%` : '',
+            mem ? `内存 ${mem.used_gb.toFixed(1)}G` : ''
+        ].filter(Boolean).join(' · '));
+    }
+
+    let timer = 0;
+    let busy = false;
+    let fails = 0;
+    const BASE = 1000;
+
+    function schedule(ms){
+        clearTimeout(timer);
+        timer = setTimeout(tick, ms);
+    }
+
+    async function tick(){
+        if(document.hidden){ schedule(2000); return; }
+        if(busy){ schedule(300); return; }
+        busy = true;
+        try {
+            const res = await fetch('/api/sys-stats', { cache: 'no-store' });
+            if(!res.ok) throw new Error('http ' + res.status);
+            const data = await res.json();
+            fails = 0;
+            render(data);
+            schedule(BASE);
+        } catch(err) {
+            fails += 1;
+            if(fails >= 3) render(null);
+            schedule(Math.min(8000, BASE * (fails + 1)));
+        } finally {
+            busy = false;
+        }
+    }
+
+    schedule(400);
+    document.addEventListener('visibilitychange', () => {
+        if(!document.hidden){ fails = 0; schedule(200); }
+    });
+    ['mousedown', 'pointerdown', 'click', 'dblclick', 'wheel'].forEach(ev => {
+        hud.addEventListener(ev, e => e.stopPropagation());
+    });
+})();

@@ -20787,3 +20787,97 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
     opacity: .42;
     cursor: not-allowed;
 }
+
+/* ===== 2026-10-31 硬件监控条（GPU/显存/CPU/内存）=====
+   形态：横版 44px 条，位置 right:22 / bottom:198（小地图 22+128 之上，
+   再让出 minimap-arrange-btn 的 158+32，避免 hover 时压住它）。
+   样式沿用画布面板规格：圆角 15、#2b2b2b 描边、#181818→#0b0b0b 竖向渐变。 */
+.sys-hud {
+    position: absolute;
+    right: 22px;
+    bottom: 18px;
+    z-index: 54;
+    height: 44px;
+    padding: 0 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #2b2b2b;
+    border-radius: 15px;
+    background: linear-gradient(180deg, rgba(24, 24, 24, .96), rgba(11, 11, 11, .97));
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .045);
+    backdrop-filter: blur(16px);
+    color: #f2f2f2;
+    font-size: 12px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity .22s ease, transform .22s ease;
+    pointer-events: auto;
+}
+.sys-hud.ready {
+    opacity: 1;
+    transform: none;
+}
+.sys-hud .sh-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.sys-hud .sh-k {
+    font-size: 11.5px;
+    font-weight: 750;
+    color: #9c9c9c;
+    letter-spacing: .2px;
+    white-space: nowrap;
+}
+.sys-hud .sh-bar {
+    flex: 0 0 40px;
+    width: 40px;
+    height: 3px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, .16);
+    overflow: hidden;
+}
+.sys-hud .sh-bar i {
+    display: block;
+    height: 100%;
+    width: 0;
+    min-width: 0;
+    border-radius: 99px;
+    background: linear-gradient(90deg, #d8d8d8, #ffffff);
+    box-shadow: 0 0 6px rgba(255, 255, 255, .22);
+    transition: width .5s cubic-bezier(.4, 0, .2, 1), background .3s ease;
+}
+.sys-hud .sh-v {
+    font-size: 12px;
+    font-weight: 800;
+    color: #f2f2f2;
+    text-align: right;
+    white-space: nowrap;
+}
+.sys-hud .sh-v em {
+    font-style: normal;
+    font-weight: 700;
+    font-size: 10.5px;
+    color: #5e5e5e;
+}
+.sys-hud .sh-item.is-pct .sh-v { min-width: 32px; }
+.sys-hud .sh-item.is-mem .sh-v { min-width: 56px; }
+.sys-hud .sh-sep {
+    width: 1px;
+    height: 14px;
+    flex: 0 0 1px;
+    background: rgba(255, 255, 255, .09);
+}
+.sys-hud .sh-bar i.has { min-width: 2px; }
+.sys-hud .sh-item.is-idle { opacity: .45; }
+.sys-hud .sh-item.warn .sh-v { color: #ffb454; }
+.sys-hud .sh-item.warn .sh-bar i { background: linear-gradient(90deg, #f0a03c, #ffc470); }
+.sys-hud .sh-item.crit .sh-v { color: #ff6b6b; }
+.sys-hud .sh-item.crit .sh-bar i { background: linear-gradient(90deg, #ff5252, #ff8a8a); }
+@media (max-width: 900px) {
+    .sys-hud { display: none; }
+}

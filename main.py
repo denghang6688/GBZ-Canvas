@@ -24196,6 +24196,206 @@ async def depth_capture_image(payload: DepthImageRequest):
     return {"ok": True, "url": out_url, "width": w0, "height": h0, "bit_depth": "16" if bit16 else "8"}
 
 
+# ============================================================================
+# 2026-10-31 画布硬件监控条：GPU / 显存 / CPU / 内存
+# - GPU/显存：nvidia-smi（不引入额外依赖，1s 内复用缓存，避免频繁起进程）
+# - CPU：Win32 GetSystemTimes 相邻两次采样差值；非 Windows 用 loadavg 兜底
+# - 内存：Win32 GlobalMemoryStatusEx；非 Windows 读 /proc/meminfo
+# 前端 1s 轮询 GET /api/sys-stats，整体再叠 0.6s 缓存，多标签页不会打爆后端。
+# ============================================================================
+_SYS_STATS_LOCK = threading.Lock()
+_SYS_STATS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_SYS_STATS_GPU_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_SYS_STATS_CPU_PREV: Dict[str, int] = {}
+_NVIDIA_SMI_PATH: Dict[str, str] = {}
+
+
+def _nvidia_smi_path() -> Optional[str]:
+    if "path" in _NVIDIA_SMI_PATH:
+        return _NVIDIA_SMI_PATH["path"] or None
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        for cand in (
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+            r"C:\Windows\System32\nvidia-smi.exe",
+        ):
+            if os.path.isfile(cand):
+                exe = cand
+                break
+    _NVIDIA_SMI_PATH["path"] = exe or ""
+    return exe or None
+
+
+def _sys_gpu_stats() -> Optional[Dict[str, Any]]:
+    """nvidia-smi 取 GPU 利用率与显存；失败返回 None（前端显示 --）。"""
+    exe = _nvidia_smi_path()
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=4,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    line = proc.stdout.strip().splitlines()[0]
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 4:
+        return None
+    try:
+        util = float(parts[1])
+        used_mb = float(parts[2])
+        total_mb = float(parts[3])
+    except ValueError:
+        return None
+    return {
+        "name": parts[0],
+        "util": round(util, 1),
+        "mem_used_mb": used_mb,
+        "mem_total_mb": total_mb,
+        "mem_used_gb": round(used_mb / 1024.0, 1),
+        "mem_total_gb": round(total_mb / 1024.0, 1),
+        "mem_percent": round(used_mb / total_mb * 100.0, 1) if total_mb > 0 else 0.0,
+    }
+
+
+def _sys_cpu_percent() -> Optional[float]:
+    """CPU 占用：Windows 用 GetSystemTimes 增量；首次调用只做种子，返回 None。"""
+    if os.name != "nt":
+        try:
+            load = os.getloadavg()[0]
+            cores = os.cpu_count() or 1
+            return round(max(0.0, min(100.0, load / cores * 100.0)), 1)
+        except Exception:
+            return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+        def _ft(v):
+            return (v.dwHighDateTime << 32) + v.dwLowDateTime
+
+        idle, kernel, user = FILETIME(), FILETIME(), FILETIME()
+        if not ctypes.windll.kernel32.GetSystemTimes(
+            ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)
+        ):
+            return None
+        cur = {"idle": _ft(idle), "kernel": _ft(kernel), "user": _ft(user)}
+        prev = dict(_SYS_STATS_CPU_PREV)
+        _SYS_STATS_CPU_PREV.update(cur)
+        if not prev:
+            return None
+        delta_idle = cur["idle"] - prev["idle"]
+        delta_total = (cur["kernel"] - prev["kernel"]) + (cur["user"] - prev["user"])
+        if delta_total <= 0:
+            return None
+        pct = (1.0 - delta_idle / float(delta_total)) * 100.0
+        return round(max(0.0, min(100.0, pct)), 1)
+    except Exception:
+        return None
+
+
+def _sys_mem_stats() -> Optional[Dict[str, float]]:
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            st = MEMORYSTATUSEX()
+            st.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return None
+            total = st.ullTotalPhys / 1073741824.0
+            used = (st.ullTotalPhys - st.ullAvailPhys) / 1073741824.0
+            if total <= 0:
+                return None
+            return {
+                "used_gb": round(used, 1),
+                "total_gb": round(total, 1),
+                "percent": round(used / total * 100.0, 1),
+            }
+        except Exception:
+            return None
+    try:
+        info: Dict[str, int] = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                info[key.strip()] = int(rest.strip().split()[0])
+        total = info["MemTotal"] / 1048576.0
+        avail = info.get("MemAvailable", info.get("MemFree", 0)) / 1048576.0
+        used = total - avail
+        if total <= 0:
+            return None
+        return {
+            "used_gb": round(used, 1),
+            "total_gb": round(total, 1),
+            "percent": round(used / total * 100.0, 1),
+        }
+    except Exception:
+        return None
+
+
+def _sys_stats_collect() -> Dict[str, Any]:
+    now = time.time()
+    gpu = _SYS_STATS_GPU_CACHE.get("data")
+    if not gpu or (now - float(_SYS_STATS_GPU_CACHE.get("ts") or 0)) > 1.0:
+        fresh = _sys_gpu_stats()
+        if fresh:
+            gpu = fresh
+            _SYS_STATS_GPU_CACHE.update(ts=now, data=fresh)
+    # GPU 显存百分比每 1s 才刷新一次，这里按最新 used/total 复算，避免读数滞后
+    if gpu and gpu.get("mem_total_mb"):
+        gpu["mem_percent"] = round(gpu["mem_used_mb"] / gpu["mem_total_mb"] * 100.0, 1)
+    return {
+        "ok": True,
+        "ts": round(now, 3),
+        "gpu": gpu,
+        "cpu": _sys_cpu_percent(),
+        "mem": _sys_mem_stats(),
+    }
+
+
+@app.get("/api/sys-stats")
+async def sys_stats():
+    """画布硬件监控条数据源（1s 轮询；整体 0.6s 缓存）。"""
+    now = time.time()
+    with _SYS_STATS_LOCK:
+        cached = _SYS_STATS_CACHE.get("data")
+        if cached and (now - float(_SYS_STATS_CACHE.get("ts") or 0)) < 0.6:
+            return cached
+    try:
+        data = await asyncio.to_thread(_sys_stats_collect)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=500)
+    with _SYS_STATS_LOCK:
+        _SYS_STATS_CACHE.update(ts=time.time(), data=data)
+    return data
+
+
+# 进程启动时先种一帧 CPU 采样，避免首次请求返回 null
+try:
+    _sys_cpu_percent()
+except Exception:
+    pass
+
+
 if __name__ == "__main__":
     import uvicorn
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
