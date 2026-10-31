@@ -9383,8 +9383,11 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
        ::before 只在 locate-flash 的 ::after 之外，互不冲突。
        伪元素不占布局、pointer-events:none，不影响点击与拖拽；
        border 宽度用 --canvas-inverse-scale（1/缩放）反向补偿，任何倍率下都是屏幕 1px / 1.5px。
-       两态 inset/border-radius 完全相同，位置严丝合缝，只有颜色和 1px→1.5px 的变化。 */
-    position: relative;
+       两态 inset/border-radius 完全相同，位置严丝合缝，只有颜色和 1px→1.5px 的变化。
+       注意：绝对不能在这里写 position —— .image-node 本体是 position:absolute（画布坐标靠它），
+       一旦被改成 relative，节点会掉回文档流、内部 absolute 的 <img> 静态位置错位，
+       整片素材变成空白灰块（2026-10-31 回归事故）。absolute 本身已是定位元素，
+       ::before 的 inset:0 不需要 relative 也能对齐。 */
     /* 节点自身的 1~2px 灰边框交给这条描边表达，否则空节点 / 提示词节点会并排成两圈线 */
     border-color: transparent !important;
 }
