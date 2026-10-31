@@ -9415,7 +9415,13 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     border-style: solid;
     border-color: rgba(226, 226, 226, .26);
     border-width: calc(1px * var(--canvas-inverse-scale, 1));
-    border-radius: calc(var(--gbz-node-radius, 8px) + var(--node-ring-outset, 0px));
+    /* 2026-10-31（用户反馈「还是有点突出黑色」）：圆角不能跟着 outset 一起加。
+       外扩 1px 时若圆角也 +1（→9px），描边的弧会比节点卡片的弧「更收」，卡片那个
+       深色圆角就露在描边外侧一小截 —— 常规倍率看不见，放到 600%+ 就是一道暗色弧。
+       实测（13.5x 角部径向采样）：radius 9 时为「卡片 → 描边 → 卡片(露出) → 画布」，
+       改成与节点同半径 8 后直接变成「卡片 → 描边 → 画布」，暗色弧消失；
+       代价是角上描边比卡片多出 1px 外鼓，常规倍率下 0.26px，不可见。 */
+    border-radius: var(--gbz-node-radius, 8px);
     pointer-events: none !important;
     z-index: 8;
 }
@@ -9425,8 +9431,10 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 }
 .world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
     /* 选中 = 常态那圈灰线原地变白、屏幕 1px 加粗到 1.5px，位置不动 */
-    /* 2026-10-31（用户要求）选中线比纯白稍暗一点，暗底上不刺眼 */
-    border-color: rgba(244, 244, 245, .82);
+    /* 2026-10-31（用户要求两次降调）：.82 在暗底上像一条发光的白带，尤其放大后
+       1 世界像素被放大成十几像素，非常刺眼。改成 .50：常态 .26 之上只提一档，
+       和悬停 .42 同量级，选中仍然一眼看得出但不抢画面。 */
+    border-color: rgba(244, 244, 245, .50);
     border-width: calc(1.5px * var(--canvas-inverse-scale, 1));
 }
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
