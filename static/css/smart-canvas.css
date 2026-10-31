@@ -9392,18 +9392,30 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
        一旦被改成 relative，节点会掉回文档流、内部 absolute 的 <img> 静态位置错位，
        整片素材变成空白灰块（2026-10-31 回归事故）。absolute 本身已是定位元素，
        ::before 的 inset:0 不需要 relative 也能对齐。 */
-    /* 节点自身的 1~2px 灰边框交给这条描边表达，否则空节点 / 提示词节点会并排成两圈线 */
+    /* 节点自身的 1~2px 灰边框交给这条描边表达，否则空节点 / 提示词节点会并排成两圈线。
+       但注意：设成 transparent 后这 1px 会露出画布底色，在描边内侧形成一圈黑缝
+       （看起来像"线没包住内容"）—— 所以下面用 --node-ring-outset 把伪元素外扩到
+       border box 外沿，正好压住这 1px，线条与卡片之间再无缝隙。 */
     border-color: transparent !important;
 }
+/* 描边外扩量 = 节点自身 border 宽度（实测：empty/prompt/loop/storyboard/h3 是 1px，
+   图片节点与上传节点是 0px）。圆角同步 +1px 保持同心。 */
+.world .image-node { --node-ring-outset: 0px; }
+.world .image-node.empty-node,
+.world .image-node.prompt-smart-node,
+.world .image-node.loop-smart-node,
+.world .image-node.storyboard-smart-node,
+.world .image-node.minimax-h3-node { --node-ring-outset: 1px; }
+
 .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
     content: "" !important;
     position: absolute !important;
-    inset: 0 !important;
+    inset: calc(-1 * var(--node-ring-outset, 0px)) !important;
     box-sizing: border-box;
     border-style: solid;
     border-color: rgba(226, 226, 226, .26);
     border-width: calc(1px * var(--canvas-inverse-scale, 1));
-    border-radius: inherit;
+    border-radius: calc(var(--gbz-node-radius, 8px) + var(--node-ring-outset, 0px));
     pointer-events: none !important;
     z-index: 8;
 }
