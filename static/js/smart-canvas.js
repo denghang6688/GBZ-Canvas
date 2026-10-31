@@ -5513,7 +5513,7 @@ function smartGroupThumbLayout(node){
                 innerH:Math.max(24, Math.round(explicitH - outerPadY - summarySpace))
             };
         }
-        // 智能分组内部的单图仍按组内最长边逻辑计算；组框外的单图才统一最短边。
+        // 2026-10-31 起单图统一按最短边缩放（singleImageLayout 内部已不分内外），这里也走同一口径。
         const single = singleImageLayout(refs[0].item, {type:'smart-group'}, scale);
         return {
             refs,
@@ -5844,9 +5844,9 @@ function singleImageLayout(image, node, scale){
                 single:true
             };
         }
-        // 组框外单图统一最短边；智能分组内部仍保留原有最长边布局，避免改动组内多图排列。
-        const isOutsideSingle = !node?.type || node?.type === 'smart-image' || node?.uploadEntry === true;
-        const referenceEdge = isOutsideSingle ? Math.min(naturalW, naturalH) : Math.max(naturalW, naturalH);
+        // 2026-10-31 用户要求：图像不按节点框缩放，一律按最短边缩放显示（组内组外同一口径）。
+        // 以前组内单图按最长边算，同一张竖图在组里和组外会差 1.7 倍，看起来「怎么变这么大了」。
+        const referenceEdge = Math.min(naturalW, naturalH);
         const fit = MEDIA_SINGLE_IMAGE_DEFAULT_EDGE / referenceEdge;
         return {
             cols:1,
@@ -6418,8 +6418,10 @@ function activePromptLlmComposerNode(){
 }
 function ensurePromptNodeLlmDefaults(node){
     if(!node || node.type !== 'smart-prompt') return;
-    node.llmProvider = resolveChatProviderId(node.llmProvider || '');
-    node.llmModel = resolveChatModel(node.llmModel || '', node.llmProvider);
+    // 2026-10-31 节点没自带选择时，跟着上一次用过的平台 + 模型走（跨会话）
+    const remembered = lastLlmSelection();
+    node.llmProvider = resolveLlmProviderWithMemory(node.llmProvider || remembered.provider || '');
+    node.llmModel = resolveChatModel(node.llmModel || remembered.model || '', node.llmProvider);
     node.llmSystemEnabled = node.llmSystemEnabled === true;
     node.llmSystemPrompt = node.llmSystemPrompt || 'You are a helpful prompt assistant.';
 }
@@ -7766,6 +7768,28 @@ function chatModelOptions(selectedModel='', providerId=''){
     const models = providerChatModels(selectedProvider);
     const selected = resolveChatModel(selectedModel, selectedProvider);
     return [...new Set([selected, ...models].filter(Boolean))].map(model => `<option value="${escapeHtml(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
+}
+// 2026-10-31 用户要求：LLM 也要记住「上次用的平台 + 模型」，新建提示词节点 / 重开面板不要回到默认。
+const LLM_SELECTION_KEY = 'smart_canvas_last_llm_selection_v1';
+function lastLlmSelection(){
+    try{
+        const raw = JSON.parse(localStorage.getItem(LLM_SELECTION_KEY) || '{}');
+        return raw && typeof raw === 'object' ? raw : {};
+    }catch{ return {}; }
+}
+function rememberLlmSelection(provider='', model=''){
+    const providers = chatApiProviders();
+    const pid = String(provider || '');
+    // 平台列表还没拉回来时不要写空值，等真正的选择落到节点上再记
+    if(!pid || (providers.length && !providers.some(p => p.id === pid))) return;
+    try{ localStorage.setItem(LLM_SELECTION_KEY, JSON.stringify({provider: pid, model: String(model || '')})); }catch{}
+}
+function resolveLlmProviderWithMemory(preferred=''){
+    const providers = chatApiProviders();
+    const wanted = String(preferred || lastLlmSelection().provider || '');
+    if(!providers.length) return wanted || 'comfly';
+    if(wanted && providers.some(p => p.id === wanted)) return wanted;
+    return providers[0]?.id || 'comfly';
 }
 function smartAgentHeaders(){
     return {'Content-Type':'application/json', 'X-User-ID':smartClientId || 'smart-canvas'};
@@ -15809,7 +15833,9 @@ function createNode(x, y, images=[], options={}){
 }
 function createPromptNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
-    const providerId = resolveChatProviderId();
+    // 2026-10-31 用户要求：新建节点沿用上一次的 LLM 平台 + 模型，不回到第一个
+    const remembered = lastLlmSelection();
+    const providerId = resolveLlmProviderWithMemory(remembered.provider || '');
     const node = {
         id:uid('prompt'),
         type:'smart-prompt',
@@ -15823,7 +15849,7 @@ function createPromptNode(x, y, options={}){
         promptSplitEnabled:false,
         llmEnabled:false,
         llmProvider:providerId,
-        llmModel:resolveChatModel('', providerId),
+        llmModel:resolveChatModel(remembered.model || '', providerId),
         llmSystemEnabled:false,
         llmSystemPrompt:'You are a helpful prompt assistant.',
         llmInstruction:'',
@@ -23946,11 +23972,17 @@ function bindPromptNodeControls(el, node){
         e.stopPropagation();
         node.llmProvider = resolveChatProviderId(e.target.value);
         node.llmModel = resolveChatModel('', node.llmProvider);
+        rememberLlmSelection(node.llmProvider, node.llmModel);
         render();
         scheduleSave();
     };
     const modelEl = el.querySelector('.prompt-llm-model');
-    if(modelEl) modelEl.onchange = e => { e.stopPropagation(); node.llmModel = e.target.value; scheduleSave(); };
+    if(modelEl) modelEl.onchange = e => {
+        e.stopPropagation();
+        node.llmModel = e.target.value;
+        rememberLlmSelection(node.llmProvider, node.llmModel);
+        scheduleSave();
+    };
     const systemToggleEl = el.querySelector('.prompt-system-toggle');
     if(systemToggleEl) systemToggleEl.onclick = e => {
         e.preventDefault();
@@ -42987,6 +43019,7 @@ promptLlmProvider?.addEventListener('change', event => {
     if(!node) return;
     node.llmProvider = resolveChatProviderId(event.target.value);
     node.llmModel = resolveChatModel('', node.llmProvider);
+    rememberLlmSelection(node.llmProvider, node.llmModel);
     syncPromptLlmComposer(node);
     scheduleSave();
 });
@@ -42994,6 +43027,7 @@ promptLlmModel?.addEventListener('change', event => {
     const node = activePromptLlmComposerNode();
     if(!node) return;
     node.llmModel = event.target.value || resolveChatModel('', node.llmProvider);
+    rememberLlmSelection(node.llmProvider, node.llmModel);
     scheduleSave();
 });
 promptLlmRun?.addEventListener('click', event => {
@@ -43008,6 +43042,7 @@ promptLlmRun?.addEventListener('click', event => {
     node.llmInstruction = promptLlmInstruction?.value || node.llmInstruction || '';
     node.llmProvider = resolveChatProviderId(promptLlmProvider?.value || node.llmProvider || '');
     node.llmModel = resolveChatModel(promptLlmModel?.value || node.llmModel || '', node.llmProvider);
+    rememberLlmSelection(node.llmProvider, node.llmModel);
     scheduleSave();
     runPromptLLMNode(node.id, {writeMode:'overwrite'});
 });
