@@ -22913,26 +22913,74 @@ async function downloadSelectedNodeImages(){
     });
     toast(`已开始下载 ${items.length} 张图片`);
 }
+// 2026-10-31（用户要求）：框选后灰色框「整块」都是移动拖动区域。
+// 旧行为：只有按在节点本体上才能整体拖动，框里的留白（竖排/长图框选时留白很大）按下去只会平移画布。
+// 新行为：框内任意空白处按下 → 整体拖动全部选中节点；按下不动就松手仍算普通点击（清空选中）。
+let selectionFrameDragStart = null;
+let selectionFrameMovedSuppressArmed = false;
+let selectionFrameElCache = null;
+function currentSelectionFrameEl(){
+    if(selectionFrameElCache && selectionFrameElCache.isConnected) return selectionFrameElCache;
+    selectionFrameElCache = world?.querySelector('.smart-selection-frame') || null;
+    return selectionFrameElCache;
+}
+function selectionFrameHoverHit(event){
+    if(!event) return false;
+    const frame = currentSelectionFrameEl();
+    if(!frame) return false;
+    const rect = frame.getBoundingClientRect();
+    return event.clientX >= rect.left && event.clientX <= rect.right
+        && event.clientY >= rect.top && event.clientY <= rect.bottom;
+}
+function beginSmartSelectionDragFromFrame(event){
+    const e = event;
+    if(!e) return false;
+    if(dragState || portDragState || selectionState) return false;
+    if(Number.isFinite(Number(e.button)) && Number(e.button) !== 0) return false;
+    const ids = selectedNodeIds();
+    if(ids.length < 2) return false;
+    const group = ids.map(dragId => {
+        const n = nodes.find(x => x.id === dragId);
+        return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
+    }).filter(Boolean);
+    if(group.length < 2) return false;
+    const anchor = nodes.find(x => x.id === ids[0]);
+    e.preventDefault();
+    e.stopPropagation();
+    window.getSelection?.()?.removeAllRanges?.();
+    dragState = {id:ids[0], startX:e.clientX, startY:e.clientY, ox:anchor?.x || 0, oy:anchor?.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:false};
+    document.body.classList.add('smart-node-drag');
+    capturePendingUndo();
+    selectionFrameDragStart = {x:e.clientX, y:e.clientY};
+    selectionFrameMovedSuppressArmed = false;
+    return true;
+}
+function trackSelectionFrameDragMove(event){
+    if(!selectionFrameDragStart || !event) return;
+    const dx = Math.abs(Number(event.clientX) - selectionFrameDragStart.x);
+    const dy = Math.abs(Number(event.clientY) - selectionFrameDragStart.y);
+    if(dx <= 3 && dy <= 3) return;
+    // 拖动过 → 松手后的 click 不能当成「点空白」，否则整组选中会被清掉
+    if(!selectionFrameMovedSuppressArmed){
+        selectionFrameMovedSuppressArmed = true;
+        suppressCanvasClickUntil = Date.now() + 320;
+    }
+}
+function updateSelectionFrameHoverCursor(event){
+    if(!shell) return;
+    if(selectionFrameDragStart){ shell.classList.add('selection-frame-hover'); return; }
+    if(event?.target?.closest?.('.image-node,.composer,.smart-selection-floating-menu,.smart-selection-batch-port')){
+        shell.classList.remove('selection-frame-hover');
+        return;
+    }
+    shell.classList.toggle('selection-frame-hover', selectionFrameHoverHit(event));
+}
 function bindSmartSelectionToolbar(){
     const frame = world.querySelector('.smart-selection-frame');
     if(frame && !frame._boundDrag){
         frame._boundDrag = true;
-        frame.addEventListener('mousedown', e => {
-            if(e.button !== 0) return;
-            e.preventDefault(); e.stopPropagation();
-            window.getSelection?.()?.removeAllRanges?.();
-            const ids = selectedNodeIds();
-            if(ids.length < 1) return;
-            const group = ids.map(dragId => {
-                const n = nodes.find(x => x.id === dragId);
-                return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
-            }).filter(Boolean);
-            if(!group.length) return;
-            const anchor = nodes.find(x => x.id === ids[0]);
-            dragState = {id:ids[0], startX:e.clientX, startY:e.clientY, ox:anchor?.x || 0, oy:anchor?.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:false};
-            document.body.classList.add('smart-node-drag');
-            capturePendingUndo();
-        });
+        // 兜底：即使哪天给 .smart-selection-frame 放开了 pointer-events，也走同一套整体拖动逻辑
+        frame.addEventListener('mousedown', e => beginSmartSelectionDragFromFrame(e));
     }
     world.querySelectorAll('[data-smart-selection-action]').forEach(btn => {
         btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
@@ -40669,8 +40717,9 @@ shell.addEventListener('click', e => {
 }, true);
 shell.addEventListener('mousemove', e => {
     updateIdlePortMagnet(e);
+    updateSelectionFrameHoverCursor(e);
 }, true);
-shell.addEventListener('mouseleave', () => clearIdlePortMagnet());
+shell.addEventListener('mouseleave', () => { clearIdlePortMagnet(); shell.classList.remove('selection-frame-hover'); });
 shell.addEventListener('mousedown', e => {
     if(e.button !== 0 || portDragState) return;
     const target = findIdlePortMagnet(e);
@@ -40693,6 +40742,11 @@ shell.onmousedown = e => {
         didPan = false;
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
+        return;
+    }
+    // 2026-10-31（用户要求）：框选后的灰色框整块都能拖动 —— 框内空白处按下即整体移动选中节点
+    if(e.button === 0 && selectionFrameHoverHit(e) && beginSmartSelectionDragFromFrame(e)){
+        didPan = false;
         return;
     }
     if(e.button !== 0 && e.button !== 1) return;
@@ -40882,6 +40936,7 @@ function applyPortDragFrame(){
 }
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
+    trackSelectionFrameDragMove(e);
     if(smartMinimapDrag){
         e.preventDefault();
         centerViewportOnWorldPoint(minimapEventToWorld(e));
@@ -41373,6 +41428,7 @@ function applyDragSnapAlign(){
 function handleCanvasMouseUp(e){
     if(e && e.timeStamp && lastCanvasMouseUpStamp === e.timeStamp) return;
     if(e && e.timeStamp) lastCanvasMouseUpStamp = e.timeStamp;
+    selectionFrameDragStart = null;
     cleanupPortPointerCapture();
     document.body.classList.remove('smart-node-drag');
     document.body.classList.remove('smart-node-resize');

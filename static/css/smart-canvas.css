@@ -57,6 +57,9 @@ html[data-studio-scale="off"].studio-scale-managed .preview-modal {
 }
 .shell.panning { cursor:grabbing; }
 .shell.zoom-preview { cursor:crosshair; }
+/* 2026-10-31（用户要求）：框选后灰色框整块可拖动 —— 悬停框内留白显示抓手光标 */
+.shell.selection-frame-hover { cursor:grab; }
+body.smart-node-drag .shell.selection-frame-hover { cursor:grabbing; }
 .world { position:absolute; left:0; top:0; width:6000px; height:4000px; transform-origin:0 0; }
 /* 鐢诲竷缂╂斁锛堥潪 1:1锛夋椂锛屽叧闂?world 鍐呭崱鐗囩殑 backdrop-filter锛岄伩鍏嶅悎鎴愬眰浣嶅浘琚缉鏀惧鑷粹€滃弬鏁拌缃€濈瓑缁勪欢鍙戣櫄銆?   搴曡壊鏈韩鎺ヨ繎涓嶉€忔槑锛屽叧闂瘺鐜荤拑鍚庤鎰熷嚑涔庢棤宸紝浣嗚兘鍦ㄥ悇娴忚鍣ㄤ笅淇濇寔娓呮櫚銆?*/
 .world.canvas-scaled .image-node,
