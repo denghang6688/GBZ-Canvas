@@ -22968,11 +22968,12 @@ function trackSelectionFrameDragMove(event){
     const dx = Math.abs(Number(event.clientX) - selectionFrameDragStart.x);
     const dy = Math.abs(Number(event.clientY) - selectionFrameDragStart.y);
     if(dx <= 3 && dy <= 3) return;
-    // 拖动过 → 松手后的 click 不能当成「点空白」，否则整组选中会被清掉
-    if(!selectionFrameMovedSuppressArmed){
-        selectionFrameMovedSuppressArmed = true;
-        suppressCanvasClickUntil = Date.now() + 320;
-    }
+    // 拖动过 → 松手后的 click 不能当成「点空白」，否则整组选中会被清掉。
+    // 2026-10-31（用户报「框选后拖动框会消失」）：这里必须**每次移动都刷新**时间戳。
+    // 旧实现只在第一次移动时打一次 +320ms，只要拖得比 320ms 久（超过三成都算），
+    // 松手时窗口早已过期，落点又在空白 → 松手 click 走 clearSelection() → 框当场消失。
+    selectionFrameMovedSuppressArmed = true;
+    suppressCanvasClickUntil = Date.now() + 320;
 }
 function updateSelectionFrameHoverCursor(event){
     if(!shell) return;
@@ -41445,6 +41446,12 @@ function applyDragSnapAlign(){
 function handleCanvasMouseUp(e){
     if(e && e.timeStamp && lastCanvasMouseUpStamp === e.timeStamp) return;
     if(e && e.timeStamp) lastCanvasMouseUpStamp = e.timeStamp;
+    // 2026-10-31（用户要求：框选后拖动，框不要消失，点空白才消失）
+    // 拖动中打的抑制只按“最后一次移动”计时；如果松手前停顿一下（很常见），
+    // 窗口仍可能在松手前过期。这里在松手这一瞬间重新打点，确保紧随的 click 不会被当成点空白。
+    if(selectionFrameDragStart && selectionFrameMovedSuppressArmed){
+        suppressCanvasClickUntil = Date.now() + 320;
+    }
     selectionFrameDragStart = null;
     cleanupPortPointerCapture();
     document.body.classList.remove('smart-node-drag');
@@ -41655,6 +41662,12 @@ function handleCanvasMouseUp(e){
         if(stateChanged) commitPendingUndo();
         else discardPendingUndo();
         if(stateChanged || dragState.thumbDetached) suppressNodeClickUntil = Date.now() + 180;
+        // 2026-10-31（用户要求：框选后拖动，框不要消失，点空白才消失）
+        // 多选整体拖动（含从外框留白处起拖）松手后，落点若在空白处，紧随的 click 会被
+        // 当成"点空白"清空选中 → 外框和工具条一起消失。这里补一次画布点击抑制。
+        if(stateChanged && (dragState.groupIds || []).length > 1){
+            suppressCanvasClickUntil = Date.now() + 320;
+        }
         clearDropHighlight();
         loopInsertPreview = null;
         hideAlignGuides();
