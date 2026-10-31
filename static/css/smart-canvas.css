@@ -9367,19 +9367,31 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     filter:none !important;
 }
 
-.world .image-node.selected,
-.world .image-node.empty-node.selected,
 .world .image-node.group-node.selected,
-.world .image-node.loop-smart-node.selected,
-.world .image-node.prompt-smart-node.selected,
-.world .image-node.smart-group-member-node.selected,
 .world .smart-group-node.selected,
 .world .image-node.workflow-group-node.selected {
-    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
+    /* 分组类容器保持无描边：它们的框有自己的配色，叠白线会打架 */
     outline:none !important;
     outline-offset:0 !important;
 }
 
+.world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.drop-target):not(.image-replace-target-node),
+.world .image-node.empty-node.selected:not(.drop-target):not(.image-replace-target-node),
+.world .image-node.loop-smart-node.selected,
+.world .image-node.prompt-smart-node.selected,
+.world .image-node.smart-group-member-node.selected {
+    /* 2026-10-31（用户要求）：选中节点四周一圈「白色亮线」，参考试用产品的细亮描边。
+       2026-10-29 曾因「和节点自身边框叠成两圈」把它去掉；这次只留一条线、并稍微外挪 1.5px，
+       线就不会和节点自身边框叠成双线；宽度/间距都用 1/缩放 反向补偿，
+       线宽在任何缩放比例下都恒等于屏幕 1.5px，缩到 10% 也看得见。
+       注意必须写 outline-* 长写：`outline: calc(...) solid var(...)` 这种 shorthand
+       在 var 替换后会被 Chrome 判成无效，outline-style 退回 none，亮线完全不出现。 */
+    outline-style: solid !important;
+    outline-color: rgba(255, 255, 255, .95) !important;
+    outline-width: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
+    /* 往外挪一点点：亮线落在画布底色上，浅色/白色素材也不会把白线吃掉 */
+    outline-offset: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
+}
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > .node-img {
     border-color:transparent !important;
@@ -9403,19 +9415,6 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     box-shadow:none !important;
 }
 
-.world .image-node.selected,
-.world .image-node.empty-node.selected,
-.world .image-node.group-node.selected,
-.world .image-node.loop-smart-node.selected,
-.world .image-node.prompt-smart-node.selected,
-.world .image-node.smart-group-member-node.selected,
-.world .smart-group-node.selected,
-.world .image-node.workflow-group-node.selected {
-    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
-    outline:none !important;
-    outline-offset:0 !important;
-}
-
 .world .image-node.image-replace-target-node,
 .world .thumb-item.image-replace-target,
 .world .image-wrap.image-replace-target,
@@ -9432,18 +9431,9 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     box-shadow:none !important;
 }
 
-.world.world.world.world.world .image-node.selected,
-.world.world.world.world.world .image-node.empty-node.selected,
-.world.world.world.world.world .image-node.group-node.selected,
-.world.world.world.world.world .image-node.loop-smart-node.selected,
-.world.world.world.world.world .image-node.prompt-smart-node.selected,
-.world.world.world.world.world .image-node.smart-group-member-node.selected,
-.world.world.world.world.world .smart-group-node.selected,
-.world.world.world.world.world .image-node.workflow-group-node.selected {
-    /* 2026-10-29（用户要求）：选中节点不再画白色描边（会与节点边框叠成两圈线），只保留节点自身边框 */
-    outline:none !important;
-    outline-offset:0 !important;
-}
+/* 2026-10-31：原来这里（5 个 .world 的高优先级版本）也写着 `outline:none !important` 的
+   「选中不画描边」规则，会把上面的白色亮线整条压掉。选中描边现在统一收在上面那条规则里
+   （白色亮线 + 1/缩放 反向补偿），此处整块删除，不要再恢复。 */
 
 .world.world.world.world.world.world.world.world.world.world,
 .world.world.world.world.world.world.world.world.world.world *,
@@ -20894,3 +20884,4 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
    糊不糊完全由像素缺口自然决定：方图清楚、长图糊。这里不再写 filter 规则。 */
 /* 低清档整画布给个「可点开」的手型，提示这里点了会变清晰 */
 .world.smart-lod-low .image-node:not(.node-pending):not(.group-node) { cursor: zoom-in; }
+
