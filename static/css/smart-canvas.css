@@ -9375,27 +9375,39 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     outline-offset:0 !important;
 }
 
-.world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.drop-target):not(.image-replace-target-node),
-.world .image-node.empty-node.selected:not(.drop-target):not(.image-replace-target-node),
-.world .image-node.loop-smart-node.selected,
-.world .image-node.prompt-smart-node.selected,
-.world .image-node.smart-group-member-node.selected {
-    /* 2026-10-31（用户要求）：选中节点四周一圈「白色亮线」，参考试用产品的细亮描边。
-       2026-10-29 曾因「和节点自身边框叠成两圈」把它去掉；这次只留一条线、并稍微外挪 1.5px，
-       线就不会和节点自身边框叠成双线；宽度/间距都用 1/缩放 反向补偿，
-       线宽在任何缩放比例下都恒等于屏幕 1.5px，缩到 10% 也看得见。
-       注意必须写 outline-* 长写：`outline: calc(...) solid var(...)` 这种 shorthand
-       在 var 替换后会被 Chrome 判成无效，outline-style 退回 none，亮线完全不出现。 */
-    outline-style: solid !important;
-    outline-color: rgba(255, 255, 255, .95) !important;
-    outline-width: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
-    /* 往外挪一点点：亮线落在画布底色上，浅色/白色素材也不会把白线吃掉 */
-    outline-offset: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
-    /* 2026-10-31（用户反馈「怎么有 2 圈线」）：空节点/提示词节点自带宽 1~2px 的边框，
-       选中时 border-color 还会被 :hover / .selected 提亮成 --strong，于是
-       「节点边框 + 外面那条白线」看起来就是两圈。选中期间把节点自身边框改成透明，
-       只留外面这一圈白线；border 宽度不变，节点尺寸/布局不受影响。 */
+.world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node) {
+    /* 2026-10-31（用户要求，B 方案）：常态一圈灰色描边，选中时「同一圈」原地变白。
+       为什么用 ::before 而不是 outline：图片节点里 <img> 是 absolute + transform 的独立
+       stacking context，会把自己的 outline 整个盖住（空节点能看见、图片节点全看不见，
+       这就是上一版「有的有白线有的没有」的真因）。伪元素带 z-index 才画在素材上面。
+       ::before 只在 locate-flash 的 ::after 之外，互不冲突。
+       伪元素不占布局、pointer-events:none，不影响点击与拖拽；
+       border 宽度用 --canvas-inverse-scale（1/缩放）反向补偿，任何倍率下都是屏幕 1px / 1.5px。
+       两态 inset/border-radius 完全相同，位置严丝合缝，只有颜色和 1px→1.5px 的变化。 */
+    position: relative;
+    /* 节点自身的 1~2px 灰边框交给这条描边表达，否则空节点 / 提示词节点会并排成两圈线 */
     border-color: transparent !important;
+}
+.world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    box-sizing: border-box;
+    border-style: solid;
+    border-color: rgba(226, 226, 226, .26);
+    border-width: calc(1px * var(--canvas-inverse-scale, 1));
+    border-radius: inherit;
+    pointer-events: none !important;
+    z-index: 8;
+}
+.world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node):hover::before {
+    /* 悬停时灰线略微提亮，提示可点；选中态位于后面，不会被这里压掉 */
+    border-color: rgba(255, 255, 255, .42);
+}
+.world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
+    /* 选中 = 常态那圈灰线原地变白、屏幕 1px 加粗到 1.5px，位置不动 */
+    border-color: rgba(255, 255, 255, .95);
+    border-width: calc(1.5px * var(--canvas-inverse-scale, 1));
 }
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > .node-img {
