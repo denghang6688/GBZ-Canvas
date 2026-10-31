@@ -9391,6 +9391,11 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     outline-width: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
     /* 往外挪一点点：亮线落在画布底色上，浅色/白色素材也不会把白线吃掉 */
     outline-offset: calc(1.5px * var(--canvas-inverse-scale, 1)) !important;
+    /* 2026-10-31（用户反馈「怎么有 2 圈线」）：空节点/提示词节点自带宽 1~2px 的边框，
+       选中时 border-color 还会被 :hover / .selected 提亮成 --strong，于是
+       「节点边框 + 外面那条白线」看起来就是两圈。选中期间把节点自身边框改成透明，
+       只留外面这一圈白线；border 宽度不变，节点尺寸/布局不受影响。 */
+    border-color: transparent !important;
 }
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > .node-img {
