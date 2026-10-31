@@ -5812,8 +5812,16 @@ function singleImageLayout(image, node, scale){
     // 否则手柄拖完会被下面的 fit 口径弹回。上传节点仍走下方专用分支，避免历史尺寸干扰。
     // 2026-10-31（用户反馈：占位框/结果卡没按选的比例）——走过生成流程的节点（genSize3000）
     // 上留存的 w/h 只是历次占位框的快照，不能当成「用户手动拉的尺寸」：否则一张 9:16 成片
-    // 被塞进上一步留下的方框里，出图后永远是正方形。只有用户真的拖过手柄（boxManual）才认。
-    const trustExplicitBox = node?.uploadEntry !== true && (node?.boxManual === true || node?.genSize3000 !== true);
+    // 被塞进上一步留下的方框里，出图后永远是正方形。
+    // 2026-10-31 晚（用户反馈：生成的图没按最短边对齐）——只有 genSize3000 被排除还不够：
+    // 上传后改名成结果、复制粘贴、局部编辑结果这些节点没有 genSize3000 标记，节点上的 w/h
+    // 又是渲染时回写的旧布局值，于是同一张 9:16 图在 A 节点 280 宽、在 B 节点 590 宽。
+    // 现在单图节点一律按「最短边 = 280」算，只有真的拖过右下角手柄（boxManual）才认自定义框。
+    // 音视频除外：它们的卡片是播放器/波形条，尺寸跟画面比例无关，沿用旧口径（认 explicit）。
+    const nonImageMedia = isVideoMediaItem(image) || isAudioMediaItem(image);
+    const trustExplicitBox = node?.uploadEntry !== true && (
+        node?.boxManual === true || (nonImageMedia && node?.genSize3000 !== true)
+    );
     if(trustExplicitBox && Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24){
         return {cols:1, rows:1, width:Math.round(explicitW), height:Math.round(explicitH), thumb:Math.round(96 * scale), single:true};
     }
