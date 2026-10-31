@@ -20623,9 +20623,12 @@ html body .prompt-llm-composer .prompt-llm-input-shell:focus-within {
 html body .prompt-llm-composer .prompt-llm-composer-input::placeholder {
     color: #7d7d7d !important;
 }
-/* 输入区内边距对齐预览（原 10 14 12） */
+/* 输入区内边距对齐预览（原 10 14 12）；
+   字号跟主 composer 的 .prompt-input 对齐（17px / 1.65，见 1529 行），原 16px / 1.48 偏小偏紧 */
 html body .prompt-llm-composer .prompt-llm-input-shell .prompt-llm-composer-input {
     padding: 12px 16px 10px !important;
+    font-size: 17px !important;
+    line-height: 1.65 !important;
 }
 
 /* 服务商 / 模型下拉：999 粗胶囊 → 幽灵灰字。
@@ -20653,6 +20656,31 @@ html body .prompt-llm-composer .prompt-llm-provider-select:hover,
 html body .prompt-llm-composer .prompt-llm-model-select:hover {
     background-color: rgba(255, 255, 255, .06) !important;
     color: rgba(255, 255, 255, .9) !important;
+}
+/* 展开弹层是系统绘制的，不吃上面的 appearance/background：
+   必须用 color-scheme:dark 声明这块控件属于深色方案，Chrome 才会用深色绘制弹层外框；
+   再给 option / optgroup 上深底浅字，免得出现"整块白底 + 浅灰字"看不清。
+   焦点行的高亮由系统画（浅色方案下是白块），深色方案下是系统灰，已可辨认。 */
+html body .prompt-llm-composer .prompt-llm-provider-select,
+html body .prompt-llm-composer .prompt-llm-model-select {
+    color-scheme: dark !important;
+}
+html body .prompt-llm-composer .prompt-llm-provider-select option,
+html body .prompt-llm-composer .prompt-llm-model-select option,
+html body .prompt-llm-composer .prompt-llm-provider-select optgroup,
+html body .prompt-llm-composer .prompt-llm-model-select optgroup {
+    background-color: #262626 !important;
+    color: #e8e8e8 !important;
+}
+html body .prompt-llm-composer .prompt-llm-provider-select option:disabled,
+html body .prompt-llm-composer .prompt-llm-model-select option:disabled {
+    color: #7a7a7a !important;
+}
+/* 当前选中行：部分 Chrome 版本会用自己的强调色画白块，这里压成深灰 */
+html body .prompt-llm-composer .prompt-llm-provider-select option:checked,
+html body .prompt-llm-composer .prompt-llm-model-select option:checked {
+    background-color: #3a3a3a !important;
+    color: #ffffff !important;
 }
 
 /* 魔棒 / 翻译：32×32 有底有边 → 30×30 透明图标键 */
