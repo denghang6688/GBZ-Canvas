@@ -17,9 +17,11 @@
 
 import argparse
 import datetime
+import filecmp
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -27,6 +29,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(ROOT, "VERSION")
 NOTES_FILE = os.path.join(ROOT, "static", "update-notes.json")
 MANIFEST_FILE = os.path.join(ROOT, "static", "update-manifest.json")
+# 2026-10-31：魔搭更新源走的是创空间仓库 clone（tmp/ms_publish，分支 master），
+# 主仓库只有 origin/main。之前脚本只认 space/modelscope/github 远端，
+# 在这台机器上等于一个都没推成功（魔搭版本停在 V26.10.27.3 就是这么来的）。
+MS_PUBLISH_DIR = os.path.join(ROOT, "tmp", "ms_publish")
 
 # 与 main.py 的 update_allowed_file() 保持一致：只允许更新这些文件
 ALLOWED_ROOT_FILES = {"main.py", "VERSION"}
@@ -165,6 +171,79 @@ def remote_exists(name):
     return name in (result.stdout or "").split()
 
 
+def current_branch():
+    result = run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+    branch = (result.stdout or "").strip()
+    return branch if branch and branch != "HEAD" else "main"
+
+
+def push_with_retry(args, attempts=3):
+    """推送统一带 sslBackend=openssl（Windows schannel 常报 server closed）+ 失败重试，
+    沙箱/公司代理偶发 502 时直接重试即可，不必改凭据。"""
+    last = None
+    for i in range(attempts):
+        last = run_git(["-c", "http.sslBackend=openssl"] + args)
+        if last.returncode == 0:
+            return last
+        print(f"[git] 第 {i + 1}/{attempts} 次失败：{(last.stderr or '').strip()[:200]}")
+    return last
+
+
+def sync_ms_publish(version):
+    """把发布文件同步到魔搭创空间仓库 clone（tmp/ms_publish）并提交推送 master。
+
+    魔搭更新源读的是仓库实时内容，推完即生效；没有这个 clone 时静默跳过。
+    """
+    if not os.path.isdir(os.path.join(MS_PUBLISH_DIR, ".git")):
+        return None
+    files = collect_files()
+    copied = 0
+    for rel in files:
+        src = os.path.join(ROOT, rel)
+        dst = os.path.join(MS_PUBLISH_DIR, rel)
+        if not os.path.isfile(src):
+            continue
+        if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    # 清单文件自己在 SKIP_FILES 里（不进清单），但仍要作为兜底文件随仓库发布
+    if os.path.isfile(MANIFEST_FILE):
+        dst_manifest = os.path.join(MS_PUBLISH_DIR, os.path.relpath(MANIFEST_FILE, ROOT))
+        os.makedirs(os.path.dirname(dst_manifest), exist_ok=True)
+        shutil.copy2(MANIFEST_FILE, dst_manifest)
+    print(f"[魔搭] 同步 {copied} 个文件 → tmp/ms_publish")
+
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
+    def git_in_clone(args):
+        return subprocess.run(
+            ["git"] + args, cwd=MS_PUBLISH_DIR, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=env,
+        )
+
+    git_in_clone(["add", "-A"])
+    status = git_in_clone(["status", "--porcelain"])
+    if (status.stdout or "").strip():
+        commit = git_in_clone([
+            "-c", "user.name=GBZ", "-c", "user.email=gbz@users.noreply.github.com",
+            "commit", "-m", f"release: {version}",
+        ])
+        if commit.returncode != 0:
+            print(f"[魔搭] 提交失败：{(commit.stderr or '').strip()[:200]}")
+            return False
+    last = None
+    for i in range(3):
+        last = git_in_clone(["-c", "http.sslBackend=openssl", "push", "origin", "master"])
+        if last.returncode == 0:
+            print("[魔搭] 已推送 ms_publish → master ✅")
+            return True
+        print(f"[魔搭] 第 {i + 1}/3 次推送失败：{(last.stderr or '').strip()[:200]}")
+    return False
+
+
 # 2026-10-12：第三方工作流快照（RunningHub 等）导出的 URL 里会残留临时认证参数，
 # 一旦随公开仓库发布即泄露。发布前统一清洗，避免再次发生。
 SENSITIVE_PATTERNS = (
@@ -248,17 +327,23 @@ def main():
         return
 
     pushed = []
-    for remote in ("space", "modelscope", "github"):
+    # 魔搭更新源 = 创空间仓库 clone（tmp/ms_publish），先同步文件再推 master
+    if sync_ms_publish(version):
+        pushed.append("ms_publish（魔搭）")
+    branch = current_branch()
+    for remote in ("origin", "space", "modelscope", "github"):
         if not remote_exists(remote):
             continue
-        result = run_git(["push", remote, "master"])
+        # 主仓库主分支一般是 main，魔搭创空间仓库固定 master
+        target = branch if remote == "origin" else "master"
+        result = push_with_retry(["push", remote, target])
         if result.returncode == 0:
             pushed.append(remote)
-            print(f"[git] 已推送到 {remote} ✅")
+            print(f"[git] 已推送到 {remote}（{target}）✅")
         else:
-            print(f"[git] 推送到 {remote} 失败：{(result.stderr or '').strip()}")
+            print(f"[git] 推送到 {remote} 失败：{(result.stderr or '').strip()[:200]}")
     if not pushed:
-        print("[git] 没有可用的远程仓库（space / modelscope / github），请先添加：git remote add space <地址>")
+        print("[git] 没有可用的远程仓库（origin / tmp/ms_publish），请先配置 git remote 或克隆魔搭仓库")
         return
 
     print("\n发布完成！魔搭创空间仓库文件 API 实时生效，无需重新部署。")
