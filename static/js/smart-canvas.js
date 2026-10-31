@@ -9908,6 +9908,7 @@ function syncPackedDurPillSummary(input){
 // 生成端（canvas_video → apply_video_model_caps）会按同一档案二次钳制，前端只负责「不让用户选错」。
 const API_VIDEO_MODEL_CAPS = {
     'minimax-h3': {
+        label:'MiniMax H3',
         // 2026-10-26 按优云智算 H3 面板实测校准：时长 4-30s、分辨率 5 档、画幅 6 种（首尾帧模式后端强制 adaptive）
         duration:{min:4, max:30, step:1},
         resolutions:['480p', '768p', '1080p', '2k', '4k'],
@@ -9916,6 +9917,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'seedance-2-5': {
+        label:'Seedance 2.5',
         duration:{min:4, max:30, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
@@ -9924,6 +9926,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'seedance': {
+        label:'Seedance',
         duration:{min:4, max:15, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
@@ -9932,6 +9935,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'hailuo': {
+        label:'Hailuo 2.3',
         duration:{ticks:[6, 10]},
         resolutions:['768p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16'],
@@ -9939,6 +9943,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'kling': {
+        label:'Kling 可灵',
         duration:{ticks:[5, 10]},
         resolutions:['720p', '1080p'],
         ratios:['16:9', '1:1', '9:16'],
@@ -9946,6 +9951,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'veo': {
+        label:'Veo 3.1',
         duration:{ticks:[4, 6, 8]},
         resolutions:['720p', '1080p'],
         ratios:['16:9', '9:16'],
@@ -9953,6 +9959,7 @@ const API_VIDEO_MODEL_CAPS = {
         audio:true
     },
     'sora': {
+        label:'Sora 2',
         duration:{ticks:[4, 8, 12]},
         resolutions:['720p', '1080p'],
         ratios:['16:9', '9:16'],
@@ -9995,6 +10002,122 @@ function apiVideoModelCaps(modelName){
         _apiVideoCapsCustom = {profiles:customProfiles, keywords:data.custom_keywords || {}};
     }catch(_){ /* 离线/旧后端：静默用镜像表 */ }
 })();
+// 2026-10-31 图片模型能力档案（前端镜像，与后端 main.py IMAGE_MODEL_CAPS_PROFILES 同源）。
+// 比例统一写成 "w:h"，面板 token（square / wide / story …）经 SMART_RATIO_VALUE_OF_TOKEN 换算比对。
+// 生成端（build_online_image_result → apply_image_model_caps）按同一档案二次校验，前后端不会打架。
+const API_IMAGE_MODEL_CAPS = {
+    'jimeng-seedream': {label:'即梦 Seedream', ratios:['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'], auto:false},
+    'gpt-image-2': {label:'GPT-Image-2', ratios:['1:1', '3:2', '2:3', '4:3', '3:4', '4:5', '5:4', '16:9', '9:16', '21:9', '9:21', '2:1', '1:2', '3:1', '1:3'], auto:true},
+    'gpt-image-1': {label:'GPT-Image-1', ratios:['1:1', '3:2', '2:3'], auto:false},
+    'nano-banana-pro': {label:'Nano Banana Pro', ratios:['1:1', '3:2', '2:3', '4:3', '3:4', '4:5', '5:4', '16:9', '9:16', '21:9', '4:1', '1:4'], auto:false},
+    'nano-banana': {label:'Nano Banana', ratios:['1:1', '3:2', '2:3', '4:3', '3:4', '4:5', '5:4', '16:9', '9:16', '21:9'], auto:false}
+};
+// 顺序敏感：更具体的必须排前面（gpt-image-2 > gpt-image、gemini-3-pro-image > pro-image）
+const API_IMAGE_CAP_KEYWORDS = [
+    ['seedream', 'jimeng-seedream'], ['jimeng', 'jimeng-seedream'], ['即梦', 'jimeng-seedream'],
+    ['gpt-image-2', 'gpt-image-2'], ['gptimage2', 'gpt-image-2'], ['gpt-image', 'gpt-image-1'],
+    ['gemini-3-pro-image', 'nano-banana-pro'], ['banana-pro', 'nano-banana-pro'], ['bananapro', 'nano-banana-pro'],
+    ['banana', 'nano-banana'], ['flash-image', 'nano-banana'], ['pro-image', 'nano-banana']
+];
+// 兜底：能力未知 → 比例不收窄、不给「自动」档（与历史行为一致，不误伤自定义模型）
+const API_IMAGE_CAP_FALLBACK = {ratios:[], auto:false};
+let _apiImageCapsCustom = null; // 后端 data/model_caps.json 的 image_profiles / image_keywords（异步拉取）
+// 面板 token ↔ 真实比例；常用顺序供「常用置前」排序（图片尺寸面板与视频画幅面板共用）。
+const SMART_RATIO_VALUE_OF_TOKEN = {
+    square:'1:1', landscape:'3:2', portrait:'2:3', landscape43:'4:3', portrait43:'3:4',
+    '5:4':'5:4', '4:5':'4:5', wide:'16:9', story:'9:16', ultrawide:'21:9', ultratall:'9:21',
+    '2:1':'2:1', '1:2':'1:2', '3:1':'3:1', '1:3':'1:3', '4:1':'4:1', '1:4':'1:4'
+};
+const SMART_RATIO_TOKEN_OF_VALUE = {};
+Object.entries(SMART_RATIO_VALUE_OF_TOKEN).forEach(([token, value]) => {
+    if(!SMART_RATIO_TOKEN_OF_VALUE[value]) SMART_RATIO_TOKEN_OF_VALUE[value] = token;
+});
+const SMART_COMMON_RATIO_ORDER = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];
+function apiImageModelCaps(modelName){
+    const name = String(modelName ?? settings.model ?? '').toLowerCase().replace(/[\s_./]+/g, '-').replace(/^-+|-+$/g, '');
+    const profiles = {...API_IMAGE_MODEL_CAPS, ...(_apiImageCapsCustom?.profiles || {})};
+    const providerId = String(settings.provider_id || '').toLowerCase();
+    if(providerId.includes('jimeng') || providerId.includes('dreamina')){
+        return {profile:'jimeng-seedream', ...(profiles['jimeng-seedream'] || API_IMAGE_MODEL_CAPS['jimeng-seedream'])};
+    }
+    for(const [pid, prof] of Object.entries(profiles)){
+        if(name === pid || name.startsWith(pid + '-')) return {profile:pid, ...prof};
+    }
+    const keywords = [...API_IMAGE_CAP_KEYWORDS, ...Object.entries(_apiImageCapsCustom?.keywords || {})];
+    for(const [kw, pid] of keywords){
+        if(kw && name.includes(String(kw).toLowerCase()) && profiles[pid]) return {profile:pid, ...profiles[pid]};
+    }
+    return {profile:'fallback', ...API_IMAGE_CAP_FALLBACK};
+}
+// 后端下发同源档案 + 自定义覆盖（失败静默：镜像表已够用）
+(async function refreshApiImageCapsFromBackend(){
+    try{
+        const r = await fetch('/api/image/model-caps');
+        if(!r.ok) return;
+        const data = await r.json();
+        if(!data || typeof data !== 'object') return;
+        const customProfiles = {};
+        for(const [pid, prof] of Object.entries(data.profiles || {})){
+            if(API_IMAGE_MODEL_CAPS[pid]) continue; // 内置档案以本地为准（同源）
+            customProfiles[pid] = prof;
+        }
+        _apiImageCapsCustom = {profiles:customProfiles, keywords:data.custom_keywords || {}};
+        if(typeof renderDynamicParams === 'function') renderDynamicParams();
+    }catch(_){ /* 离线/旧后端：静默用镜像表 */ }
+})();
+function smartImageAllowedRatios(model){
+    return (apiImageModelCaps(model).ratios || []).map(s => String(s).toLowerCase());
+}
+// 当前比例不被该模型支持时按宽高比吸附到最近档；silent=true 时不弹提示（渲染期静默纠正）。
+function reconcileSmartImageRatio(model, opts){
+    const allowed = smartImageAllowedRatios(model);
+    if(!allowed.length) return false;
+    const current = settings.ratio || 'square';
+    if(current === 'source' || current === 'custom') return false;
+    const value = SMART_RATIO_VALUE_OF_TOKEN[current];
+    if(!value || allowed.includes(value)) return false;
+    const [cw, ch] = value.split(':').map(Number);
+    if(!cw || !ch) return false;
+    let best = '', bestDiff = Infinity;
+    allowed.forEach(token => {
+        const [aw, ah] = String(token).split(':').map(Number);
+        if(!aw || !ah) return;
+        const diff = Math.abs(Math.log((cw / ch) / (aw / ah)));
+        if(diff < bestDiff){ bestDiff = diff; best = token; }
+    });
+    const nextToken = SMART_RATIO_TOKEN_OF_VALUE[best];
+    if(!nextToken) return false;
+    settings.ratio = nextToken;
+    if(!(opts && opts.silent)){
+        const caps = apiImageModelCaps(model);
+        const textOf = token => SMART_RATIO_VALUE_OF_TOKEN[token] || token;
+        toast(`${textOf(current)} 不被 ${caps.label || model} 支持，已切到 ${textOf(nextToken)}`);
+    }
+    return true;
+}
+// 视频画幅同理：切模型时把越界的画幅吸附到最近支持档并提示。
+function reconcileSmartVideoAspect(model){
+    const caps = apiVideoModelCaps(model);
+    const allowed = (caps.ratios || []).map(s => String(s).toLowerCase());
+    if(!allowed.length) return false;
+    const current = String(settings.videoAspect || '').toLowerCase();
+    if(!current || allowed.includes(current)) return false;
+    const [cw, ch] = current.split(':').map(Number);
+    let best = '';
+    if(cw && ch){
+        let bestDiff = Infinity;
+        allowed.forEach(token => {
+            const [aw, ah] = String(token).split(':').map(Number);
+            if(!aw || !ah) return;
+            const diff = Math.abs(Math.log((cw / ch) / (aw / ah)));
+            if(diff < bestDiff){ bestDiff = diff; best = token; }
+        });
+    }
+    if(!best) best = allowed.includes('16:9') ? '16:9' : allowed[0];
+    settings.videoAspect = best;
+    toast(`画幅 ${current || 'Auto'} 不被 ${caps.label || model} 支持，已切到 ${best}`);
+    return true;
+}
 // 2026-10-19 视频时长范围按「模型」判定（此前按平台一刀切会误伤 Seedance 2.5）：
 //   Seedance 2.5 → 官方 4-30s；其他 Seedance（2.0 / 2.0-fast / 1.5-pro）→ 4-15s；非 Seedance 平台 → 1-30s。
 // 2026-10-25 改为读能力档案：H3 → 4-15s、Seedance 2.5 → 4-30s、固定档模型（Hailuo/Kling/Veo/Sora）→ ticks。
@@ -10011,7 +10134,8 @@ function renderVideoPackedControl(){
     //（H3 面板只剩 Auto）。现在有档案时直接按档案档位生成（映射成大写标签），没档案才用通用四档。
     const RES_LABELS = {'':'Auto', '480p':'480P', '768p':'768P', '720p':'720P', '1080p':'1080P', '2k':'2K', '4k':'4K'};
     const defaultResOptions = [['', 'Auto'], ['480p', '480P'], ['720p', '720P'], ['1080p', '1080P']];
-    const aspOptions = [['', 'Auto'], ['16:9','16:9'], ['4:3','4:3'], ['1:1','1:1'], ['3:4','3:4'], ['9:16','9:16'], ['21:9','21:9']];
+    // 2026-10-31 画幅顺序按「常用置前」：16:9 / 9:16 竖横两块最常用，其次 4:3 / 1:1 / 3:4，21:9 收尾。
+    const aspOptions = [['', 'Auto'], ['16:9','16:9'], ['9:16','9:16'], ['4:3','4:3'], ['1:1','1:1'], ['3:4','3:4'], ['21:9','21:9']];
     // 2026-10-25 能力档案联动：只渲染该模型支持的画幅/清晰度，越界的当前值自动归位。
     const caps = apiVideoModelCaps(settings.videoModel);
     const allowedRes = (caps.resolutions || []).map(s => String(s).toLowerCase());
@@ -10212,7 +10336,8 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
 function normalizeApiSizeSettings(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
-    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
+    // 2026-10-31 「自动」档改由能力档案决定：只有声明 auto 的模型（目前 GPT-Image-2）才保留。
+    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && apiImageModelCaps(settings.model).auto === true;
     if(!settings[resKey]) settings[resKey] = allowAuto ? 'auto' : '1k';
     if(!allowAuto && settings[resKey] === 'auto') settings[resKey] = '1k';
     if(settings[resKey] === 'auto' && !settings[ratioKey]) settings[ratioKey] = 'square';
@@ -10337,6 +10462,8 @@ function renderApiParams(){
     if(!settings.model || !models.includes(settings.model)) settings.model = models[0] || '';
     // 切换平台/模型时保留用户已选的分辨率（记忆），normalizeApiSizeSettings 只会修正非法的 auto。
     normalizeApiSizeSettings('');
+    // 2026-10-31 能力档案：当前比例若不被该模型支持，渲染期静默吸附到最近档（切模型时另给 toast）。
+    reconcileSmartImageRatio(settings.model, {silent:true});
     const outpaintLocked = settings.outpaintResolutionLocked === true;
     dynamicParams.innerHTML = `
         ${renderProviderControl(providers)}
@@ -10423,6 +10550,7 @@ function renderVolcengineParams(){
     settings.provider_id = 'volcengine';
     if(!settings.model || !models.includes(settings.model)) settings.model = models[0] || '';
     normalizeApiSizeSettings('');
+    reconcileSmartImageRatio(settings.model, {silent:true});
     const outpaintLocked = settings.outpaintResolutionLocked === true;
     dynamicParams.innerHTML = `
         ${renderProviderControl(providers)}
@@ -11411,6 +11539,8 @@ function renderComfyWorkflowControl(){
 // 比例分组：香蕉/GPT 共用在上（无注释），模型独有在下（带归属注释）。
 // 依据官方文档（2026-09）：共用 = 1:1 3:2 2:3 4:3 3:4 4:5 5:4 9:16 16:9 21:9 9:21；
 // GPT 独有 = 2:1 1:2 3:1 1:3（GPT 接受 ≤3:1 的任意比例）；香蕉 Pro 独有 = 4:1 1:4（最高 8:1）。
+// 2026-10-31 改为能力档案驱动：只保留该模型支持的档位（不再靠「（仅GPT）」后缀提示），
+// 并把常用档（1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3）按 SMART_COMMON_RATIO_ORDER 置前。
 function smartRatioOptionsForModel(model){
     const shared = [
         ['square', '1:1'], ['landscape', '3:2'], ['portrait', '2:3'],
@@ -11420,15 +11550,20 @@ function smartRatioOptionsForModel(model){
     ];
     const gptOnly = [['2:1', '2:1'], ['1:2', '1:2'], ['3:1', '3:1'], ['1:3', '1:3']];
     const proOnly = [['4:1', '4:1'], ['1:4', '1:4']];
-    const isGpt = isGptImageAutoSizeModel(model);
-    const isPro = isNanoBananaProModel(model);
-    const gptSuffix = isGpt ? '' : '（仅GPT）';
-    const proSuffix = isPro ? '' : (isNanoBananaModel(model) ? '（仅Pro）' : '（仅香蕉Pro）');
-    return [
-        ...shared,
-        ...gptOnly.map(([v, l]) => [v, l + gptSuffix]),
-        ...proOnly.map(([v, l]) => [v, l + proSuffix])
-    ];
+    const all = [...shared, ...gptOnly, ...proOnly];
+    const allowed = smartImageAllowedRatios(model);
+    const visible = allowed.length
+        ? all.filter(([token]) => allowed.includes(String(SMART_RATIO_VALUE_OF_TOKEN[token] || '').toLowerCase()))
+        : all;
+    const rank = value => {
+        const index = SMART_COMMON_RATIO_ORDER.indexOf(value);
+        return index < 0 ? SMART_COMMON_RATIO_ORDER.length : index;
+    };
+    // 常用置前，同组内保持原有相对顺序（用原始下标兜底，避免依赖 sort 稳定性）
+    return visible
+        .map(([token, label], order) => ({token, label, order, value: SMART_RATIO_VALUE_OF_TOKEN[token] || label}))
+        .sort((a, b) => (rank(a.value) - rank(b.value)) || (a.order - b.order))
+        .map(entry => [entry.token, entry.label]);
 }
 function renderSizeControls(prefix='', includeSource=false){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
@@ -11679,7 +11814,8 @@ function renderResolutionControl(prefix=''){
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k','custom'] : ['1k','2k','4k','custom'];
     const current = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
-    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
+    // 2026-10-31 「自动」档改由能力档案决定：只有声明 auto 的模型（目前 GPT-Image-2）才保留。
+    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && apiImageModelCaps(settings.model).auto === true;
     return `<div class="smart-control resolution-control">
         <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(resolutionLabel(prefix))}</span></button>
         <div class="smart-popover compact-popover">
@@ -11740,7 +11876,8 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k'] : ['1k','2k','4k'];
     const currentRes = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const currentRatio = settings[ratioKey] || 'square';
-    const allowAuto = !prefix && includeSource && settings.apiKind !== 'video';
+    // 2026-10-31 「自动」档改由能力档案决定（仅声明 auto 的模型可点，目前 GPT-Image-2）
+    const allowAuto = !prefix && includeSource && settings.apiKind !== 'video' && apiImageModelCaps(settings.model).auto === true;
     const sourceRatioText = sourceImageRatioLabel(prefix);
     const sourceRatioForSize = settings[prefix ? `${prefix}CustomRatio` : 'customRatio'] || sourceRatioText || '';
     // 与底部参数栏同一套分组：共用在上（无注释），模型独有在下（带归属注释）
@@ -12496,6 +12633,9 @@ function setDynamicSetting(key, value){
     if(key === 'count') syncActiveSmartCount(settings.count);
     persistActiveSmartSettings();
     rememberRecentSmartSettings(settings, activeSettingsSubject());
+    // 2026-10-31 切换模型时把越界的比例/画幅吸附到最近支持档，并明确提示（渲染期是静默的）
+    if(key === 'model') reconcileSmartImageRatio(settings.model);
+    if(key === 'videoModel') reconcileSmartVideoAspect(settings.videoModel);
     if(layoutKeys.has(key)) renderDynamicParams();
     if(['ratio','videoAspect','msRatio','resolution','videoResolution','msResolution','customRatio','customSize','msCustomRatio','msCustomSize'].includes(key)){
         refreshGenNodeBoxSizes();

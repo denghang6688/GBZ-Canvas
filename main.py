@@ -15648,6 +15648,9 @@ async def fetch_upstream_models(provider_id: str):
     return await fetch_models_from_upstream(provider.get("base_url") or "", api_key, provider_protocol(provider), provider.get("image_request_mode") or "openai")
 
 async def build_online_image_result(payload: OnlineImageRequest):
+    # 2026-10-31 图片能力档案兜底：比例明显偏离该模型支持集时吸附（前端已按档案过滤，
+    # 这里防的是旧缓存页面 / 直接调接口的场景）。
+    image_caps = apply_image_model_caps(payload)
     provider = get_api_provider(payload.provider_id)
     default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
     model = selected_model(payload.model, default_model)
@@ -15701,6 +15704,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
+    if image_caps.get("adjusted_size"):
+        result["image_caps"] = {"profile": image_caps.get("profile"), "ratio": image_caps.get("ratio_hint"), "size": image_caps.get("adjusted_size")}
     save_to_history(result)
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
@@ -17549,6 +17554,127 @@ async def api_video_model_caps():
         "keywords": {k: v for k, v in VIDEO_MODEL_CAP_KEYWORDS},
         "custom_keywords": overrides.get("keywords") or {},
         "fallback": VIDEO_MODEL_CAPS_FALLBACK,
+    }
+
+# ==================== 2026-10-31 图片模型能力档案（与视频同一套机制）====================
+# 与 VIDEO_MODEL_CAPS_PROFILES 同构，只是字段更少：
+#   ratios  该模型实际接受的比例（"w:h"）；空列表 = 不限制（兜底，与历史行为一致）
+#   auto    是否支持「自动尺寸」档（前端「自动」按钮按此禁用）
+# - 前端：GET /api/image/model-caps 下发给尺寸面板，只渲染支持的档位 + 常用置前。
+# - 生成端：apply_image_model_caps 对 size 兜底吸附（偏差 > 8% 才改，2-8% 只给 hint），
+#   前端被绕过时不至于把明显不合规的比例发给上游，同时不破坏「自定义分辨率」。
+# - 自定义覆盖：data/model_caps.json 的 image_profiles / image_keywords，改完即生效。
+IMAGE_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
+    "jimeng-seedream": {
+        "label": "即梦 Seedream",
+        # 2026-10-31：CLI help 列出的 8 档，--ratio=9:16 实测出 1080×1920 已验。
+        "ratios": ["21:9", "16:9", "3:2", "4:3", "1:1", "3:4", "2:3", "9:16"],
+        "auto": False,
+    },
+    "gpt-image-2": {
+        "label": "GPT-Image-2",
+        # 代码既有注释：接受 ≤3:1 的任意比例（含 16:9 / 9:16 / 21:9），
+        # 只有 4:1 / 1:4 这类超过 3:1 的档不支持。
+        "ratios": ["1:1", "3:2", "2:3", "4:3", "3:4", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21", "2:1", "1:2", "3:1", "1:3"],
+        "auto": True,
+    },
+    "gpt-image-1": {
+        "label": "GPT-Image-1",
+        "ratios": ["1:1", "3:2", "2:3"],
+        "auto": False,
+    },
+    "nano-banana-pro": {
+        "label": "Nano Banana Pro",
+        # 通用 10 档 + Pro 独有 4:1 / 1:4（最高 8:1）。
+        "ratios": ["1:1", "3:2", "2:3", "4:3", "3:4", "4:5", "5:4", "16:9", "9:16", "21:9", "4:1", "1:4"],
+        "auto": False,
+    },
+    "nano-banana": {
+        "label": "Nano Banana",
+        "ratios": ["1:1", "3:2", "2:3", "4:3", "3:4", "4:5", "5:4", "16:9", "9:16", "21:9"],
+        "auto": False,
+    },
+}
+# 顺序敏感：更具体的关键词必须排在更宽泛的前面（gpt-image-2 > gpt-image、gemini-3-pro-image > pro-image）。
+IMAGE_MODEL_CAP_KEYWORDS: List[Tuple[str, str]] = [
+    ("seedream", "jimeng-seedream"),
+    ("jimeng", "jimeng-seedream"),
+    ("即梦", "jimeng-seedream"),
+    ("gpt-image-2", "gpt-image-2"),
+    ("gptimage2", "gpt-image-2"),
+    ("gpt-image", "gpt-image-1"),
+    ("gemini-3-pro-image", "nano-banana-pro"),
+    ("banana-pro", "nano-banana-pro"),
+    ("bananapro", "nano-banana-pro"),
+    ("banana", "nano-banana"),
+    ("flash-image", "nano-banana"),
+    ("pro-image", "nano-banana"),
+]
+IMAGE_MODEL_CAPS_FALLBACK: Dict[str, Any] = {"label": "未识别模型（不收窄）", "ratios": [], "auto": False}
+
+def image_model_caps(model_name: str, provider_id: str = "") -> Dict[str, Any]:
+    """模型名 → 图片能力档案。优先级：即梦平台 > 精确 ID > 关键词 > data/model_caps.json 自定义 > 兜底。"""
+    overrides = _video_model_caps_overrides()
+    profiles = {**IMAGE_MODEL_CAPS_PROFILES, **(overrides.get("image_profiles") or {})}
+    pid_hint = str(provider_id or "").lower()
+    if "jimeng" in pid_hint or "dreamina" in pid_hint:
+        return {"profile": "jimeng-seedream", **profiles.get("jimeng-seedream", IMAGE_MODEL_CAPS_PROFILES["jimeng-seedream"])}
+    keywords = list(IMAGE_MODEL_CAP_KEYWORDS) + [
+        (str(k).lower(), str(v)) for k, v in (overrides.get("image_keywords") or {}).items()
+    ]
+    name = re.sub(r"[\s_./]+", "-", str(model_name or "").lower()).strip("-")
+    for pid, prof in profiles.items():
+        if name == pid or name.startswith(pid + "-"):
+            return {"profile": pid, **prof}
+    for keyword, pid in keywords:
+        if keyword and keyword in name and pid in profiles:
+            return {"profile": pid, **profiles[pid]}
+    return {"profile": "fallback", **IMAGE_MODEL_CAPS_FALLBACK}
+
+def apply_image_model_caps(payload: OnlineImageRequest) -> Dict[str, Any]:
+    """生成前按档案校验 pixel size 的宽高比。返回命中的档案（可能带 ratio_hint / adjusted_size）。
+
+    保守策略：偏差 ≤8% 视为「同一比例的不同像素档」，只记录 hint 不改 size；
+    超过 8%（例如 9:21 发给只认 8 档的即梦）才按最近的支持档吸附，保持长边像素不变。
+    """
+    caps = image_model_caps(payload.model, payload.provider_id)
+    allowed = [str(r).strip() for r in (caps.get("ratios") or [])]
+    if not allowed:
+        return caps
+    width, height = parse_size_pair(payload.size)
+    if not width or not height:
+        return caps
+    pairs: List[Tuple[int, int, str]] = []
+    for token in allowed:
+        try:
+            left, right = (int(part) for part in token.split(":")[:2])
+        except (TypeError, ValueError):
+            continue
+        if left > 0 and right > 0:
+            pairs.append((left, right, token))
+    if not pairs or any(width * right == height * left for left, right, _ in pairs):
+        return caps
+    left, right, token = min(pairs, key=lambda item: abs(width * item[1] - height * item[0]) / float(height * item[0]))
+    drift = abs(width * right - height * left) / float(height * left)
+    if drift <= 0.08:
+        return {**caps, "ratio_hint": token}
+    long_edge = max(width, height)
+    if width >= height:
+        new_w, new_h = long_edge, max(16, int(round(long_edge * right / left / 16.0)) * 16)
+    else:
+        new_h, new_w = long_edge, max(16, int(round(long_edge * left / right / 16.0)) * 16)
+    payload.size = f"{new_w}x{new_h}"
+    return {**caps, "ratio_hint": token, "adjusted_size": payload.size}
+
+@app.get("/api/image/model-caps")
+async def api_image_model_caps():
+    """下发图片模型能力档案：前端尺寸面板按此过滤档位（与生成端校验同源）。"""
+    overrides = _video_model_caps_overrides()
+    return {
+        "profiles": {**IMAGE_MODEL_CAPS_PROFILES, **(overrides.get("image_profiles") or {})},
+        "keywords": {k: v for k, v in IMAGE_MODEL_CAP_KEYWORDS},
+        "custom_keywords": overrides.get("image_keywords") or {},
+        "fallback": IMAGE_MODEL_CAPS_FALLBACK,
     }
 
 @app.post("/api/canvas-video")
