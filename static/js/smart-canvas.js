@@ -1003,6 +1003,7 @@ const SMART_LOD_SRC_STEPS = [16, 32, 64, 128];
 let smartLodLow = false;            // 当前是否处于低清档
 let smartLodSrcCache = new WeakMap();
 let smartLodSrcScaleBar = 0;         // 上次挑源时的缩放，用于低清档内部换档
+let smartSelSigCache = null;         // 上次同步时的选中集合签名（见 smartSelectionSignature）
 function smartMediaPreviewUrl(itemOrUrl, size=512){
     const raw = smartOriginalMediaUrl(itemOrUrl);
     const displayItem = typeof itemOrUrl === 'object' && itemOrUrl ? {...itemOrUrl, url:raw} : raw;
@@ -1032,7 +1033,17 @@ function smartPreviewImgHtml(itemOrUrl, size=512, attrs='', lodAware=false){
     // render 就能直接给小源，省掉「先下 768 再换掉」的往返。
     const lodScale = (typeof viewport !== 'undefined' && viewport) ? viewport.scale : 1;
     const useLow = lodAware && smartLodShouldBeLow(lodScale);
-    const src = useLow ? smartMediaPreviewUrl(itemOrUrl, SMART_LOD_SRC_STEPS[0]) : preview;
+    // 档位按「首屏这一刻的缩放」估算（单图节点短边 280，×dpr，同 smartLodSrcWidthFor 口径）。
+    // 之前这里恒取最小档 16，19% 附近 render 出来的新图会比老的糊一截。
+    // 渲染时拿不到真实长宽比，先按短边算（对长图偏保守=略糊，方向正确），
+    // sync 首跑会用真实 rect 纠正。
+    let lodStep = SMART_LOD_SRC_STEPS[0];
+    if(useLow){
+        const need = 280 * Math.max(0.01, Math.min(1, Number(lodScale) || 1)) * (window.devicePixelRatio || 1);
+        lodStep = SMART_LOD_SRC_STEPS[SMART_LOD_SRC_STEPS.length - 1];
+        for(const step of SMART_LOD_SRC_STEPS){ if(need <= step){ lodStep = step; break; } }
+    }
+    const src = useLow ? smartMediaPreviewUrl(itemOrUrl, lodStep) : preview;
     return `<img src="${escapeHtml(src)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${useLow ? ' data-lod-dim="1"' : ''}${attrs ? ` ${attrs}` : ''}>`;
 }
 function loadSmartOriginalImageDimensions(url){
@@ -2195,21 +2206,38 @@ function smartLodShouldBeLow(scale){
     const s = Math.max(0.01, Number(scale) || 1);
     return smartLodLow ? s < SMART_LOD_ENTER_SCALE : s < SMART_LOD_EXIT_SCALE;
 }
-function smartLodSrcWidthFor(imgEl, nodeEl){
-    // 屏幕上这张图会有多宽（乘 dpr 才是真实像素需求）。低清档只给需求的 ~50%，
-    // 剩下的靠 blur 盖住——纯降采样看着是「马赛克」，加一点失焦才像参考稿。
-    const rect = imgEl?.getBoundingClientRect?.();
-    const cssW = rect && rect.width > 0 ? rect.width : 280;
-    const need = cssW * (window.devicePixelRatio || 1) * 0.5;
-    let out = SMART_LOD_SRC_STEPS[0];
-    for(const step of SMART_LOD_SRC_STEPS){ if(need >= step) out = step; }
+function smartLodSrcWidthFor(imgEl, nodeEl, nodesById){
+    // 2026-10-31（用户反馈：参考产品 10% 时只有长图糊，方图基本不糊）——
+    // 原来按「宽度 × dpr × 0.5」挑源：等于人为把所有图都砍掉一半像素，方图也被糊成一团。
+    // 现在按「屏幕上最长的那条边」要像素，一次给够：方图 28×28 要点 56px 就给 64，看着是清楚的；
+    // 长图长边 28×112 要 224px，档位封顶 128，只能放大 1.75 倍——糊不糊由像素缺口自然决定，
+    // 不再靠一层统一的 blur 硬盖。这才是参考稿那种「只有长图才糊」的观感。
+    //
+    // 尺寸优先取节点对象上的 w/h（世界坐标 × 当前缩放），不看 DOM：选中/取消选中那一下
+    // 图片会重排，getBoundingClientRect 与 naturalWidth 可能是旧值/0，会让同一张图在
+    // 64 与 128 之间来回跳。节点数据不受渲染时序影响。
+    let longCss = 0;
+    const node = (nodesById && nodeEl?.dataset?.id) ? nodesById.get(nodeEl.dataset.id) : null;
+    if(node && Number(node.w) > 0 && Number(node.h) > 0){
+        longCss = Math.max(Number(node.w), Number(node.h)) * safeScale(viewport.scale);
+    }
+    if(!(longCss > 0)){
+        const rect = imgEl?.getBoundingClientRect?.();
+        const cw = rect && rect.width > 0 ? rect.width : 280;
+        const nw = imgEl?.naturalWidth || 0, nh = imgEl?.naturalHeight || 0;
+        const ratio = (nw > 0 && nh > 0) ? (nh / nw) : 1;
+        longCss = ratio > 1 ? cw * ratio : cw;
+    }
+    const need = longCss * (window.devicePixelRatio || 1);
+    let out = SMART_LOD_SRC_STEPS[SMART_LOD_SRC_STEPS.length - 1];
+    for(const step of SMART_LOD_SRC_STEPS){ if(need <= step){ out = step; break; } }
     return out;
 }
-function smartLodSrcFor(imgEl){
+function smartLodSrcFor(imgEl, nodeEl, nodesById){
     const original = imgEl?.dataset?.originalSrc || '';
     if(!original) return '';
     const cached = smartLodSrcCache.get(imgEl);
-    const width = smartLodSrcWidthFor(imgEl);
+    const width = smartLodSrcWidthFor(imgEl, nodeEl, nodesById);
     if(cached && cached.width === width && cached.original === original) return cached.src;
     const src = smartMediaPreviewUrl(original, width);
     smartLodSrcCache.set(imgEl, {width, original, src});
@@ -2240,6 +2268,17 @@ function preloadSmartSelectedHighRes(src){
     smartSelectedHighResLoading.set(src, task);
     return task;
 }
+// 选中集合签名：用于让 syncSmartSelectedImageResolution 判断「这次需不需要全量重算」。
+// 只看 id 拼接，不碰 DOM、不读几何，代价可以忽略。
+function smartSelectionSignature(){
+    let multi = '';
+    try {
+        if(typeof selectedIds !== 'undefined' && selectedIds && selectedIds.length) multi = [...selectedIds].sort().join(',');
+    } catch(e) {}
+    let single = '';
+    try { if(typeof selectedId !== 'undefined' && selectedId) single = String(selectedId); } catch(e) {}
+    return single + '|' + multi;
+}
 function smartImageNeedsHighRes(img, nodeEl){
     if(nodeEl?.dataset?.id && isNodeSelected(nodeEl.dataset.id)) return true;
     const rect = img?.getBoundingClientRect?.();
@@ -2250,13 +2289,33 @@ function smartImageNeedsHighRes(img, nodeEl){
     const displayLongSide = Math.max(rect.width, rect.height) * (window.devicePixelRatio || 1);
     return viewport.scale >= 1.35 || displayLongSide >= 900;
 }
+// 档位状态更新（O(1)、不碰 DOM 几何）：applyViewport 每帧都要立即生效，
+// 否则 render 时 smartPreviewImgHtml 读到的档位会滞后一帧。
+function updateSmartLodState(){
+    const lodLow = smartLodShouldBeLow(viewport.scale);
+    const changed = (lodLow !== smartLodLow);
+    smartLodLow = lodLow;
+    if(changed && world && world.classList) world.classList.toggle('smart-lod-low', lodLow);
+    return { lodLow, changed };
+}
+// 2026-10-31：高清档（≥21%）原来的 sync 也是每帧全量跑，120 张图 = 每帧 120 次
+// getBoundingClientRect，实测缩放只有 6.8fps。缩放过程中「哪张图该升级到原图」晚 100ms
+// 判定完全看不出来（这段时间挂的是 768 预览，本来就清晰），所以整体改成防抖：
+// 停下 100ms 再一次性算完。点击/选中路径仍走同步调用，保证立刻高清。
+let smartSelectedSyncTimer = 0;
+function scheduleSmartSelectedImageSync(delay=100){
+    if(smartSelectedSyncTimer) clearTimeout(smartSelectedSyncTimer);
+    smartSelectedSyncTimer = setTimeout(() => {
+        smartSelectedSyncTimer = 0;
+        syncSmartSelectedImageResolution(world);
+    }, delay);
+}
 function syncSmartSelectedImageResolution(root=world){
     // 2026-10-31（低清 LOD）：先在这里定档位，再按档位决定每张图挂哪个源。
     // 只用 class 与目标状态不一致的才重算 src —— 滚轮缩放会连续触发本函数，
     // 每张图都 getBoundingClientRect + 改 src 会把缩放拖成幻灯片。
-    const lodLow = smartLodShouldBeLow(viewport.scale);
-    smartLodLow = lodLow;
-    if(world && world.classList) world.classList.toggle('smart-lod-low', lodLow);
+    const lodState = updateSmartLodState();
+    const lodLow = lodState.lodLow, lodChanged = lodState.changed;
     // 低清档内部还要按缩放挑档：12% 用 16px、19% 用 32px，否则「越放大越糊」。
     // 只有缩放相对变化超过 25% 才重挑一次，避免滚轮连续滚动时每帧改 src。
     const lodScaleNow = safeScale(viewport.scale);
@@ -2265,7 +2324,28 @@ function syncSmartSelectedImageResolution(root=world){
         smartLodSrcScaleBar = lodScaleNow;
         lodRescaleAll = true;
     }
+    // 2026-10-31（实测出来的真凶）：本函数每个 img 都要 getBoundingClientRect，
+    // 120 张图在滚轮缩放时就是每帧 120 次强制同步布局 —— 实测 12% 缩放只有 6.9fps，
+    // 而平移有 60fps（平移走 applyViewport({pan}) 会跳过这里）。
+    // 低清档里只要「档位没变 + 源档位没变 + 选中没变」，结论就不可能变：
+    // 低清档最高 20%，屏幕长边撑死 280×0.2×2≈112px，永远到不了 900px 自动升级线，
+    // 也没有节点会需要原图。直接返回，把每帧让给合成器。
+    const selSig = smartSelectionSignature();
+    const selChanged = selSig !== smartSelSigCache;
+    smartSelSigCache = selSig;
+    // 选中/取消选中会让节点尺寸变（选中态有边距与工具条），档位得按新尺寸重挑一次，
+    // 否则取消选中后那张图会停在选中前的小档、肉眼可见比邻居糊。
+    if(selChanged) lodRescaleAll = true;
+    if(lodLow && !lodChanged && !lodRescaleAll && !selChanged) return;
     const highResImages = [];
+    // id → 节点 的临时索引：低清档挑源要用节点 w/h（比读 DOM 稳定，见 smartLodSrcWidthFor）
+    let nodesById = null;
+    try {
+        if(typeof nodes !== 'undefined' && Array.isArray(nodes)){
+            nodesById = new Map();
+            nodes.forEach(n => { if(n && n.id) nodesById.set(n.id, n); });
+        }
+    } catch(e) { nodesById = null; }
     root.querySelectorAll?.('.image-node img[data-preview-src][data-original-src]').forEach(img => {
         if(img.dataset.previewKind === 'video') return;
         const nodeEl = img.closest('.image-node');
@@ -2278,7 +2358,7 @@ function syncSmartSelectedImageResolution(root=world){
             const isLow = img.dataset.lodDim === '1';
             if(wantLow !== isLow || (lodRescaleAll && wantLow)){
                 if(wantLow) img.dataset.lodDim = '1'; else delete img.dataset.lodDim;
-                const want = wantLow ? (smartLodSrcFor(img) || preview) : preview;
+                const want = wantLow ? (smartLodSrcFor(img, nodeEl, nodesById) || preview) : preview;
                 if(want && img.getAttribute('src') !== want){
                     img.dataset.lodSwapAt = String(Date.now());
                     img.src = want;
@@ -7503,7 +7583,10 @@ function applyViewport(options={}){
     updateSmartZoomPanel();
     // 平移期间跳过「选中图高清升级」：缩放没变、结论不会变，而它每帧都要遍历全画布
     // 100+ 张图并读真实矩形。平移结束时（clearCanvasPanState）会补跑一次。
-    if(!options.pan) syncSmartSelectedImageResolution(world);
+    // 2026-10-31：缩放期间也改成防抖了（见 scheduleSmartSelectedImageSync 注释）。
+    // 档位状态（低清/高清）本身是 O(1) 计算，这里每帧立即更新，保证 class 与渲染口径不滞后。
+    updateSmartLodState();
+    if(!options.pan) scheduleSmartSelectedImageSync();
     // 2026-10-30（用户反馈拖动变卡）：平移期间冻结视口外裁剪。平移中节点不断进出裁剪
     // 边界，content-visibility 反复挂/摘会反复重建合成层（Layerize 实测是平移开销最大头，
     // 4 秒里 913ms），表现为拖画布一卡一卡。平移结束时 clearCanvasPanState →
