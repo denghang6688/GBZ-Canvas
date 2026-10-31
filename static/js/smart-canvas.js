@@ -7317,20 +7317,23 @@ function openArrangeModePicker(ids, anchorEl){
         });
     });
 }
-// 排列后只「平移居中」，不做整画布 fit：
-// fitAllNodesViewport 会把画布上所有节点（含远处没选中的）一起算进包围盒，
-// 结果选中的那一组被压成中间一小条 —— 就是用户截图里「切最大化显示」的问题。
-// 这里档位等同预览里的「居中不缩放」：scale 不动，只有布局本身装不下时才按选中区域降。
+// 排列后只「平移」，绝不改缩放：
+// 1) 不能用 fitAllNodesViewport —— 它把画布上所有节点（含远处没选中的）一起算进包围盒，
+//    选中的那一组被压成中间一小团，就是用户说的「又最大化显示了」。
+// 2) 也不能「装不下就按选中区域降 scale」（上一版的口径）—— 选中 20 个节点竖排时，
+//    包围盒高一两万，fitScale 只有 5%~8%，排完照样整屏缩成小点。
+// 所以：scale 原样保留；排得进视口就居中，排不进就从左上角起（贴 pad），
+// 让用户从第一个节点开始顺着看，缩放始终由用户自己控制。
 function centerArrangedViewport(box){
     if(!box || !box.w || !box.h) return;
     const vw = shell.clientWidth || window.innerWidth;
     const vh = shell.clientHeight || window.innerHeight;
     const pad = 72;
-    const fitScale = Math.min((vw - pad * 2) / box.w, (vh - pad * 2) / box.h);
-    const nextScale = clampSmartCanvasZoom(Math.max(0.06, Math.min(viewport.scale, fitScale)));
-    viewport.scale = nextScale;
-    viewport.x = vw / 2 - (box.x + box.w / 2) * nextScale;
-    viewport.y = vh / 2 - (box.y + box.h / 2) * nextScale;
+    const scale = viewport.scale;
+    const fitsW = box.w * scale <= vw - pad * 2;
+    const fitsH = box.h * scale <= vh - pad * 2;
+    viewport.x = fitsW ? vw / 2 - (box.x + box.w / 2) * scale : pad - box.x * scale;
+    viewport.y = fitsH ? vh / 2 - (box.y + box.h / 2) * scale : pad - box.y * scale;
     applyViewport();
     scheduleSave();
 }
