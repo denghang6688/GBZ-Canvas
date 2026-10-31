@@ -24057,6 +24057,145 @@ async def depth_capture_task(task_id: str):
     return {k: v for k, v in task.items() if k != "src_path"} | {"status": status}
 
 
+# ===================== 图像 · 导出深度图（2026-10-31） =====================
+# 复用视频深度捕捉的同一颗 ONNX 模型（depth-anything-v2-small）跑单帧，同步返回（单图 2-4 秒）。
+# 色带：gray（近白远黑）/ inv（近黑远白）/ turbo（彩色，展示用）；位深 8/16-bit，16-bit 强制灰度。
+
+_TURBO_POLY = {
+    "r": [0.13572138, 4.61539260, -42.66032258, 132.13108234, -152.94239396, 59.28637943],
+    "g": [0.09140261, 2.19418839, 4.84296658, -14.18503333, 4.27729857, 2.82956604],
+    "b": [0.10667330, 12.64194608, -60.58204836, 110.36276771, -89.90310912, 27.34824973],
+}
+
+
+def _turbo_lut() -> "np.ndarray":
+    """Turbo colormap 多项式近似（Google turbo），返回 256×3 uint8 LUT。"""
+    import numpy as np
+    xs = np.linspace(0.0, 1.0, 256, dtype=np.float64)
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    for ch, key in enumerate(("r", "g", "b")):
+        poly = _TURBO_POLY[key]
+        v = np.full_like(xs, poly[-1])
+        for c in reversed(poly[:-1]):
+            v = v * xs + c
+        lut[:, ch] = np.clip(v * 255.0, 0, 255).astype(np.uint8)
+    return lut
+
+
+class DepthImageRequest(BaseModel):
+    url: str
+    colormap: str = "gray"    # gray | inv | turbo
+    resolution: str = "auto"  # auto | 768 | 512
+    bit_depth: str = "8"      # 8 | 16
+
+
+def _depth_image_worker(src_path: str, colormap: str, infer_w: int, bit16: bool):
+    """单图推理 + 落盘，返回 (output_path, w, h)。"""
+    import numpy as np
+    import onnxruntime as ort
+    from PIL import Image, ImageOps
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] \
+        if "CUDAExecutionProvider" in ort.get_available_providers() else ["CPUExecutionProvider"]
+    sess = ort.InferenceSession(DEPTH_MODEL_PATH, providers=providers)
+    input_name = sess.get_inputs()[0].name
+
+    with Image.open(src_path) as fp:
+        frame = ImageOps.exif_transpose(fp).convert("RGB")
+    w0, h0 = frame.size
+    h = max(14, int(round(h0 * infer_w / max(w0, 1) / 14.0)) * 14)
+    im = frame.resize((infer_w, h), Image.BICUBIC)
+    mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+    std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
+    arr = (np.asarray(im).astype(np.float32) - mean) / std
+    tensor = arr.transpose(2, 0, 1)[None]
+    depth = sess.run(None, {input_name: tensor})[0][0]
+    dmin, dmax = float(depth.min()), float(depth.max())
+    depth = (depth - dmin) / (dmax - dmin + 1e-8)
+
+    out_name = f"depth_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
+    out_path = os.path.join(OUTPUT_OUTPUT_DIR, out_name)
+    if bit16:
+        # 16-bit 只出灰度（色带是 8-bit 展示用的，16 位里塞彩色没有意义）
+        arr16 = (np.clip(depth, 0.0, 1.0) * 65535.0).astype(np.uint16)
+        Image.fromarray(arr16, mode="I;16").resize((w0, h0), Image.BICUBIC).save(out_path, optimize=True)
+    else:
+        u8 = (np.clip(depth, 0.0, 1.0) * 255.0).astype(np.uint8)
+        if colormap == "inv":
+            u8 = 255 - u8
+        elif colormap == "turbo":
+            u8 = _turbo_lut()[u8]
+        pil = u8 if u8.ndim == 2 else Image.fromarray(u8, "RGB")
+        if u8.ndim == 2:
+            pil = Image.fromarray(u8, mode="L")
+        pil.resize((w0, h0), Image.BICUBIC).save(out_path, optimize=True)
+    return out_path, w0, h0
+
+
+@app.post("/api/depth-capture/image")
+async def depth_capture_image(payload: DepthImageRequest):
+    if not _depth_deps_ready():
+        raise HTTPException(status_code=409, detail="推理依赖未就绪，请先完成准备（打开视频深度面板点「准备模型」）")
+    if not _depth_model_ready():
+        raise HTTPException(status_code=409, detail="深度模型未就绪，请先完成准备下载")
+    if payload.colormap not in ("gray", "inv", "turbo"):
+        raise HTTPException(status_code=400, detail="不支持的色带")
+    if payload.resolution not in ("auto", "768", "512"):
+        raise HTTPException(status_code=400, detail="不支持的推理精度")
+    bit16 = str(payload.bit_depth) == "16"
+
+    src_path = output_file_from_url(payload.url)
+    tmpdl = ""
+    if not src_path:
+        raw = str(payload.url or "").strip()
+        if not re.match(r"^https?://", raw):
+            raise HTTPException(status_code=404, detail="图片文件不存在")
+        # 远程图（画布外链）：转存到 output 再推理
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                resp = await client.get(raw)
+                resp.raise_for_status()
+                ctype = resp.headers.get("content-type", "")
+                if "image" not in ctype:
+                    raise HTTPException(status_code=415, detail="远程地址不是图片")
+                if len(resp.content) > 64 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="远程图片超过 64MB")
+            ext = ".png"
+            m = re.search(r"\.(png|jpe?g|webp|bmp|tiff?)(?:[?#]|$)", raw, re.I)
+            if m:
+                ext = "." + ("jpg" if m.group(1).lower().startswith("jp") else m.group(1).lower())
+            tmpdl = os.path.join(OUTPUT_OUTPUT_DIR, f"depth_src_{uuid.uuid4().hex[:10]}{ext}")
+            os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
+            with open(tmpdl, "wb") as f:
+                f.write(resp.content)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"远程图片下载失败：{str(exc)[:160]}")
+        src_path = tmpdl
+
+    infer_w = 518
+    if payload.resolution in ("768", "512"):
+        infer_w = int(payload.resolution)
+    try:
+        out_path, w0, h0 = await asyncio.to_thread(
+            _depth_image_worker, src_path, payload.colormap, infer_w, bit16
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"深度推理失败：{str(exc)[:200]}")
+    finally:
+        if tmpdl and os.path.isfile(tmpdl):
+            try:
+                os.remove(tmpdl)
+            except OSError:
+                pass
+    if not os.path.isfile(out_path):
+        raise HTTPException(status_code=500, detail="深度图写入失败")
+    out_url = output_url_for(os.path.basename(out_path), "output")
+    return {"ok": True, "url": out_url, "width": w0, "height": h0, "bit_depth": "16" if bit16 else "8"}
+
+
 if __name__ == "__main__":
     import uvicorn
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，

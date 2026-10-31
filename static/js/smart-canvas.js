@@ -21335,6 +21335,8 @@ function smartNodeToolbarHtml(node){
             {key:'download-all', icon:'archive', label:'批量下载', enabled:mediaCount > 0},
             {key:'resize-batch', icon:'ruler', label:'改尺寸', enabled:imageCount > 0},
             {key:'ungroup', icon:'ungroup', label:'解开组件', enabled:mediaCount > 1},
+            // 2026-10-31 多图组批量导出深度图：逐张本地推理，汇总成新的组合节点
+            {key:'depth-batch', icon:'layers', label:'批量深度图', enabled:imageCount > 0},
             {key:'delete', icon:'trash-2', label:'删除', enabled:true}
         ];
     } else if(kind === 'image' && lpPlanForNode(node)){
@@ -21367,6 +21369,8 @@ function smartNodeToolbarHtml(node){
             {key:'annotate', icon:'message-square-plus', label:'标注', enabled:canEditImage},
             {key:'transform', icon:'flip-horizontal-2', label:'旋转 / 镜像', enabled:canEditImage},
             {key:'grid', icon:'grid-3x3', label:gridLabel, enabled:canEditImage},
+            // 2026-10-31 图像导出深度图：内置 ONNX 模型本地推理（复用视频深度捕捉基建）
+            {key:'depth-image', icon:'layers', label:'导出深度图', enabled:true},
             ...(canClearGeneratedOutput ? [{key:'clear-output', icon:'trash-2', label:'删除结果', enabled:true}] : []),
             {key:'download', icon:'download', label:'下载', enabled:true}
         ];
@@ -21406,7 +21410,7 @@ function smartNodeToolbarHtml(node){
         } else {
         // 高频键外露，其余收「更多」。单图节点：预览/裁剪/扩图/局部编辑（4 键，全展开会超 900px）。
         const SMM_EXPOSED = ['preview', 'crop', 'outpaint', 'local'];
-        const SMM_MORE = ['resize', 'brush', 'annotate', 'transform', 'grid', 'clear-output'];
+        const SMM_MORE = ['resize', 'brush', 'annotate', 'transform', 'grid', 'depth-image', 'clear-output'];
         const main = actions.filter(a => SMM_EXPOSED.includes(a.key));
         const more = actions.filter(a => SMM_MORE.includes(a.key));
         const tail = actions.filter(a => a.key === 'download');
@@ -21664,6 +21668,21 @@ function runSmartNodeToolbarAction(nodeId, action){
         const depthUrl = item?.url || '';
         if(!depthUrl){ toast('视频地址缺失，无法深度捕捉'); return; }
         openSmartDepthCapturePanel(depthUrl, nodeId);
+        return;
+    }
+    if(action === 'depth-image'){
+        // 2026-10-31 图像导出深度图：单张图走面板（可调色带/精度/位深/导出方式）
+        const dUrl = item?.url || '';
+        if(!dUrl){ toast('图片地址缺失，无法导出深度图'); return; }
+        openImageDepthExportPanel(dUrl, nodeId, index);
+        return;
+    }
+    if(action === 'depth-batch'){
+        // 2026-10-31 多图组批量导出深度图：逐张推理（灰度 8-bit 自动档），汇总成组合节点
+        const batchImgs = (node.images || []).map(imageForDisplay).filter(i => i?.url && mediaKindForItem(i) === 'image');
+        if(!batchImgs.length){ toast('没有可导出的图片'); return; }
+        if(batchImgs.length === 1){ openImageDepthExportPanel(batchImgs[0].url, nodeId, 0); return; }
+        runImageDepthBatch(nodeId, batchImgs);
         return;
     }
     if(action === 'topaz'){
@@ -43667,6 +43686,370 @@ function smartDepthCreateResultNode(outputUrl, nodeId, mode){
         scheduleSave();
         toast('深度视频已生成，但节点创建失败');
     }
+}
+
+// ===================== 图像 · 导出深度图（2026-10-31） =====================
+// 复用视频深度捕捉的模型与准备流程（/api/depth-capture/status、/prepare），
+// 推理走新的同步端点 /api/depth-capture/image（单图 2-4 秒）。面板结构抄 dcap（视觉语言一致）。
+let smartDepthImagePanelState = null;
+
+function closeSmartDepthImagePanel(){
+    const st = smartDepthImagePanelState;
+    smartDepthImagePanelState = null;
+    if(st){
+        clearInterval(st.pollTimer);
+        clearInterval(st.fakeTimer);
+        window.removeEventListener('keydown', st.onKey, true);
+    }
+    document.getElementById('dimgOverlay')?.remove();
+}
+
+function smartDepthImageBaseName(url, srcNode){
+    let base = '';
+    try { base = decodeURIComponent(String(url).split('/').pop().split('?')[0]) || ''; } catch(e) {}
+    base = base.replace(/\.[a-z0-9]+$/i, '').trim();
+    if(!base && srcNode?.title) base = String(srcNode.title).trim();
+    return base || 'image';
+}
+
+function createDepthImageResultNode(outUrl, srcNode, base){
+    if(!outUrl) return null;
+    const item = { url: outUrl, kind: 'image', name: `${base}.depth.png`, generatedResult: true, depthResult: true, depthMode: 'depth' };
+    let x, y;
+    const rect = srcNode ? nodeRect(srcNode) : null;
+    if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
+    else { const c = viewportCenter(); x = c.x; y = c.y; }
+    pushUndo();
+    const node = createNode(x, y, [item], { skipUndo: true });
+    if(node){
+        node.title = `${base} · 深度图`;
+        if(srcNode) connectInputNode(srcNode.id, node.id);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = { nodeId:'', index:-1 };
+    }
+    scheduleSave();
+    render();
+    return node;
+}
+
+function downloadDepthImageFile(outUrl, base){
+    fetch(outUrl).then(r => {
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+    }).then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${base}.depth.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }).catch(() => toast('深度图下载失败，可在输出目录手动获取'));
+}
+
+function openImageDepthExportPanel(url, nodeId, index){
+    closeSmartDepthImagePanel();
+    const srcNode = nodes.find(n => n.id === nodeId) || null;
+    const base = smartDepthImageBaseName(url, srcNode);
+    const overlay = document.createElement('div');
+    overlay.id = 'dimgOverlay';
+    overlay.className = 'vtm-overlay dcap-overlay';
+    overlay.innerHTML = `
+        <div class="vtm-bar dcap-bar" role="dialog" aria-label="导出深度图">
+            <div class="dcap-head">
+                <div>
+                    <div class="dcap-title">导出深度图</div>
+                    <div class="dcap-sub">内置模型本地推理 · 不上传图片 · 近处亮、远处暗</div>
+                </div>
+                <button type="button" class="vtm-x dcap-x" title="关闭">✕</button>
+            </div>
+            <div class="dcap-previews">
+                <div class="dcap-pv"><span class="dcap-lab">原图</span><img src="${escapeAttr(url)}" alt=""></div>
+                <div class="dcap-pv"><span class="dcap-lab" id="dimgPvLab">深度图 · 示意</span>
+                    <div class="dcap-depth-mock" id="dimgDepthMock"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div>
+                </div>
+            </div>
+            <div class="dcap-prepare" id="dimgPrepare">
+                <span id="dimgPrepareText">检查模型状态…</span>
+                <div class="dcap-prog" style="display:block;flex:1;"><i id="dimgPrepareBar"></i></div>
+            </div>
+            <div class="dcap-opts">
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">色带</span>
+                    <div class="dcap-seg" id="dimgSegCmap">
+                        <button type="button" data-v="gray" class="active">灰度 · 近白远黑</button>
+                        <button type="button" data-v="inv">反相 · 近黑远白</button>
+                        <button type="button" data-v="turbo">Turbo 彩色</button>
+                    </div>
+                </div>
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">推理精度</span>
+                    <div class="dcap-seg" id="dimgSegRes">
+                        <button type="button" data-v="auto" class="active">跟随原图</button>
+                        <button type="button" data-v="768">768（快）</button>
+                        <button type="button" data-v="512">512（最快）</button>
+                    </div>
+                </div>
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">位深</span>
+                    <div class="dcap-seg" id="dimgSegBit">
+                        <button type="button" data-v="8" class="active">8-bit PNG</button>
+                        <button type="button" data-v="16">16-bit PNG（仅灰度）</button>
+                    </div>
+                </div>
+                <div class="dcap-opt-row">
+                    <span class="dcap-opt-label">导出方式</span>
+                    <div class="dcap-seg" id="dimgSegDest">
+                        <button type="button" data-v="node" class="active">新建节点</button>
+                        <button type="button" data-v="download">直接下载</button>
+                        <button type="button" data-v="both">节点 + 下载</button>
+                    </div>
+                </div>
+            </div>
+            <div class="dcap-foot">
+                <span class="dcap-eta" id="dimgEta"></span>
+                <div class="dcap-prog" id="dimgTaskProg"><i id="dimgTaskBar"></i></div>
+                <button type="button" class="dcap-run" id="dimgRun" disabled>开始导出</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    // 面板定位在源节点卡下方居中（与视频深度面板同一套算法）
+    requestAnimationFrame(() => {
+        const bar = overlay.querySelector('.dcap-bar');
+        if(!bar?.isConnected) return;
+        const nodeEl = Array.from(document.querySelectorAll('.image-node')).find(el => el.dataset.id === nodeId);
+        const rect = nodeEl?.getBoundingClientRect();
+        const barW = bar.offsetWidth || 560;
+        const barH = bar.offsetHeight || 470;
+        const center = rect
+            ? Math.max(barW / 2 + 12, Math.min(window.innerWidth - barW / 2 - 12, rect.left + rect.width / 2))
+            : window.innerWidth / 2;
+        const top = rect
+            ? Math.max(8, Math.min(window.innerHeight - barH - 12, rect.bottom + 10))
+            : Math.max(8, (window.innerHeight - barH) / 2);
+        bar.style.left = `${center}px`;
+        bar.style.top = `${top}px`;
+        bar.style.transform = 'translateX(-50%)';
+    });
+
+    const state = {
+        url, nodeId, index, base, srcNode, overlay,
+        ready: false, busy: false, prepareStarted: false, pollTimer: null, fakeTimer: null, onKey: null,
+    };
+    smartDepthImagePanelState = state;
+
+    const runBtn = overlay.querySelector('#dimgRun');
+    const prepBox = overlay.querySelector('#dimgPrepare');
+    const prepText = overlay.querySelector('#dimgPrepareText');
+    const prepBar = overlay.querySelector('#dimgPrepareBar');
+    const taskProg = overlay.querySelector('#dimgTaskProg');
+    const taskBar = overlay.querySelector('#dimgTaskBar');
+    const eta = overlay.querySelector('#dimgEta');
+    const mock = overlay.querySelector('#dimgDepthMock');
+    const pvLab = overlay.querySelector('#dimgPvLab');
+
+    const segVal = id => overlay.querySelector(`${id} button.active`)?.dataset.v || '';
+    const bindSeg = id => {
+        overlay.querySelector(id)?.addEventListener('click', e => {
+            const btn = e.target.closest('button[data-v]');
+            if(!btn || btn.disabled) return;
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+            syncBitLock();
+        });
+    };
+    // 16-bit 只出灰度：选中 16 时锁定色带（灰度以外的按钮禁用，示意预览同步去色）
+    const syncBitLock = () => {
+        const bit16 = segVal('#dimgSegBit') === '16';
+        const grayBtn = overlay.querySelector('#dimgSegCmap button[data-v="gray"]');
+        overlay.querySelectorAll('#dimgSegCmap button').forEach(b => {
+            b.disabled = bit16 && b.dataset.v !== 'gray';
+        });
+        if(bit16 && grayBtn && !grayBtn.classList.contains('active')){
+            overlay.querySelectorAll('#dimgSegCmap button').forEach(b => b.classList.toggle('active', b === grayBtn));
+        }
+        if(mock){
+            mock.style.filter = bit16 || segVal('#dimgSegCmap') === 'inv' ? (segVal('#dimgSegCmap') === 'inv' ? 'invert(1)' : 'saturate(0)') : '';
+        }
+        if(pvLab) pvLab.textContent = segVal('#dimgSegCmap') === 'turbo' ? '深度图 · 彩色示意' : '深度图 · 示意';
+    };
+    bindSeg('#dimgSegCmap');
+    bindSeg('#dimgSegRes');
+    bindSeg('#dimgSegBit');
+    bindSeg('#dimgSegDest');
+
+    overlay.querySelector('.dcap-x').addEventListener('click', () => closeSmartDepthImagePanel());
+    overlay.addEventListener('mousedown', e => { if(e.target === overlay) closeSmartDepthImagePanel(); });
+    state.onKey = e => { if(e.key === 'Escape') closeSmartDepthImagePanel(); };
+    window.addEventListener('keydown', state.onKey, true);
+
+    const startPrepare = async () => {
+        try {
+            runBtn.disabled = true;
+            await fetch('/api/depth-capture/prepare', { method: 'POST' });
+            state.prepareStarted = true;
+            pollPrepare();
+        } catch(e) {
+            prepText.textContent = '准备请求失败，请重试';
+            runBtn.disabled = false;
+        }
+    };
+
+    const pollPrepare = () => {
+        clearInterval(state.pollTimer);
+        state.pollTimer = setInterval(async () => {
+            if(!smartDepthImagePanelState){ clearInterval(state.pollTimer); return; }
+            try {
+                const res = await fetch('/api/depth-capture/status');
+                if(res.ok) applyStatus(await res.json());
+            } catch(e) {}
+            if(state.ready) clearInterval(state.pollTimer);
+        }, 1000);
+    };
+
+    const applyStatus = data => {
+        state.ready = Boolean(data.deps_ready && data.model_ready);
+        eta.textContent = data.gpu ? 'GPU 加速已启用 · 单图约 2-4 秒' : 'CPU 推理 · 单图约 5-15 秒';
+        const prep = data.prepare || {};
+        if(!state.ready){
+            prepBox.style.display = 'flex';
+            prepBar.style.width = `${Math.max(3, Math.min(100, Number(prep.progress) || 3))}%`;
+            if(prep.error){
+                prepText.textContent = `准备失败：${prep.error}`;
+                runBtn.textContent = '重试准备';
+                runBtn.disabled = false;
+                runBtn.dataset.act = 'prepare';
+            } else if(prep.running || (state.prepareStarted && !prep.stage?.startsWith?.('done'))){
+                prepText.textContent = prep.message || '准备中…';
+                runBtn.disabled = true;
+                runBtn.dataset.act = '';
+            } else {
+                prepText.textContent = `首次使用需准备：安装推理依赖 + 下载深度模型（约 ${data.model_size_mb}MB，一次性）`;
+                runBtn.textContent = '准备模型';
+                runBtn.disabled = false;
+                runBtn.dataset.act = 'prepare';
+            }
+        } else {
+            prepBox.style.display = 'none';
+            runBtn.dataset.act = 'run';
+            if(!state.busy){
+                runBtn.disabled = false;
+                runBtn.textContent = '开始导出';
+            }
+        }
+    };
+
+    // 导出中无逐帧进度可报，用一条缓慢逼近的假进度条表达"在跑"（同步端点 2-4 秒）
+    const startFakeProgress = () => {
+        taskProg.classList.add('on');
+        taskBar.style.width = '4%';
+        let p = 4;
+        clearInterval(state.fakeTimer);
+        state.fakeTimer = setInterval(() => {
+            p = Math.min(90, p + 3 + Math.random() * 5);
+            taskBar.style.width = `${p}%`;
+        }, 240);
+    };
+    const stopFakeProgress = () => {
+        clearInterval(state.fakeTimer);
+        state.fakeTimer = null;
+        setTimeout(() => { taskProg.classList.remove('on'); taskBar.style.width = '0%'; }, 500);
+    };
+
+    runBtn.addEventListener('click', async () => {
+        if(runBtn.dataset.act === 'prepare'){ startPrepare(); return; }
+        if(runBtn.dataset.act !== 'run' || state.busy || !state.ready) return;
+        state.busy = true;
+        runBtn.disabled = true;
+        runBtn.textContent = '导出中…';
+        eta.textContent = '推理中…';
+        startFakeProgress();
+        try {
+            const res = await fetch('/api/depth-capture/image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: state.url,
+                    colormap: segVal('#dimgSegCmap') || 'gray',
+                    resolution: segVal('#dimgSegRes') || 'auto',
+                    bit_depth: segVal('#dimgSegBit') || '8',
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok){
+                if(res.status === 409){ startPrepare(); }
+                throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+            }
+            taskBar.style.width = '100%';
+            const dest = segVal('#dimgSegDest') || 'node';
+            if(dest === 'download' || dest === 'both') downloadDepthImageFile(data.url, state.base);
+            if(dest === 'node' || dest === 'both'){
+                createDepthImageResultNode(data.url, state.srcNode, state.base);
+                toast('已在原图旁新建深度图节点');
+            } else {
+                toast('深度图已开始下载');
+            }
+            setTimeout(() => closeSmartDepthImagePanel(), 650);
+        } catch(err) {
+            eta.textContent = `导出失败：${err.message}`;
+        } finally {
+            state.busy = false;
+            stopFakeProgress();
+            if(!smartDepthImagePanelState) return;
+            runBtn.disabled = false;
+            runBtn.textContent = '开始导出';
+        }
+    });
+
+    prepText.textContent = '检查模型状态…';
+    pollPrepare();
+}
+
+async function runImageDepthBatch(nodeId, items){
+    const srcNode = nodes.find(n => n.id === nodeId) || null;
+    const outItems = [];
+    for(let i = 0; i < items.length; i++){
+        const it = items[i];
+        toast(`导出深度图 ${i + 1}/${items.length}…`);
+        try {
+            const res = await fetch('/api/depth-capture/image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: it.url, colormap: 'gray', resolution: 'auto', bit_depth: '8' }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok){
+                const detail = typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`;
+                throw Object.assign(new Error(detail), { status: res.status });
+            }
+            outItems.push({ url: data.url, base: smartDepthImageBaseName(it.url, srcNode) });
+        } catch(err) {
+            if(err.status === 409){
+                toast('深度模型未就绪：请先在单张图片的「导出深度图」面板里完成准备');
+                return;
+            }
+            toast(`第 ${i + 1} 张导出失败：${err.message}，已跳过`);
+        }
+    }
+    if(!outItems.length){ toast('没有成功导出的深度图'); return; }
+    const groupItems = outItems.map(o => ({ url: o.url, kind: 'image', name: `${o.base}.depth.png`, generatedResult: true, depthResult: true, depthMode: 'depth' }));
+    let x, y;
+    const rect = srcNode ? nodeRect(srcNode) : null;
+    if(rect){ x = rect.x + rect.width + 110; y = rect.y; }
+    else { const c = viewportCenter(); x = c.x; y = c.y; }
+    pushUndo();
+    const node = createNode(x, y, groupItems, { skipUndo: true });
+    if(node){
+        node.title = `${String(srcNode?.title || '图片组').trim() || '图片组'} · 深度图`;
+        if(srcNode) connectInputNode(srcNode.id, node.id);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = { nodeId:'', index:-1 };
+    }
+    scheduleSave();
+    render();
+    toast(`已导出 ${outItems.length} 张深度图，并新建组合节点`);
 }
 
 function openSmartDepthCapturePanel(url, nodeId){

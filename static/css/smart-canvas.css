@@ -20775,3 +20775,15 @@ html body #promptLlmRun.is-running {
 html body .prompt-llm-composer .prompt-llm-composer-actions {
     gap: 6px !important;
 }
+
+/* ===== 2026-10-31 图像导出深度图面板 =====
+   结构复用 .dcap-*（视频深度捕捉那套），只补两条图片专属样式：
+   ① .dcap-pv img —— 原图预览（视频用 video，图片没有对应规则）
+   ② 16-bit 锁色带时被禁用的按钮观感 */
+.dcap-pv img {
+    width: 100%; height: 100%; object-fit: contain; display: block; background: #0b0b0d;
+}
+.dcap-seg button:disabled {
+    opacity: .42;
+    cursor: not-allowed;
+}
