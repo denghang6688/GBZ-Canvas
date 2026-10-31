@@ -20881,3 +20881,18 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 @media (max-width: 900px) {
     .sys-hud { display: none; }
 }
+
+/* 2026-10-31（用户要求：画布流畅度）——低倍率低清显示（LOD）。
+   缩放 < 20% 时节点图换 16/32/64/128 小尺寸源（纹理内存比 768 预览低两个数量级），
+   再叠一点失焦，视觉上就是「缩太小了看不清」，点开/选中立刻回高清。
+   注意：filter: blur 写在 world 内会被 transform: scale 一起缩放，必须按
+   --canvas-inverse-scale 反向补偿，否则 12% 缩放下 blur(1.5px) 只剩 0.18 屏幕像素，等于没糊。
+   不要加 transition：缩放时 blur 值连续变化，过渡会让画面追不上指针。 */
+html body .world .image-node img[data-lod-dim="1"],
+html body .world .image-node .image-wrap > img[data-lod-dim="1"],
+html body .world .image-node .media-thumb img[data-lod-dim="1"] {
+    /* 必须 !important：9364 行 `.world .node-img { filter:none !important }` 会把这里的模糊吃掉 */
+    filter: blur(calc(1.5px * var(--canvas-inverse-scale, 1))) !important;
+}
+/* 低清档整画布给个「可点开」的手型，提示这里点了会变清晰 */
+.world.smart-lod-low .image-node:not(.node-pending):not(.group-node) { cursor: zoom-in; }

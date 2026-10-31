@@ -7328,7 +7328,9 @@ async def media_preview(url: str, w: int = 512):
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="媒体文件不存在")
 
-    width = max(64, min(2048, int(w or 512)))
+    # 2026-10-31（画布低清 LOD）：低倍率档需要 16/32 级缩略图压纹理，
+    # 最小宽度从 64 放到 16；上限维持 2048。
+    width = max(16, min(2048, int(w or 512)))
     # 2026-10-27：构建过程 per-key 去重，同一文件同宽度的首次构建全画布只跑一个 ffmpeg
     async with media_build_lock(f"preview:{os.path.abspath(path)}:{width}"):
         webp_path, png_path = media_preview_cache_paths(path, width)

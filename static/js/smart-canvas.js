@@ -993,6 +993,16 @@ function smartOriginalMediaUrl(itemOrUrl){
 // 画布缩略图不需要按原图尺寸解码：768px 足够支撑常用卡片和 100% 缩放，
 // 多节点画布可把浏览器的图片解码内存降到原来的约四分之一。原图仍用于下载、编辑和生成引用。
 const SMART_CANVAS_IMAGE_PREVIEW_MAX = 768;
+// 2026-10-31（用户要求：画布流畅度）——低倍率低清显示（LOD）常量。
+// 缩放 < 20% 全画布走低清（小尺寸源 + 轻微失焦），≥ 21% 完全清晰；20%/21% 做滞回，
+// 避免停在临界线附近时整屏反复换图。低清源按节点屏幕像素选 16/32/64/128，
+// 纹理内存比 768 预览低两个数量级——低倍率卡顿的大头就在这里。
+const SMART_LOD_EXIT_SCALE = 0.20;
+const SMART_LOD_ENTER_SCALE = 0.21;
+const SMART_LOD_SRC_STEPS = [16, 32, 64, 128];
+let smartLodLow = false;            // 当前是否处于低清档
+let smartLodSrcCache = new WeakMap();
+let smartLodSrcScaleBar = 0;         // 上次挑源时的缩放，用于低清档内部换档
 function smartMediaPreviewUrl(itemOrUrl, size=512){
     const raw = smartOriginalMediaUrl(itemOrUrl);
     const displayItem = typeof itemOrUrl === 'object' && itemOrUrl ? {...itemOrUrl, url:raw} : raw;
@@ -1000,7 +1010,8 @@ function smartMediaPreviewUrl(itemOrUrl, size=512){
     if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return displayUrl;
     if(!raw.startsWith('/output/') && !raw.startsWith('/assets/')) return displayUrl;
     if(!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/i.test(raw)) return displayUrl;
-    const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
+    // 2026-10-31（低清 LOD）：允许 16 级缩略图，低倍率下纹理体积能压到千分之一
+    const width = Math.max(16, Math.min(2048, Math.round(Number(size) || 512)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
 function smartPlayableVideoUrl(itemOrUrl){
@@ -1012,10 +1023,17 @@ function smartPlayableVideoUrl(itemOrUrl){
     if(!/\.(mp4|mov|m4v)(\?|#|$)/i.test(raw)) return displayUrl;
     return `/api/playable-video?url=${encodeURIComponent(raw)}`;
 }
-function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
+function smartPreviewImgHtml(itemOrUrl, size=512, attrs='', lodAware=false){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
-    return `<img src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
+    // 2026-10-31（低清 LOD）：画布节点在低倍率下直接输出小源。不这么做的话，每次
+    // render 重建 img 都会先挂 768 预览、再由 sync 换成 32，拖动/选中时反复来回切图。
+    // 这里用 viewport.scale 现算（而不是只读 smartLodLow），首屏恢复缩放后第一次
+    // render 就能直接给小源，省掉「先下 768 再换掉」的往返。
+    const lodScale = (typeof viewport !== 'undefined' && viewport) ? viewport.scale : 1;
+    const useLow = lodAware && smartLodShouldBeLow(lodScale);
+    const src = useLow ? smartMediaPreviewUrl(itemOrUrl, SMART_LOD_SRC_STEPS[0]) : preview;
+    return `<img src="${escapeHtml(src)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${useLow ? ' data-lod-dim="1"' : ''}${attrs ? ` ${attrs}` : ''}>`;
 }
 function loadSmartOriginalImageDimensions(url){
     const src = displayMediaUrl({url:smartOriginalMediaUrl(url)});
@@ -2169,6 +2187,34 @@ function bindSmartPreviewImageFallbacks(root=document){
         });
     });
 }
+// 2026-10-31（用户要求：画布流畅度）——低倍率低清显示（LOD）。
+// 规则：缩放 < 20% 全画布走低清（小尺寸源 + 轻微失焦），≥ 20% 完全清晰。
+// 20% 上下一律用滞回带（18% 进、22% 出），避免在临界线上来回抖导致整屏反复换图。
+// 常量与开关见文件顶部 SMART_LOD_*（smartPreviewImgHtml 渲染时就要读，不能等到这里才定义）。
+function smartLodShouldBeLow(scale){
+    const s = Math.max(0.01, Number(scale) || 1);
+    return smartLodLow ? s < SMART_LOD_ENTER_SCALE : s < SMART_LOD_EXIT_SCALE;
+}
+function smartLodSrcWidthFor(imgEl, nodeEl){
+    // 屏幕上这张图会有多宽（乘 dpr 才是真实像素需求）。低清档只给需求的 ~50%，
+    // 剩下的靠 blur 盖住——纯降采样看着是「马赛克」，加一点失焦才像参考稿。
+    const rect = imgEl?.getBoundingClientRect?.();
+    const cssW = rect && rect.width > 0 ? rect.width : 280;
+    const need = cssW * (window.devicePixelRatio || 1) * 0.5;
+    let out = SMART_LOD_SRC_STEPS[0];
+    for(const step of SMART_LOD_SRC_STEPS){ if(need >= step) out = step; }
+    return out;
+}
+function smartLodSrcFor(imgEl){
+    const original = imgEl?.dataset?.originalSrc || '';
+    if(!original) return '';
+    const cached = smartLodSrcCache.get(imgEl);
+    const width = smartLodSrcWidthFor(imgEl);
+    if(cached && cached.width === width && cached.original === original) return cached.src;
+    const src = smartMediaPreviewUrl(original, width);
+    smartLodSrcCache.set(imgEl, {width, original, src});
+    return src;
+}
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
 let smartSelectedHighResTimer = 0;
 let smartSelectedHighResSeq = 0;
@@ -2205,6 +2251,20 @@ function smartImageNeedsHighRes(img, nodeEl){
     return viewport.scale >= 1.35 || displayLongSide >= 900;
 }
 function syncSmartSelectedImageResolution(root=world){
+    // 2026-10-31（低清 LOD）：先在这里定档位，再按档位决定每张图挂哪个源。
+    // 只用 class 与目标状态不一致的才重算 src —— 滚轮缩放会连续触发本函数，
+    // 每张图都 getBoundingClientRect + 改 src 会把缩放拖成幻灯片。
+    const lodLow = smartLodShouldBeLow(viewport.scale);
+    smartLodLow = lodLow;
+    if(world && world.classList) world.classList.toggle('smart-lod-low', lodLow);
+    // 低清档内部还要按缩放挑档：12% 用 16px、19% 用 32px，否则「越放大越糊」。
+    // 只有缩放相对变化超过 25% 才重挑一次，避免滚轮连续滚动时每帧改 src。
+    const lodScaleNow = safeScale(viewport.scale);
+    let lodRescaleAll = false;
+    if(Math.abs(lodScaleNow - smartLodSrcScaleBar) / (smartLodSrcScaleBar || 1) > 0.25){
+        smartLodSrcScaleBar = lodScaleNow;
+        lodRescaleAll = true;
+    }
     const highResImages = [];
     root.querySelectorAll?.('.image-node img[data-preview-src][data-original-src]').forEach(img => {
         if(img.dataset.previewKind === 'video') return;
@@ -2214,9 +2274,21 @@ function syncSmartSelectedImageResolution(root=world){
         const original = img.dataset.originalSrc || '';
         if(!needsHighRes){
             delete img.dataset.selectedHighResTarget;
-            if(preview && img.getAttribute('src') !== preview) img.src = preview;
+            const wantLow = lodLow;
+            const isLow = img.dataset.lodDim === '1';
+            if(wantLow !== isLow || (lodRescaleAll && wantLow)){
+                if(wantLow) img.dataset.lodDim = '1'; else delete img.dataset.lodDim;
+                const want = wantLow ? (smartLodSrcFor(img) || preview) : preview;
+                if(want && img.getAttribute('src') !== want){
+                    img.dataset.lodSwapAt = String(Date.now());
+                    img.src = want;
+                }
+            } else if(!wantLow && preview && img.getAttribute('src') !== preview){
+                img.src = preview;
+            }
             return;
         }
+        delete img.dataset.lodDim;
         const target = displayMediaUrl({url:smartOriginalMediaUrl(original)});
         if(!target) return;
         img.dataset.selectedHighResTarget = target;
@@ -6348,7 +6420,7 @@ function smartNodeInputThumbsHtml(images, opts={}){
             ? `<div class="media-thumb audio-thumb"><i data-lucide="file-audio"></i><span>${escapeHtml(img.name || 'Audio')}</span></div>`
             : isVideoMediaItem(img)
             ? smartVideoPreviewHtml(img, 256, 'alt=""')
-            : smartPreviewImgHtml(img, 256, 'alt=""');
+            : smartPreviewImgHtml(img, 256, 'alt=""', true);
         return `<div class="smart-node-input-thumb" title="${escapeHtml(label)}">${media}<span class="smart-node-input-badge">${escapeHtml(label)}</span></div>`;
     }).join('');
     const more = refs.length > limit ? `<div class="smart-node-input-thumb smart-node-input-more">+${refs.length - limit}</div>` : '';
@@ -6579,7 +6651,7 @@ function syncPromptLlmRefs(node){
         const isVid = kind === 'video';
         const inner = isVid
             ? smartVideoPreviewHtml(img, 256, 'draggable="false" alt=""')
-            : smartPreviewImgHtml(img, 256, 'draggable="false" alt=""');
+            : smartPreviewImgHtml(img, 256, 'draggable="false" alt=""', true);
         const key = inputRefKey(img);
         const removable = Boolean(key) && manualKeys.has(key);
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-llm-remove-reference="${escapeHtml(key)}" title="删除引用图" aria-label="删除引用图">×</button>` : '';
@@ -16945,7 +17017,7 @@ function thumbMediaHtml(img){
     // 2026-10-11：截帧相机已并入控制条（.smart-video-canvas-controls），这里不再单独挂一个浮动按钮；
     // 2026-10-11（用户要求）：去掉「AI生成」角标（分辨率角标保留）。
     if(isVideoMediaItem(img)) return `<div class="media-thumb video-thumb">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img) : (smartVideoShouldMount(img) ? `${smartVideoNodeHtml(img, 512, 'draggable="false" alt=""')}${smartVideoCanvasControlsHtml()}` : smartVideoLazyPosterHtml(img, 512, 'draggable="false" alt=""'))}</div>`;
-    return smartPreviewImgHtml(img, SMART_CANVAS_IMAGE_PREVIEW_MAX, 'draggable="false" loading="lazy" decoding="async"');
+    return smartPreviewImgHtml(img, SMART_CANVAS_IMAGE_PREVIEW_MAX, 'draggable="false" loading="lazy" decoding="async"', true);
 }
 function imageResolutionLabel(img){
     const w = Number(img?.natural_w || img?.width || img?.w || 0);
@@ -17131,7 +17203,7 @@ function singleMediaHtml(img, w, h){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="node-img media-card media-file-card${isSpreadsheetMediaItem(img) ? ' is-spreadsheet' : ''}" style="width:${w}px;height:${h}px"><div class="media-card-icon">${smartFileIconHtml(img)}</div><div class="media-card-title">${escapeHtml(img.name || smartFileLabel(img))}</div><div class="media-card-sub">${smartFileLabel(img)}</div></div>`;
     if(isAudioMediaItem(img)) return `<div class="node-img media-card media-audio-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="file-audio"></i></div><div class="media-card-title">${escapeHtml(img.name || 'Audio')}</div><div class="media-card-sub">AUDIO</div><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio><button class="mini-x audio-dl-btn" type="button" title="下载音频" aria-label="下载音频"><i data-lucide="download"></i></button></div>`;
     if(isVideoMediaItem(img)) return `<div class="node-img media-card media-video-card" style="width:${w}px;height:${h}px">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img) : (smartVideoShouldMount(img) ? `${smartVideoNodeHtml(img, 768, 'draggable="false" alt=""')}${smartVideoCanvasControlsHtml()}` : smartVideoLazyPosterHtml(img, 768, 'draggable="false" alt=""'))}</div>`;
-    return smartPreviewImgHtml(img, SMART_CANVAS_IMAGE_PREVIEW_MAX, `class="node-img" draggable="false" loading="lazy" decoding="async" onload="smartNodeImgOnload(this)" style="width:${w}px;height:${h}px"`);
+    return smartPreviewImgHtml(img, SMART_CANVAS_IMAGE_PREVIEW_MAX, `class="node-img" draggable="false" loading="lazy" decoding="async" onload="smartNodeImgOnload(this)" style="width:${w}px;height:${h}px"`, true);
 }
 function imageReferenceButtonHtml(index=0){
     return `<button class="mini-x image-reference" type="button" data-image-index="${Number(index) || 0}" title="引用为参考图" aria-label="引用为参考图"><i data-lucide="image-plus"></i></button>`;
@@ -30633,7 +30705,7 @@ function renderInputThumbsRow(node){
             ? `<div class="input-thumb-audio"><i data-lucide="file-audio"></i></div>`
             : isVid
             ? smartVideoLiveThumbHtml(img, 'draggable="false"') + `<span class="input-thumb-play" aria-hidden="true"></span><span class="input-thumb-dur" aria-hidden="true">--</span>`
-            : smartPreviewImgHtml(img, 256, 'draggable="false"');
+            : smartPreviewImgHtml(img, 256, 'draggable="false"', true);
         const count = (mediaCounters[kind] = (mediaCounters[kind] || 0) + 1);
         // 只有 image / video / audio 参与限额（H3 ComfyUI 模式表 / API 能力档案）；其它 kind 不设限。
         const kindLimit = kindLimitMap && Object.prototype.hasOwnProperty.call(kindLimitMap, kind) ? kindLimitMap[kind] : null;
