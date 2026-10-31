@@ -6650,13 +6650,24 @@ def jimeng_output_values(raw):
     return deduped
 
 JIMENG_RATIO_CHOICES = [(21, 9), (16, 9), (3, 2), (4, 3), (1, 1), (3, 4), (2, 3), (9, 16)]
-def jimeng_ratio_from_size(size, fallback="1:1"):
+def jimeng_ratio_from_size(size, fallback=""):
     width, height = parse_size_pair(size)
     if not width or not height:
         return fallback
     ratio = width / max(1, height)
     left, right = min(JIMENG_RATIO_CHOICES, key=lambda item: abs(ratio - item[0] / item[1]))
     return f"{left}:{right}"
+
+def jimeng_ratio_from_image(path):
+    """按参考图实际像素推断最近的比例档（画布的「自动/适配比例」走这里）。
+    2026-10-31：image2image 此前完全不传 --ratio，CLI 默认 16:9，
+    导致选了 9:16 仍出 2560×1440；自动比例更无从适配。"""
+    try:
+        with Image.open(path) as im:
+            width, height = im.size
+        return jimeng_ratio_from_size(f"{int(width)}x{int(height)}")
+    except Exception:
+        return ""
 
 # 官方 dreamina 支持的图片模型（来自 text2image/image2image -h）。
 # image2image 不支持 3.0/3.1。
@@ -6938,16 +6949,28 @@ async def generate_jimeng_provider_image(prompt, size, model, reference_images=N
     try:
         args = []
         if refs:
-            image_path, created = await jimeng_prepare_local_media(refs[0].get("url"), "image")
-            temp_paths.extend(created)
+            # 2026-10-31：image2image 支持 1-10 张图（官方 help），此前只取 refs[0]，
+            # 「图1 换角度 + 图2 换产品」这类多图 prompt 里的图2 根本没进 CLI。
+            # 每张图单独一个 --images，避免路径里带英文逗号被 StringSlice 拆开。
+            image_paths = []
+            for ref in refs[:10]:
+                image_path, created = await jimeng_prepare_local_media(ref.get("url"), "image")
+                temp_paths.extend(created)
+                image_paths.append(image_path)
             model_version = jimeng_image_model_version(model, "image2image")
-            args = [
-                "image2image",
-                f"--images={jimeng_cli_path_arg(image_path)}",
+            # 2026-10-31 修 bug：图生图缺 --ratio，CLI 走默认 16:9（选 9:16 却出 2560×1440）。
+            # 尺寸解析不出来（自动比例 / 自适应）时按第一张参考图实际像素推断，读不到才交给 CLI 默认。
+            ratio = jimeng_ratio_from_size(size) or jimeng_ratio_from_image(image_paths[0])
+            args = ["image2image"]
+            for image_path in image_paths:
+                args.append(f"--images={jimeng_cli_path_arg(image_path)}")
+            args.extend([
                 f"--prompt={prompt}",
                 f"--resolution_type={jimeng_image_resolution(model, size, 'image2image')}",
                 f"--poll={jimeng_poll_seconds()}",
-            ]
+            ])
+            if ratio:
+                args.append(f"--ratio={ratio}")
             if model_version:
                 args.append(f"--model_version={model_version}")
         else:
@@ -6955,7 +6978,7 @@ async def generate_jimeng_provider_image(prompt, size, model, reference_images=N
             args = [
                 "text2image",
                 f"--prompt={prompt}",
-                f"--ratio={jimeng_ratio_from_size(size)}",
+                f"--ratio={jimeng_ratio_from_size(size, '1:1')}",
                 f"--resolution_type={jimeng_image_resolution(model, size, 'text2image')}",
                 f"--poll={jimeng_poll_seconds()}",
             ]
