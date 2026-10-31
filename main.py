@@ -14922,7 +14922,10 @@ def upstream_unusable_map(ids):
 
 def classify_upstream_model(mid):
     lc = str(mid or "").lower()
-    video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "doubao-1", "kling", "hailuo", "video", "t2v-", "i2v-", "s2v"]
+    # 2026-10-31：补上 wan-3.0 / seedance / vidu / pixverse / happyhorse 等新命名，
+    # 否则这些模型会被归到「聊天模型」，在视频分类里永远看不到。
+    video_keys = ["veo", "sora", "wan2", "wanx", "wan-", "doubao-seedance", "seedance", "doubao-1",
+                  "kling", "hailuo", "video", "t2v-", "i2v-", "s2v", "vidu", "pixverse", "happyhorse"]
     if any(k in lc for k in video_keys):
         return "video"
     image_keys = ["banana", "image", "dalle", "dall-e", "imagen", "flux", "stable", "sdxl", "midjourney", "nano-banana", "ideogram", "fal-ai", "z-image", "qwen-image", "klein", "seedream", "doubao-seedream", "text-to-image", "image-to-image"]
@@ -15042,16 +15045,13 @@ async def test_provider_connection(payload: TestConnectionPayload):
         except httpx.HTTPError as e:
             return {"ok": False, "status": 0, "message": friendly_connect_error_detail(e, f"{root}/image/v1/tasks")}
     if protocol == "grsai":
-        # Grsai 没有 /v1/models，验证走原生 /v1/api/generate 探测（零成本，不会创建生成任务）
-        async with httpx.AsyncClient(timeout=15) as client:
-            grsai_ok, grsai_probe = await probe_grsai_endpoint(client, base_url, api_key)
-        if not grsai_ok:
-            return {"ok": False, "status": grsai_probe.get("status") or 0, "message": grsai_probe.get("message") or "Grsai 原生接口不可用", "raw": grsai_probe.get("raw")}
-        return grsai_default_models_payload(
-            status=grsai_probe.get("status") or 200,
-            message="Grsai 原生协议验证通过：视频接口 /v1/api/generate 可用。该站不提供 /v1/models 模型列表，已返回内置推荐模型。",
-            raw=grsai_probe.get("raw"),
-        )
+        # 先真拉 /v1/models（实测可用，返回文本/图像模型），视频模型由内置清单补齐；
+        # 拉不到时再退回原生 /v1/api/generate 探活，避免把「Key 失效」误判成可用。
+        payload = await grsai_models_payload(base_url, api_key)
+        if not payload.get("ok"):
+            return payload
+        payload["message"] = f"Grsai 接口验证通过：{payload['message']}"
+        return payload
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -15081,13 +15081,12 @@ async def test_provider_connection(payload: TestConnectionPayload):
                 # Grsai 站点没有 /v1/models 与 /v1beta/models（必然 404）：
                 # 域名命中时改走原生接口探测，验证即可通过并自动识别为 grsai 协议。
                 if resp.status_code == 404 and is_grsai_provider({"base_url": base_url}):
-                    grsai_ok, grsai_probe = await probe_grsai_endpoint(client, base_url, api_key)
-                    if grsai_ok:
-                        return grsai_default_models_payload(
-                            status=grsai_probe.get("status") or resp.status_code,
-                            message=f"已自动识别为 Grsai 原生协议（该站不提供模型列表接口，/{'v1beta' if protocol == 'gemini' else 'v1'}/models 返回 404 属正常现象）。",
-                            raw={"models_error": resp.text[:300], "grsai_probe": grsai_probe.get("raw")},
-                        )
+                    payload = await grsai_models_payload(
+                        base_url, api_key, status=resp.status_code, raw={"models_error": resp.text[:300]}
+                    )
+                    if payload.get("ok"):
+                        payload["message"] = f"已自动识别为 Grsai 原生协议：{payload['message']}"
+                        return payload
                 return {"ok": False, "status": resp.status_code, "message": resp.text[:300]}
             data = resp.json() if resp.text else {}
             grouped, ids = parse_upstream_models(data, protocol)
@@ -15472,22 +15471,14 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url or RUNNINGHUB_DEFAULT_BASE_URL, "protocol": "runninghub", "api_key": api_key}
         return await runninghub_models_payload(provider)
     if protocol == "grsai":
-        # Grsai 不提供 /v1/models：先探测原生接口确认可用，再返回内置推荐模型清单
-        if base_url and api_key:
-            base = (base_url or "").strip().rstrip("/")
-            async with httpx.AsyncClient(timeout=15) as client:
-                grsai_ok, grsai_probe = await probe_grsai_endpoint(client, base, api_key)
-            if not grsai_ok:
-                raise HTTPException(status_code=502, detail=grsai_probe.get("message") or "Grsai 原生接口不可用")
-        return {
-            "total": len(GRSAI_DEFAULT_IMAGE_MODELS) + len(GRSAI_DEFAULT_CHAT_MODELS) + len(GRSAI_DEFAULT_VIDEO_MODELS),
-            "protocol": "grsai",
-            "message": "Grsai 不提供模型列表接口，已返回内置推荐模型（视频：minimax-h3）",
-            "image_models": list(GRSAI_DEFAULT_IMAGE_MODELS),
-            "chat_models": list(GRSAI_DEFAULT_CHAT_MODELS),
-            "video_models": list(GRSAI_DEFAULT_VIDEO_MODELS),
-            "all": [*GRSAI_DEFAULT_IMAGE_MODELS, *GRSAI_DEFAULT_CHAT_MODELS, *GRSAI_DEFAULT_VIDEO_MODELS],
-        }
+        # 真实拉取 /v1/models（返回文本/图像模型）+ 内置视频清单补齐。
+        # 2026-10-31 之前这里直接返回内置清单，导致站点新上架的视频模型永远拉不到。
+        if not base_url:
+            raise HTTPException(status_code=400, detail="请先填写请求地址")
+        payload = await grsai_models_payload(base_url, api_key, status=200)
+        if not payload.get("ok"):
+            raise HTTPException(status_code=502, detail=payload.get("message") or "Grsai 原生接口不可用")
+        return payload
     base_url = (base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -16501,7 +16492,10 @@ GRSAI_DRAW_RESULT_PATH = "/v1/draw/result"
 GRSAI_DRAW_ASPECTS = {"auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"}
 
 # Grsai 没有 /v1/models 模型列表接口，验证/拉取模型时用这份内置清单兜底
-GRSAI_DEFAULT_VIDEO_MODELS = ["minimax-h3"]
+# 2026-10-31：Grsai 的视频模型不会出现在 /v1/models 里，只能靠这份清单兜底。
+# 站点当前在售（文档 qmy27nhsd9.apifox.cn：minimax-h3 / wan-video / agnes-video 三个接口）：
+#   minimax-h3、wan-3.0、agnes-video-2.5
+GRSAI_DEFAULT_VIDEO_MODELS = ["minimax-h3", "wan-3.0", "agnes-video-2.5"]
 GRSAI_DEFAULT_IMAGE_MODELS = [
     "nano-banana-2", "nano-banana-pro", "nano-banana-pro-vt",
     "nano-banana-fast", "gpt-image-2.5",
@@ -16561,6 +16555,65 @@ def grsai_default_models_payload(status=200, message="", raw=None):
         "video_models": list(GRSAI_DEFAULT_VIDEO_MODELS),
         "all": [*GRSAI_DEFAULT_IMAGE_MODELS, *GRSAI_DEFAULT_CHAT_MODELS, *GRSAI_DEFAULT_VIDEO_MODELS],
         "raw": raw or {},
+    }
+
+async def grsai_models_payload(base_url, api_key, status=200, raw=None, strict_probe=True):
+    """Grsai 模型清单：真实拉取 /v1/models + 内置视频清单兜底。
+
+    2026-10-31（用户反馈「视频模型新上架好几个，怎么没拉取到」）：
+    原先这里直接返回内置清单、完全不打上游接口，所以站点新上的 wan-3.0 /
+    agnes-video-2.5 永远不出现。实测 https://grsai.dakka.com.cn/v1/models 是
+    200 且能返回 30 个文本/图像模型，只是**视频模型不会出现在这个接口里**，
+    因此改成「真实清单 + 内置视频补齐」两段式。
+    """
+    root = grsai_api_base_url({"base_url": base_url}) if base_url else ""
+    fetched_image, fetched_chat, fetched_video = [], [], []
+    ids = []
+    raw = dict(raw or {})
+    if root and api_key:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(f"{root}/v1/models", headers=upstream_model_headers(api_key, "openai"))
+            if resp.status_code < 400:
+                grouped, ids = parse_upstream_models(resp.json() if resp.text else {}, "openai")
+                fetched_image = list(grouped.get("image") or [])
+                fetched_chat = list(grouped.get("chat") or [])
+                fetched_video = list(grouped.get("video") or [])
+        except (httpx.HTTPError, ValueError):
+            ids = []
+    if ids:
+        note = f"已从上游拉取 {len(ids)} 个模型"
+    else:
+        note = "上游模型列表接口没有返回内容，已使用内置推荐模型"
+        # 拿不到列表时退回原生接口探活，保证「Key 失效」这类问题仍能被发现
+        if strict_probe and base_url and api_key:
+            async with httpx.AsyncClient(timeout=15) as client:
+                grsai_ok, grsai_probe = await probe_grsai_endpoint(client, base_url, api_key)
+            raw["grsai_probe"] = grsai_probe.get("raw")
+            if not grsai_ok:
+                return {
+                    "ok": False,
+                    "status": grsai_probe.get("status") or 0,
+                    "message": grsai_probe.get("message") or "Grsai 原生接口不可用",
+                    "raw": raw,
+                }
+    image_models = fetched_image or list(GRSAI_DEFAULT_IMAGE_MODELS)
+    chat_models = fetched_chat or list(GRSAI_DEFAULT_CHAT_MODELS)
+    # 视频模型：内置清单在前，上游若真给了视频模型也并进来（去重保序）
+    video_models = list(dict.fromkeys([*GRSAI_DEFAULT_VIDEO_MODELS, *fetched_video]))
+    all_models = [*image_models, *chat_models, *video_models]
+    return {
+        "ok": True,
+        "protocol": "grsai",
+        "status": status,
+        "message": f"{note}；视频模型（{'、'.join(video_models)}）不在上游列表接口里，已自动补齐",
+        "model_count": len(all_models),
+        "total": len(all_models),
+        "image_models": image_models,
+        "chat_models": chat_models,
+        "video_models": video_models,
+        "all": all_models,
+        "raw": raw,
     }
 
 def is_grsai_provider(provider):
