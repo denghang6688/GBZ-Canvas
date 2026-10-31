@@ -950,7 +950,7 @@ body.smart-node-resize .smart-selection-floating-menu,
 .empty-node .node-body { flex:1 1 auto; min-height:0; padding:10px 10px 6px; overflow:hidden; }
 .node-drop { width:100%; height:100%; min-height:0; border-radius:15px; border:1px dashed var(--line); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; color:var(--faint); background:var(--soft); font-size:12px; font-weight:800; padding:12px; box-sizing:border-box; text-align:center; overflow:hidden; }
 .node-drop i { width:24px; height:24px; }
-.upload-entry-drop { min-height:0; height:100%; padding:24px; gap:16px; border-radius:16px; border:0; background:transparent; color:var(--muted); align-items:center; justify-content:center; text-align:center; cursor:grab; transition:background .14s ease; }
+.upload-entry-drop { min-height:0; height:100%; padding:24px; gap:16px; border-radius:var(--gbz-node-radius, 8px); border:0; background:transparent; color:var(--muted); align-items:center; justify-content:center; text-align:center; cursor:grab; transition:background .14s ease; }
 .upload-entry-node:hover .upload-entry-drop,.upload-entry-node.drop-target .upload-entry-drop { border-color:var(--strong); background:color-mix(in srgb, var(--card) 68%, var(--soft)); color:var(--text); }
 .upload-entry-icon { width:54px; height:54px; border-radius:16px; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); }
 .upload-entry-icon i,.upload-entry-icon svg { width:42px; height:42px; stroke-width:1.8; }
@@ -4503,7 +4503,11 @@ body.theme-dark.theme-custom {
     width:100%;
     height:100%;
     min-height:0;
-    border-radius:16px;
+    /* 2026-10-31（用户要求）：圆角必须跟节点同一个变量。
+       这里原来写死 16px，而节点半径是 --gbz-node-radius(8px)，选中描边按节点半径画，
+       两者圆心相同半径不同 → 四个角上线比素材"方"，角部露出一段月牙形黑缝，
+       看起来就是"线没包住"。统一成一个变量后描边与素材边缘严丝合缝。 */
+    border-radius:var(--gbz-node-radius, 8px);
     overflow:hidden;
     display:flex;
     align-items:center;
@@ -4517,7 +4521,7 @@ body.theme-dark.theme-custom {
     width:100%;
     height:100%;
     object-fit:cover;
-    border-radius:16px;
+    border-radius:var(--gbz-node-radius, 8px);
 }
 .image-node.upload-entry-node .upload-preview-media img,
 .image-node.upload-entry-node .upload-preview-media video {
@@ -4539,7 +4543,7 @@ body.theme-dark.theme-custom {
     /* 注意：:not(.empty-node) 的通用规则把 .upload-preview-media 的底色/边框清成了 transparent
        （那是给铺满节点的图片/视频用的）。图片和视频自己就是画面，但音频和文件没有画面，
        所以这两类必须自己补一层卡片底色，否则内容会直接浮在画布网格上。 */
-    border-radius:16px;
+    border-radius:var(--gbz-node-radius, 8px);
     background:var(--smart-node-card-inner);
     border:1px solid var(--smart-node-border);
     box-sizing:border-box;
@@ -12676,14 +12680,15 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 .image-node.upload-entry-node:not(.empty-node) .upload-preview-media:has(video) {
     background: #000 !important;
     overflow: hidden !important;
-    border-radius: 16px !important;
+    /* 2026-10-31：与节点同半径，选中描边才能包住视频画面 */
+    border-radius: var(--gbz-node-radius, 8px) !important;
 }
 .image-node.upload-entry-node:not(.empty-node) .upload-preview-media video {
     background: #000 !important;
     width: 100% !important;
     height: 100% !important;
     object-fit: contain !important;
-    border-radius: 16px !important;
+    border-radius: var(--gbz-node-radius, 8px) !important;
 }
 
 /* Each thumb inside a group gets rounded corners */
@@ -19492,14 +19497,19 @@ html body .world .image-node.image-node.image-node.image-node.image-node.upload-
     box-shadow: none !important;
 }
 html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-card {
-    border-radius: 18px !important;
+    /* 与素材/节点同半径：卡片本身没有可见边框，但底色会在 object-fit:contain 留边处露出，
+       半径不一致时同样会出现角部月牙缝。 */
+    border-radius: var(--gbz-node-radius, 8px) !important;
     background: #101010 !important;
 }
 html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media,
 html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media > img,
 html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) .upload-preview-media > video {
-    border-radius: 17px !important;
-    clip-path: inset(0 round 17px) !important;
+    /* 2026-10-31（用户要求）：这里原来硬编码 17px，比节点半径 8px 大，
+       选中描边按节点半径画 → 四个角上线比素材"方"、角部露出月牙形黑缝（"线没包住"）。
+       改为跟节点同一个变量，描边与素材边缘严格同心。 */
+    border-radius: var(--gbz-node-radius, 8px) !important;
+    clip-path: inset(0 round var(--gbz-node-radius, 8px)) !important;
 }
 html body .world .image-node.image-node.image-node.image-node.image-node.upload-entry-node:not(.empty-node) > .node-body {
     padding: 0 !important;
