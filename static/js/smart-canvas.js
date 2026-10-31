@@ -5810,7 +5810,11 @@ function singleImageLayout(image, node, scale){
     const explicitH = Number(node?.h);
     // 2026-10-11（用户要求，对齐 3000 版同函数开头口径）：右下角缩放手柄拖出的 w/h 优先使用，
     // 否则手柄拖完会被下面的 fit 口径弹回。上传节点仍走下方专用分支，避免历史尺寸干扰。
-    if(node?.uploadEntry !== true && Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24){
+    // 2026-10-31（用户反馈：占位框/结果卡没按选的比例）——走过生成流程的节点（genSize3000）
+    // 上留存的 w/h 只是历次占位框的快照，不能当成「用户手动拉的尺寸」：否则一张 9:16 成片
+    // 被塞进上一步留下的方框里，出图后永远是正方形。只有用户真的拖过手柄（boxManual）才认。
+    const trustExplicitBox = node?.uploadEntry !== true && (node?.boxManual === true || node?.genSize3000 !== true);
+    if(trustExplicitBox && Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24){
         return {cols:1, rows:1, width:Math.round(explicitW), height:Math.round(explicitH), thumb:Math.round(96 * scale), single:true};
     }
     // 音频没有自然宽高，否则会套用图片的 260x180 默认框，导致卡片四周大片空白。给一个贴合内容的紧凑尺寸。
@@ -6813,7 +6817,9 @@ function imageLayout(images, scale=1, node=null){
         const edge = Math.max(40, Math.round(Number(node.loopOutputEdge) || MEDIA_SINGLE_IMAGE_DEFAULT_EDGE));
         return {cols:1, rows:1, width:edge, height:edge, thumb:Math.round(96 * s), single:true, loopSquare:true};
     }
-    if(appendPendingCount){
+    // 2026-10-31（用户反馈：占位框没按比例）——只有 1 格（空节点首跑 / 单图追加 1 格）时不走宫格：
+    // 宫格的格位是固定方形，会把竖版请求的占位框压成正方形。单格直接走下面 count===0 的比例盒。
+    if(appendPendingCount && layoutCount > 1){
         return appendPendingImageGroupLayout(layoutCount, s, node);
     }
     if(count === 0){
@@ -6825,7 +6831,15 @@ function imageLayout(images, scale=1, node=null){
         const pending = Number(node?.pending) > 0 || pendingPlaceholderCount > 0 || Boolean(node?.queued);
         const isImageNodeForGen = !node?.type || node.type === 'smart-image';
         const pendingBox = pending && node?.appendPendingOutput
-            ? appendPendingCompactBoxSize(appendPendingDisplayCount(node, 0) || Number(node?.pending || 1) || 1, (() => { const r = pendingThumbRatioOf(node); return r ? r.h / r.w : null; })())
+            // 2026-10-31（用户反馈：占位框没按比例）——比例必须取「本次占位格」的快照
+            //（pendingPlaceholders[i].outputW/H），不能再从 node.runSettings 推：runSettings 是
+            // 上一次生成留下的，上一轮是方图时这里就会把新一轮的竖版占位画成正方形。
+            ? appendPendingCompactBoxSize(appendPendingDisplayCount(node, 0) || Number(node?.pending || 1) || 1, (() => {
+                const livePlaceholder = (Array.isArray(node?.pendingPlaceholders) ? node.pendingPlaceholders : [])
+                    .find(item => item && !item.failed && !item.querying) || null;
+                const r = pendingThumbRatioOf(node, livePlaceholder);
+                return r ? {w:r.w, h:r.h} : null;
+            })())
             : pending
             ? (isImageNodeForGen && node?.uploadEntry !== true && node?.singleI2IPendingOutput !== true && Number(node?.pending || 1) <= 1
                 // 生成中的单张占位优先使用提交时保存的比例快照。
@@ -31994,7 +32008,19 @@ function pendingVideoBaseBox3000(runSettings, refs){
 }
 function appendPendingCompactBoxSize(count=1, ratio=null){
     const c = Math.max(1, Number(count) || 1);
-    const base = pendingBaseBox3000(ratio);
+    // 2026-10-31（用户反馈：占位框没按比例）——ratio 有两个调用口径：对象 {w,h} 和 h/w 数值。
+    // 以前数值口径直接丢给 pendingBaseBox3000（它只认 {w,h}），拿到 undefined 就回退 1024×1024，
+    // 占位框于是恒为正方形。这里统一归一成 {w,h}。
+    const ratioSize = (() => {
+        if(ratio && typeof ratio === 'object'){
+            const rw = Number(ratio.w || ratio.width || 0);
+            const rh = Number(ratio.h || ratio.height || 0);
+            return rw > 0 && rh > 0 ? {w:rw, h:rh} : null;
+        }
+        const n = Number(ratio);
+        return n > 0 ? {w:1, h:n} : null;
+    })();
+    const base = pendingBaseBox3000(ratioSize);
     if(c <= 1){
         return {w:base.w, h:base.h, thumb:Math.max(base.w, base.h), cellW:base.w, cellH:base.h, cols:1, rows:1};
     }
@@ -32097,6 +32123,13 @@ function applyAppendPendingPreviewBox(node){
     // 改用与生成完成后完全同源的宫格口径：thumb 固定 round(224×scale)、cols=宫格规则、
     // 盒 = cols/visibleRows×(thumb+8) + 32。这样等待中与完成后格子尺寸、盒子尺寸完全一致，
     // 每追加一张只是多一格（满了换行），已有格子大小永远不变。
+    // 2026-10-31（用户反馈：占位框没按比例）——只有 1 张（首次出图 / 只追加 1 格）时，
+    // 外框就是本次请求的比例盒，不能被宫格的方形格位撑成横扁或正方形。
+    if(totalCount <= 1){
+        node.w = Math.round(compactBox.w);
+        node.h = Math.round(compactBox.h);
+        return layout;
+    }
     if((node.images || []).length > 0){
         const sFix = nodeScale(node);
         const tFix = Math.max(112, Math.round(MEDIA_GROUP_THUMB_BASE * sFix));
@@ -37203,6 +37236,9 @@ async function runGeneration(){
     }
     undoSuppressed = false;
     const pendingNode = branchNode || node;
+    // 2026-10-31：新一次生成要按「本次请求的比例」重新排框，上一次用户手动拉的尺寸标记作废
+    //（否则旧方框会被当成手动尺寸一直沿用，占位框看起来没跟比例走）。
+    if(pendingNode) delete pendingNode.boxManual;
     const pendingKeepSize = branchNode ? null : smartNodeSizeSnapshot(pendingNode);
     const existingPendingTasks = smartPendingTasks(pendingNode);
     const existingPendingPlaceholders = (Array.isArray(pendingNode.pendingPlaceholders) ? pendingNode.pendingPlaceholders : [])
@@ -37258,6 +37294,10 @@ async function runGeneration(){
             applyAppendPendingPreviewBox(pendingNode);
         } else if((pendingNode.images || []).length === 0 || pendingNode.replacePendingOutput){
             applyPendingPreviewBox(pendingNode, pendingNode.pending, {sourceNode:node, refs, settings, baseBox:pendingBaseBox});
+        } else if((pendingNode.images || []).length <= 1){
+            // 2026-10-31（用户反馈：占位框没按比例）——单图节点重跑时，上一轮留下的框（可能是方框）
+            // 不该继续顶着本次请求的比例，按本次比例盒重新排一次。
+            applyPendingPreviewBox(pendingNode, Math.max(1, Number(pendingNode.pending) || 1), {sourceNode:node, refs, settings, baseBox:pendingBaseBox});
         } else {
             keepSmartNodeSize(pendingNode, pendingKeepSize);
         }
@@ -40865,6 +40905,9 @@ window.onmousemove = e => {
         node.w = Math.max(minW, Math.round(resizeState.startW + dx));
         node.h = Math.max(minH, Math.round(resizeState.startH + dy));
         node.scale = 1;
+        // 2026-10-31：画布手柄拖出来的框是「用户自己定的尺寸」，记下来，
+        // 这样 singleImageLayout 不会按成片比例把它重新 fit（见 boxManual 说明）。
+        if(node.type === 'smart-image' && node.uploadEntry !== true) node.boxManual = true;
         updateNodeElementDuringResize(node, {refreshInteraction:node.type !== 'smart-prompt'});
         return;
     }
