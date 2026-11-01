@@ -25995,6 +25995,28 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
             port.addEventListener('dblclick', e => { e.stopPropagation(); });
         });
         el.onmousedown = beginNodeDrag;
+        // 2026-11-01（用户报「AI助手关闭后，按 ctrl 键不能引用」）：Ctrl+点击卡片本体
+        // （标题栏 / 图片区之外的空白）原来什么都不做 —— 引用只有图片区那条 click 链路，
+        // 点在卡片其它位置就以为引用坏了。这里补一条与图片区同款的路：
+        // Ctrl/Cmd+点击（没拖动）= 选中该卡、把卡片素材引用进 AI 助手并自动打开面板。
+        // 图片区/缩略图自己的 Ctrl 处理会 stopPropagation，到不了这里，不会重复引用；
+        // Ctrl+拖动连线走 dragState.ctrlGroup，拖动过（位移超阈值）的 click 也不算。
+        let cardCtrlDown = null;
+        el.addEventListener('mousedown', e => { cardCtrlDown = { x: e.clientX, y: e.clientY }; });
+        el.addEventListener('click', e => {
+            if(!(e.ctrlKey || e.metaKey)) return;
+            if(!cardCtrlDown || Math.hypot(e.clientX - cardCtrlDown.x, e.clientY - cardCtrlDown.y) > 5){ cardCtrlDown = null; return; }
+            cardCtrlDown = null;
+            if(e.target.closest('button,input,textarea,select,.node-port,.smart-node-floating-menu')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:id, index:-1};
+            paintSelectionClassNow();
+            setSmartAgentOpen(true);
+            if(!smartAgentAttachSelectedImageRef()) toast('该卡片没有可引用的素材');
+        });
         el.ondragover = e => setSmartDropCopyEffect(e);
         el.ondrop = async e => {
             e.preventDefault();
