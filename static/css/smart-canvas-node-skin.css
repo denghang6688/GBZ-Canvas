@@ -23,9 +23,10 @@ html body {
        value once; nested content surfaces follow the same visual family.
        2026-10-30（用户要求）圆角 18px → 8px（参考第三方画布，方角感）。
        内层差值同步 -4px → -2px：外框 8px 时内层 4px 会显得外框反而更圆。
-       2026-11-01（用户要求）8px → 7px：卡片本体方角感更强，选中时外面再加
-       一圈 8px 圆角的灰线（7 + 1px 外扩 = 同心），卡片本身不再有任何描边。 */
-    --gbz-node-radius: 7px;
+       2026-11-01（用户要求）8px → 7px → 回到 8px：卡片本体 8px，选中时外面
+       再加一圈 1px 灰线，线的圆角 9px（8 + 1px 外扩 = 同心，线内沿正好 8px
+       与卡片同弧）。卡片本身不再有任何描边。 */
+    --gbz-node-radius: 8px;
     --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 2px);
     --gbz-node-toolbar-radius: 8px;
     --gbz-node-shadow: 0 14px 34px rgba(0, 0, 0, .22);

@@ -9382,8 +9382,9 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node) {
     /* 2026-11-01（用户要求，最终方案）：素材一律按「无描边卡片」显示。
        默认态完全没有线，悬停也不加线，只有选中时外面浮现一圈 1px 灰色线。
-       卡片圆角 7px（--gbz-node-radius），线的圆角 8px = 7 + 1px 外扩，圆心重合，
-       线的弧不会切进卡片、卡片也不会漏到线外侧（上一版黑角的成因）。
+       卡片圆角 8px（--gbz-node-radius），线的圆角 9px = 8 + 1px 外扩，圆心重合，
+       线的「内沿」半径正好也是 8px —— 与卡片同一条弧，所以线既不会切进卡片、
+       卡片也不会漏到线外侧（上一版黑角的成因）。
        为什么用 ::before 而不是 outline：图片节点里 <img> 是 absolute + transform 的
        独立 stacking context，会把自己的 outline 整个盖住（空节点能看见、图片节点全
        看不见，这就是「有的有白线有的没有」的真因）。伪元素带 z-index 才画在素材上面。
@@ -9412,7 +9413,7 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     /* 默认与悬停都不画线：卡片就是干净的卡片 */
     border-color: transparent;
     border-width: calc(1px * var(--canvas-inverse-scale, 1));
-    border-radius: calc(var(--gbz-node-radius, 7px) + var(--node-ring-outset, 0px));
+    border-radius: calc(var(--gbz-node-radius, 8px) + var(--node-ring-outset, 0px));
     pointer-events: none !important;
     z-index: 8;
 }
