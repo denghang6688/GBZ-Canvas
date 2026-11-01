@@ -5043,15 +5043,29 @@ function paintSelectionClassNow(){
         if (on !== el.classList.contains('selected')) el.classList.toggle('selected', on);
     }
 }
-function scheduleSelectionSync(needRender = false){
+function scheduleSelectionSync(needRender = false, skipComposer = false){
     if(selectionSyncRaf) cancelAnimationFrame(selectionSyncRaf);
     selectionSyncRaf = requestAnimationFrame(() => {
         selectionSyncRaf = 0;
         // rAF 回调仍在「这一帧」的绘制之前，再套一个宏任务才会落到位图之后。
         setTimeout(() => {
-            syncSelectionUi();
-            updateComposer();
-            if(needRender) render();
+            // 2026-11-01（用户要求「工具条和输入面板弹出越快越好」）：
+            // 原来是 syncSelectionUi() → updateComposer()，实测 syncSelectionUi 要 26~33ms
+            // （全量遍历节点 + 选中预览 + 连线层），面板得排队等它跑完才开始 open。
+            // 现在拆成三段：
+            //   ① 面板/工具条（用户点完第一眼要找的东西）先跑，跑完浏览器就能画面板；
+            //   ② 全量选中态同步（不影响面板外观）挪到下一个任务，让①的结果先上屏；
+            //   ③ 需要重建时再 render。
+            if(!skipComposer) updateComposer();
+            // ② 等面板真的上屏再算全量选中态：syncSelectionUi 会让 90+ 个节点重新匹配
+            // 样式（实测触发 ~30ms 样式重算 + 后续绘制），紧贴 ① 跑就会把面板那一帧
+            // 往后顶一百毫秒。rAF 里再套 setTimeout 才能确定落在「画完之后」。
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    syncSelectionUi();
+                    if(needRender) render();
+                }, 0);
+            });
         }, 0);
     });
 }
@@ -25083,6 +25097,14 @@ function bindNodeEvents(){
                 if(!(Number(node.w) > 0)) node.w = PROMPT_NODE_DEFAULT_WIDTH;
                 if(!(Number(node.h) > 0)) node.h = PROMPT_NODE_DEFAULT_HEIGHT;
             }
+            // 2026-11-01（用户要求「弹出越快越好」）：mousedown 已经把这个节点切成单选了，
+            // 紧接着的 click 会再做一遍相同的事 —— 实测多跑一次 syncSelectionUi(26ms) +
+            // updateComposer(32ms)，正好压在面板淡入的那几帧上，动画因此一顿。
+            // 完全同状态时直接跳过，只留 closeGroupColorPicker 这类副作用。
+            const selectionUnchanged = selectedId === id
+                && selectedIds.length === 0
+                && selectedImage.nodeId === ''
+                && selectedImage.index === -1;
             selectedId = id;
             selectedIds = [];
             selectedImage = {nodeId:'', index:-1};
@@ -25096,8 +25118,12 @@ function bindNodeEvents(){
             else {
                 // 2026-11-01（用户要求「反应要快」）：先把 .selected 落到位（下一帧就能画出来），
                 // 再让 syncSelectionUi / updateComposer 走「画完这一帧之后」的通道。
-                paintSelectionClassNow();
-                scheduleSelectionSync(false);
+                if(!selectionUnchanged){
+                    paintSelectionClassNow();
+                    // 同 mousedown 分支：面板状态与描边并到同一批变更，只做一轮样式重算。
+                    updateComposer();
+                    scheduleSelectionSync(false, true);
+                }
                 if(closedGroupColor) render();
             }
             return;
@@ -25948,7 +25974,14 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 selectedImage = {nodeId:'', index:-1};
                 if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
                 paintSelectionClassNow();
-                scheduleSelectionSync(false);
+                // 2026-11-01（用户要求「工具条和输入面板弹出越快越好」）：
+                // 之前这里只切 .selected，面板要等 rAF+setTimeout 之后才 open ——
+                // 那样浏览器要为这次点击做两轮样式重算（.selected 一轮 ~73ms，
+                // 面板 open 再一轮 ~35ms），中间还隔着一个空帧，面板因此要 200ms 才露头。
+                // 把 updateComposer 并到同一批变更里：描边和面板一次算完、一帧上屏。
+                // updateComposer 已把 20ms 的参数区渲染挪走，现在本身只要 ~15ms。
+                updateComposer();
+                scheduleSelectionSync(false, true);
             }
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
             document.body.classList.add('smart-node-drag');
@@ -30795,10 +30828,25 @@ function updateComposer(){
     updatePromptWordCount();
     renderInputPromptPreview(node);
     syncCascadeRunButton(node);
-    updateProviderModels();
+    scheduleDynamicParamsRender();
     syncImageOutputModeToggle();
     syncRunButtonState(node);
     syncPromptScrollbar();
+}
+/* 2026-11-01（用户要求「工具条和输入面板弹出越快越好」）：
+   选中一个节点时 updateComposer 实测 35ms，其中 20ms 全在 renderDynamicParams
+   （重建整块参数区 DOM + 重跑 lucide.createIcons）。而面板要「弹出来」只需要
+   open 类 + 定位 —— 参数区不在第一眼范围内，晚一帧画完全看不出来。
+   把这一项推到「面板出帧之后」，点击到面板可见能省掉 20ms。
+   只改 updateComposer 这条路径；用户主动切引擎/平台（其它 3 个调用点）仍同步渲染。
+   合并成一次：连续点几个节点只有最后一个节点的参数区会真正重画。 */
+let deferredParamsRaf = 0;
+function scheduleDynamicParamsRender(){
+    if(deferredParamsRaf) return;
+    deferredParamsRaf = requestAnimationFrame(() => {
+        deferredParamsRaf = 0;
+        setTimeout(() => { updateProviderModels(); }, 0);
+    });
 }
 function renderInputPromptPreview(node){
     if(!inputPromptPreview) return;
@@ -40812,7 +40860,9 @@ shell.onmousedown = e => {
     if(e.button === 0 && (selectedId || selectedIds.length)){
         clearSelection();
         paintSelectionClassNow();
-        scheduleSelectionSync(true);
+        // 同「点节点」的处理：线和面板在同一批变更里一起收掉，只做一轮样式重算。
+        updateComposer();
+        scheduleSelectionSync(true, true);
     }
     if(e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
