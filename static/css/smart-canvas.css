@@ -9397,11 +9397,15 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     border-color: transparent !important;
 }
 
-/* 线的外扩量 = 1 个「屏幕」像素（用 --canvas-inverse-scale 抵消缩放），
-   所以任何倍率下都是「离卡片 1px + 线宽 1px」，放大时不会变成一圈很宽的留白。
-   圆角跟着外扩量一起加，恒保持同心。 */
+/* 选中线 = 卡片「外面」的一圈：离卡片固定一段空隙，再画 1 个「屏幕」像素的线。
+   空隙/线宽都用 --canvas-inverse-scale 抵消缩放，所以任何倍率下都是「离卡片 3px + 线 1px」。
+   圆角跟着外扩量一起加，线永远与卡片同心。
+   2026-11-01（用户两次反馈「还是内圈」）：原来 outset 只有 1px、线和卡片边完全贴死，
+   看上去就跟卡片自带的描边一样。改成 3px 空隙后，线明确浮在卡片之外。 */
 .world .image-node {
-    --node-ring-outset: calc(1px * var(--canvas-inverse-scale, 1));
+    --node-ring-gap: calc(3px * var(--canvas-inverse-scale, 1));
+    --node-ring-w: calc(1px * var(--canvas-inverse-scale, 1));
+    --node-ring-outset: calc(var(--node-ring-gap) + var(--node-ring-w));
 }
 
 .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
@@ -9412,15 +9416,15 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     border-style: solid;
     /* 默认与悬停都不画线：卡片就是干净的卡片 */
     border-color: transparent;
-    border-width: calc(1px * var(--canvas-inverse-scale, 1));
+    border-width: var(--node-ring-w, 1px);
     border-radius: calc(var(--gbz-node-radius, 8px) + var(--node-ring-outset, 0px));
     pointer-events: none !important;
     z-index: 8;
 }
 .world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
-    /* 选中 = 卡片外圈贴边浮现 1 屏幕 px 的灰线。灰度 .45（黑底上约 rgb(112,112,112)）：
-       参考截图实测选中线灰度 168 ≈ 我们的 .60，但 .60 在主画布上偏硬，用户从 .30/.45 里选了 .45 ——
-       比 .30(77) 明显一档，又不到 .60 那种「自带发光」的观感。线仍走外圈（不啃素材、不改卡片尺寸）。 */
+    /* 选中 = 卡片外圈浮现 1 屏幕 px 的灰线，与卡片留 3px 空隙。
+       灰度 .45（黑底上约 rgb(112,112,112)）：参考实测选中线 168 ≈ 我们的 .60，
+       但 .60 在主画布上偏硬，用户从 .30/.45 里选了 .45。 */
     border-color: rgba(244, 244, 245, .45);
 }
 

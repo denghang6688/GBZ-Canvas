@@ -30,7 +30,10 @@ html body {
     --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 2px);
     --gbz-node-toolbar-radius: 8px;
     --gbz-node-shadow: 0 14px 34px rgba(0, 0, 0, .22);
-    --gbz-node-shadow-selected: 0 0 0 1px rgba(246, 246, 246, .36), 0 18px 42px rgba(0, 0, 0, .28);
+    /* 2026-11-01：选中态原来是 box-shadow 的 `0 0 0 1px` 光晕，紧贴卡片边，
+       会和 ::before 的外圈线叠成「贴着卡片的两层」——外圈线因此看不出是外圈。
+       光晕去掉，选中只由 ::before（离卡片 3px 的 1px 线）表达。 */
+    --gbz-node-shadow-selected: 0 18px 42px rgba(0, 0, 0, .28);
 }
 
 html body.theme-light {

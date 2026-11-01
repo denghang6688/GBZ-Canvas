@@ -5026,6 +5026,35 @@ function clearImageClickTimer(){
         imageClickTimer = null;
     }
 }
+/* 2026-11-01（用户要求「选中和点空白取消反应要快」）：
+   .selected 的类切换本身是廉价操作，真正贵的是 syncSelectionUi() 的全量遍历
+   （syncSmartSelectedImageResolution / renderSmartAgent* / 连线层）和取消选中后的 render()。
+   实测 92 个节点的画布上：选中 55ms、取消 79ms，全部发生在鼠标事件当下，
+   浏览器必须等这段跑完才肯画下一帧 —— 所以描边总是「慢半拍」才出现/消失。
+   这里把「改类」和「后续重活」拆开：改类同步做（<1ms，下一帧立刻可见），
+   重活推到「下一帧之后」的宏任务里跑，绝不占用反馈那一帧。 */
+let selectionSyncRaf = 0;
+function paintSelectionClassNow(){
+    const ids = new Set(selectedNodeIds());
+    const all = world.querySelectorAll('.image-node');
+    for (let i = 0; i < all.length; i += 1) {
+        const el = all[i];
+        const on = ids.has(el.dataset.id || '');
+        if (on !== el.classList.contains('selected')) el.classList.toggle('selected', on);
+    }
+}
+function scheduleSelectionSync(needRender = false){
+    if(selectionSyncRaf) cancelAnimationFrame(selectionSyncRaf);
+    selectionSyncRaf = requestAnimationFrame(() => {
+        selectionSyncRaf = 0;
+        // rAF 回调仍在「这一帧」的绘制之前，再套一个宏任务才会落到位图之后。
+        setTimeout(() => {
+            syncSelectionUi();
+            updateComposer();
+            if(needRender) render();
+        }, 0);
+    });
+}
 function syncSelectionUi(){
     const ids = selectedNodeIds();
     world.classList.toggle('smart-multi-selected', ids.length > 1);
@@ -25065,8 +25094,10 @@ function bindNodeEvents(){
             const needsFullRender = Boolean(smartTransformEditorState && smartTransformEditorState.nodeId === id);
             if(needsFullRender) render();
             else {
-                syncSelectionUi();
-                updateComposer();
+                // 2026-11-01（用户要求「反应要快」）：先把 .selected 落到位（下一帧就能画出来），
+                // 再让 syncSelectionUi / updateComposer 走「画完这一帧之后」的通道。
+                paintSelectionClassNow();
+                scheduleSelectionSync(false);
                 if(closedGroupColor) render();
             }
             return;
@@ -40764,6 +40795,13 @@ shell.onmousedown = e => {
         didPan = false;
         return;
     }
+    // 2026-11-01（用户要求「点空白取消要快」）：按下就把线收掉，不等 mouseup。
+    // 类切换是同步的（<1ms），所以这一帧就能看到线消失；重活（syncSelectionUi / render）推后一帧。
+    if(e.button === 0 && (selectedId || selectedIds.length)){
+        clearSelection();
+        paintSelectionClassNow();
+        scheduleSelectionSync(true);
+    }
     if(e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
     didPan = false;
@@ -40794,10 +40832,9 @@ shell.onclick = e => {
     closeCreateMenu();
     closePortNextMenu();
     clearSelection();
-    // 2026-10-31（用户报「点空白线还是亮的 / 收线慢」）：先只做类切换把白线立刻收回，
-    // 再去跑全量 render（≈100ms+）。否则描边要排队等整棵画布重建完才变灰。
-    syncSelectionUi();
-    render();
+    // 2026-11-01（用户要求「取消要快」）：只做类切换把线立刻收回，render 推后一帧再跑。
+    paintSelectionClassNow();
+    scheduleSelectionSync(true);
 };
 minimap?.addEventListener('mousedown', e => {
     if(e.button !== 0) return;
