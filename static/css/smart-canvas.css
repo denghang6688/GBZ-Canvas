@@ -9402,8 +9402,8 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     border-color: transparent !important;
 }
 
-/* 选中线 = 卡片「外面」紧贴着的一圈：卡片 8px 圆角、外面 1 个「屏幕」像素的线、线的圆角 9px。
-   2026-11-01（用户定稿）：不要空隙，线就贴卡片外沿走，靠 9px/8px 的同心圆角把它读成「外圈」。
+/* 选中线 = 卡片「外面」紧贴着的一圈：卡片 8px 圆角、外面 1.5 个「屏幕」像素的线、线的圆角 9.5px。
+   2026-11-01（用户定稿）：不要空隙，线就贴卡片外沿走，靠圆角同心把它读成「外圈」。
 
    ⚠ 这里用**外** box-shadow 画线，不用 border、也不再用 outline ——
    两次断线事故的两个根因都在这里收口：
@@ -9414,11 +9414,15 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
       伪元素盒**外侧**的，放大后整条线会跟卡片脱开。
    外阴影（非 inset）的 spread 从伪元素边向外长，伪元素又和卡片 border-box 重合：
    环正好占满「卡片边 → 卡片边外 w」，内沿就是卡片边，不切进卡片、也不留缝，
-   且 spread 没有 1px 下限，任何倍率都是 1 个屏幕像素。
-   圆角：伪元素 = 卡片圆角，外阴影的外沿半径 = 卡片圆角 + w，即 8/1/9。 */
+   且 spread 没有 1px 下限，任何倍率都是同一个屏幕像素宽度。
+   圆角：伪元素 = 卡片圆角，外阴影的外沿半径 = 卡片圆角 + w，即 8 / 1.5 / 9.5。 */
 .world .image-node {
-    /* 线宽 = 1 个「屏幕」像素（世界 px 数随缩放反向变化）。 */
-    --node-ring-w: calc(1px * var(--canvas-inverse-scale, 1));
+    /* 线宽 = 1.5 个「屏幕」像素（世界 px 数随缩放反向变化）。
+       2026-11-01（用户报「描边线有点细了」）：原来是 1 个屏幕像素，在高分屏上正好
+       落在 2 个物理像素、又只有 #787878 这一档灰度，视觉重量偏轻，浅色卡片旁边几乎
+       看不出来。加到 1.5（DPR2 → 3 物理像素）后轮廓清晰但没有粗框感；再往上 2 个
+       屏幕像素就开始抢内容了。 */
+    --node-ring-w: calc(1.5px * var(--canvas-inverse-scale, 1));
     --node-ring-radius: var(--gbz-node-radius, 8px);
 }
 
@@ -9456,7 +9460,7 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     inset: -1px !important;
 }
 .world .image-node.selected:not(.drop-target):not(.image-replace-target-node)::before {
-    /* 选中 = 卡片外圈紧贴的 1 屏幕 px 灰线（线的圆角 9px，卡片 8px）。
+    /* 选中 = 卡片外圈紧贴的 1.5 屏幕 px 灰线（线的圆角 9.5px，卡片 8px）。
 
        2026-11-01（用户第二次报「下面还有点不齐」）：原来是 rgba(244,244,245,.45) 的
        半透明白线，画在节点 1px 的透明边沟里。这条沟正好卡在卡片外沿：左右上三面沟里
