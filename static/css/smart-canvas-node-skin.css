@@ -390,9 +390,12 @@ html body .world .image-node.group-node {
    the same solid neutral frame as the other functional nodes.
    2026-11-01（用户要求）所有素材按无描边卡片显示：H3 这条 (0,9,2) 的 !important
    边框是最后一个还会露线的（比 smart-canvas.css 那条 :not 链还高一档），
-   改成 transparent；选中灰圈由 .image-node::before 统一绘制。 */
+   改成 transparent；选中灰圈由 .image-node::before 统一绘制。
+   2026-11-01 二次修正：边框宽度也归零。透明的 1px 边框会把这 1px 的世界坐标
+   变成一条实心边沟（背景 clip 到 border-box），100% 时靠 1px 的线刚好抵消，
+   放大后就是素材画面与选中线之间那条黑缝。宽度归零后画面直接铺到卡片边。 */
 html body .world .image-node.minimax-h3-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) {
-    border: 1px solid transparent !important;
+    border: 0 solid transparent !important;
     border-style: solid !important;
     border-radius: var(--gbz-node-radius) !important;
 }
@@ -2509,4 +2512,15 @@ html body.theme-light .world .image-node.image-node.group-node:not(.grid-split-n
 html body.theme-light .world .image-node.image-node.smart-group-node:not(.smart-group-member-node) .node-resize-handle:hover,
 html body.theme-light .world .image-node.image-node.group-node:not(.grid-split-node) .node-resize-handle:hover {
     color: rgba(10, 10, 10, .92) !important;
+}
+
+/* 2026-11-01（用户报「右边有黑色空隙，没包住」）：素材卡一律不要那 1px 透明边框。
+   这个边框本身不可见，但背景默认 clip 到 border-box，会把 --gbz-node-bg 填进这 1px 的
+   边沟；100% 缩放时它只有 1px，和 1px 的选中线正好互相抵消，看不出问题；一放大到
+   500%，1px 世界坐标被放大成 5 个屏幕像素的黑边，夹在素材画面和选中线之间 ——
+   就是用户看到的「黑色空隙」。边框去掉后画面直接铺到卡片边，选中线再贴在最外沿。
+   只处理素材/功能卡，分组容器（group-node / smart-group-node / workflow-group-node /
+   history-group-node）的彩色框仍靠自己的 border，不在此列。 */
+html body .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.smart-group-member-node) {
+    border-width: 0 !important;
 }
