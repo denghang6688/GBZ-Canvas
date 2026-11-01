@@ -25938,6 +25938,18 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 const n = nodes.find(x => x.id === dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
+            // 2026-11-01（用户要求「反应速度再快一点」）：按下即选中，不等松手后的 click。
+            // 原来选中态要等 mouseup → click 才切换，用户按住多久描边就晚多久亮；
+            // 现在 pointerdown 当场把选中切过去（0.4ms），下一帧就能看到外圈线。
+            // 已在选中集合里的节点不动（避免拖动多选时被打散）；ctrl/shift 保持加选语义。
+            if(!e.ctrlKey && !e.shiftKey && !isNodeSelected(node.id)) {
+                selectedId = node.id;
+                selectedIds = [];
+                selectedImage = {nodeId:'', index:-1};
+                if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+                paintSelectionClassNow();
+                scheduleSelectionSync(false);
+            }
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();

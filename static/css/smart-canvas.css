@@ -9398,33 +9398,36 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 }
 
 /* 选中线 = 卡片「外面」紧贴着的一圈：卡片 8px 圆角、外面 1 个「屏幕」像素的线、线的圆角 9px。
-   线宽用 --canvas-inverse-scale 抵消缩放，任何倍率下都是 1 屏幕 px。
-   圆角跟着外扩量一起加（8 + 1 = 9），线内沿半径 9-1=8 与卡片同弧，所以线跟卡片严丝合缝、不留缝也不打架。
-   2026-11-01（用户定稿）：不要空隙，线就贴卡片外沿走，靠 9px/8px 的同心圆角把它读成「外圈」。 */
+   2026-11-01（用户定稿）：不要空隙，线就贴卡片外沿走，靠 9px/8px 的同心圆角把它读成「外圈」。
+
+   ⚠ 这里用 box-shadow 的 spread 画线，不用 border —— 这是「下面没包住」的根因修复：
+   border 的四条边是分别 snap 到设备像素网格的，元素边界带小数（缩放不是整数倍时必然带）
+   就会出现「上左下三条边各 1px、底边取整成 0px」的断线。box-shadow 由绘制层抗锯齿渲染、
+   不参与像素对齐，四个方向永远一致，任何倍率下都不会缺边。
+   几何上等价：元素圆角 8px + spread 1px ⇒ 外沿圆角 9px、内沿就是卡片边，
+   与 border 方案的 8/1/9 完全一致，但不会退化。 */
 .world .image-node {
-    --node-ring-gap: 0px;
     --node-ring-w: calc(1px * var(--canvas-inverse-scale, 1));
-    --node-ring-outset: calc(var(--node-ring-gap) + var(--node-ring-w));
 }
 
-.world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
+.world .image-node:not(.drop-target):not(.image-replace-target-node)::before {
     content: "" !important;
     position: absolute !important;
-    inset: calc(-1 * var(--node-ring-outset, 0px)) !important;
-    box-sizing: border-box;
-    border-style: solid;
+    inset: 0 !important;
+    border: 0 !important;
+    border-radius: var(--gbz-node-radius, 8px) !important;
     /* 默认与悬停都不画线：卡片就是干净的卡片 */
-    border-color: transparent;
-    border-width: var(--node-ring-w, 1px);
-    border-radius: calc(var(--gbz-node-radius, 8px) + var(--node-ring-outset, 0px));
+    outline: var(--node-ring-w, 1px) solid transparent !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
     pointer-events: none !important;
     z-index: 8;
 }
-.world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
+.world .image-node.selected:not(.drop-target):not(.image-replace-target-node)::before {
     /* 选中 = 卡片外圈紧贴的 1 屏幕 px 灰线（线的圆角 9px，卡片 8px）。
        灰度 .45（黑底上约 rgb(112,112,112)）：参考实测选中线 168 ≈ 我们的 .60，
        但 .60 在主画布上偏硬，用户从 .30/.45 里选了 .45。 */
-    border-color: rgba(244, 244, 245, .45);
+    outline-color: rgba(244, 244, 245, .45) !important;
 }
 
 /* H3 节点是全仓唯一还带可见 1px 灰边框的类型：node-skin 里那条
@@ -9596,8 +9599,6 @@ body.smart-agent-open .smart-minimap {
 
 /* 2026-08-03 flat card performance pass: remove card shadows and expensive effects. */
 .world .image-node,
-.world .image-node::before,
-.world .image-node::after,
 .world .image-node .image-wrap,
 .world .image-node .prompt-node-card,
 .world .image-node .prompt-node-text,
@@ -9607,6 +9608,17 @@ body.smart-agent-open .smart-minimap {
 .world .image-node .node-port,
 .world .image-node .node-resize-handle {
     box-shadow:none !important;
+    filter:none !important;
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+}
+
+/* 伪元素从上面那条「一刀切 box-shadow:none」里摘出来了：
+   2026-11-01 起选中外圈线改用 ::before 的 box-shadow spread 绘制（border 在非整数
+   缩放下会被逐边 snap 掉，出现「下面没包住」的断线），被 none !important 吃掉就整圈消失。
+   伪元素本来也没挂 filter/backdrop-filter，这里只关这两项。 */
+.world .image-node::before,
+.world .image-node::after {
     filter:none !important;
     backdrop-filter:none !important;
     -webkit-backdrop-filter:none !important;
