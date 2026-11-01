@@ -12523,6 +12523,17 @@ html body .world .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart-
 .opt-apply-btn { background: #fff; color: #111; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .opt-apply-btn:hover { background: #eee; }
 
+/* 2026-11-01（用户要求：minimax h3 样式和其他统一）
+   H3 空态的居中图标被 7548 那条 `.image-node:not(.upload-entry-node)
+   .smart-run-upload-icon svg { width:16px }` 压成 16px，而普通空节点在同一位置是
+   34px —— 同一套空态组件（.smart-run-empty-state）在 H3 上小了一半，看起来像另一个
+   组件。这里把 H3 拉回 34px；描边宽度 2.2、透明度 .68 本来就与其他节点相同，不动。 */
+html body .world .image-node.minimax-h3-node .smart-run-upload-icon svg,
+html body .world .image-node.minimax-h3-node .smart-run-upload-icon i {
+    width: 34px !important;
+    height: 34px !important;
+}
+
 /* remove divider line in H3 output node */
 .image-node.minimax-h3-node .node-body,
 .image-node.minimax-h3-node .image-wrap,
