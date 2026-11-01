@@ -2524,3 +2524,14 @@ html body.theme-light .world .image-node.image-node.group-node:not(.grid-split-n
 html body .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.smart-group-member-node) {
     border-width: 0 !important;
 }
+
+/* 2026-11-01（用户报「API生图现在是内圈描边」）：分组容器选中时不要再留自己那条 1px 边框。
+   它画在 border-box 内侧、宽度按「世界像素」随缩放一起放大（230% 下等于 2.3 个屏幕像素），
+   和外圈那条 1 屏幕像素的灰环叠在一起，变成一条又粗、重心又偏内的线 —— 读起来就是
+   「描边跑进卡片里了」。选中态统一只留外圈环，未选中时的彩色边框照旧（那是分组的分类标识）。 */
+html body .world .image-node.group-node.selected,
+html body .world .image-node.smart-group-node.selected,
+html body .world .image-node.workflow-group-node.selected,
+html body .world .image-node.history-group-node.selected {
+    border-color: transparent !important;
+}
