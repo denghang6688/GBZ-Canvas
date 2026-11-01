@@ -9380,32 +9380,28 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 }
 
 .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node) {
-    /* 2026-10-31（用户要求，B 方案）：常态一圈灰色描边，选中时「同一圈」原地变白。
-       为什么用 ::before 而不是 outline：图片节点里 <img> 是 absolute + transform 的独立
-       stacking context，会把自己的 outline 整个盖住（空节点能看见、图片节点全看不见，
-       这就是上一版「有的有白线有的没有」的真因）。伪元素带 z-index 才画在素材上面。
+    /* 2026-11-01（用户要求，最终方案）：素材一律按「无描边卡片」显示。
+       默认态完全没有线，悬停也不加线，只有选中时外面浮现一圈 1px 灰色线。
+       卡片圆角 7px（--gbz-node-radius），线的圆角 8px = 7 + 1px 外扩，圆心重合，
+       线的弧不会切进卡片、卡片也不会漏到线外侧（上一版黑角的成因）。
+       为什么用 ::before 而不是 outline：图片节点里 <img> 是 absolute + transform 的
+       独立 stacking context，会把自己的 outline 整个盖住（空节点能看见、图片节点全
+       看不见，这就是「有的有白线有的没有」的真因）。伪元素带 z-index 才画在素材上面。
        ::before 只在 locate-flash 的 ::after 之外，互不冲突。
-       伪元素不占布局、pointer-events:none，不影响点击与拖拽；
-       border 宽度用 --canvas-inverse-scale（1/缩放）反向补偿，任何倍率下都是屏幕 1px / 1.5px。
-       两态 inset/border-radius 完全相同，位置严丝合缝，只有颜色和 1px→1.5px 的变化。
-       注意：绝对不能在这里写 position —— .image-node 本体是 position:absolute（画布坐标靠它），
-       一旦被改成 relative，节点会掉回文档流、内部 absolute 的 <img> 静态位置错位，
-       整片素材变成空白灰块（2026-10-31 回归事故）。absolute 本身已是定位元素，
-       ::before 的 inset:0 不需要 relative 也能对齐。 */
-    /* 节点自身的 1~2px 灰边框交给这条描边表达，否则空节点 / 提示词节点会并排成两圈线。
-       但注意：设成 transparent 后这 1px 会露出画布底色，在描边内侧形成一圈黑缝
-       （看起来像"线没包住内容"）—— 所以下面用 --node-ring-outset 把伪元素外扩到
-       border box 外沿，正好压住这 1px，线条与卡片之间再无缝隙。 */
+       伪元素不占布局、pointer-events:none，不影响点击与拖拽。
+       注意：绝对不能在这里写 position —— .image-node 本体是 position:absolute（画布
+       坐标靠它），一旦被改成 relative，节点会掉回文档流、内部 absolute 的 <img> 静态
+       位置错位，整片素材变成空白灰块（2026-10-31 回归事故）。absolute 本身已是定位
+       元素，::before 的 inset 不需要 relative 也能对齐。 */
     border-color: transparent !important;
 }
-/* 描边外扩量 = 节点自身 border 宽度（实测：empty/prompt/loop/storyboard/h3 是 1px，
-   图片节点与上传节点是 0px）。圆角同步 +1px 保持同心。 */
-.world .image-node { --node-ring-outset: 0px; }
-.world .image-node.empty-node,
-.world .image-node.prompt-smart-node,
-.world .image-node.loop-smart-node,
-.world .image-node.storyboard-smart-node,
-.world .image-node.minimax-h3-node { --node-ring-outset: 1px; }
+
+/* 线的外扩量 = 1 个「屏幕」像素（用 --canvas-inverse-scale 抵消缩放），
+   所以任何倍率下都是「离卡片 1px + 线宽 1px」，放大时不会变成一圈很宽的留白。
+   圆角跟着外扩量一起加，恒保持同心。 */
+.world .image-node {
+    --node-ring-outset: calc(1px * var(--canvas-inverse-scale, 1));
+}
 
 .world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
     content: "" !important;
@@ -9413,29 +9409,26 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     inset: calc(-1 * var(--node-ring-outset, 0px)) !important;
     box-sizing: border-box;
     border-style: solid;
-    border-color: rgba(226, 226, 226, .26);
+    /* 默认与悬停都不画线：卡片就是干净的卡片 */
+    border-color: transparent;
     border-width: calc(1px * var(--canvas-inverse-scale, 1));
-    /* 2026-10-31（用户反馈「还是有点突出黑色」）：圆角不能跟着 outset 一起加。
-       外扩 1px 时若圆角也 +1（→9px），描边的弧会比节点卡片的弧「更收」，卡片那个
-       深色圆角就露在描边外侧一小截 —— 常规倍率看不见，放到 600%+ 就是一道暗色弧。
-       实测（13.5x 角部径向采样）：radius 9 时为「卡片 → 描边 → 卡片(露出) → 画布」，
-       改成与节点同半径 8 后直接变成「卡片 → 描边 → 画布」，暗色弧消失；
-       代价是角上描边比卡片多出 1px 外鼓，常规倍率下 0.26px，不可见。 */
-    border-radius: var(--gbz-node-radius, 8px);
+    border-radius: calc(var(--gbz-node-radius, 7px) + var(--node-ring-outset, 0px));
     pointer-events: none !important;
     z-index: 8;
 }
-.world .image-node:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node):hover::before {
-    /* 悬停时灰线略微提亮，提示可点；选中态位于后面，不会被这里压掉 */
-    border-color: rgba(255, 255, 255, .42);
-}
 .world .image-node.selected:not(.group-node):not(.smart-group-node):not(.workflow-group-node):not(.history-group-node):not(.drop-target):not(.image-replace-target-node)::before {
-    /* 选中 = 常态那圈灰线原地变白、屏幕 1px 加粗到 1.5px，位置不动 */
-    /* 2026-10-31（用户要求两次降调）：.82 在暗底上像一条发光的白带，尤其放大后
-       1 世界像素被放大成十几像素，非常刺眼。改成 .50：常态 .26 之上只提一档，
-       和悬停 .42 同量级，选中仍然一眼看得出但不抢画面。 */
-    border-color: rgba(244, 244, 245, .50);
-    border-width: calc(1.5px * var(--canvas-inverse-scale, 1));
+    /* 选中 = 卡片外面浮现一圈 1px 灰色线。灰度 .30：比画布底色亮一档就能看清，
+       又不会像 .50/.82 那样在暗底上抢画面（用户从三档里选了 .30）。 */
+    border-color: rgba(244, 244, 245, .30);
+}
+
+/* H3 节点是全仓唯一还带可见 1px 灰边框的类型：node-skin 里那条
+   `html body .world .image-node.minimax-h3-node… { border: 1px solid var(--gbz-node-line) }`
+   是 !important，特异性 (0,4,2)，比上面那条 :not 链低、但它自身有更晚出现的同链变体，
+   实测仍会露边。这里用重复 .world 把特异性拉到 (0,6,0) 一并压平，
+   保证「所有素材一律无描边」对 H3 也成立（它的选中线同样走上面的 ::before）。 */
+.world.world.world.world .image-node.minimax-h3-node {
+    border-color: transparent !important;
 }
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > img,
 .world .image-node.selected:not(.empty-node):not(.group-node) .image-wrap > .node-img {

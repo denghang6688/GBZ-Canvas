@@ -22,8 +22,10 @@ html body {
     /* Single source of truth for node corner geometry. Change the outer
        value once; nested content surfaces follow the same visual family.
        2026-10-30（用户要求）圆角 18px → 8px（参考第三方画布，方角感）。
-       内层差值同步 -4px → -2px：外框 8px 时内层 4px 会显得外框反而更圆。 */
-    --gbz-node-radius: 8px;
+       内层差值同步 -4px → -2px：外框 8px 时内层 4px 会显得外框反而更圆。
+       2026-11-01（用户要求）8px → 7px：卡片本体方角感更强，选中时外面再加
+       一圈 8px 圆角的灰线（7 + 1px 外扩 = 同心），卡片本身不再有任何描边。 */
+    --gbz-node-radius: 7px;
     --gbz-node-inner-radius: calc(var(--gbz-node-radius) - 2px);
     --gbz-node-toolbar-radius: 8px;
     --gbz-node-shadow: 0 14px 34px rgba(0, 0, 0, .22);
@@ -61,7 +63,10 @@ html body .world .image-node {
     border-radius: var(--gbz-node-radius) !important;
 }
 
-/* Shared functional-node frame. Group fills stay on their own variables. */
+/* Shared functional-node frame. Group fills stay on their own variables.
+   2026-11-01（用户要求）所有素材按「无描边卡片」显示：这里的 1px 边框保留占位
+   （改宽度会让内容位移 1px），但颜色设为透明，卡片本身不再出现任何边线。
+   选中时的灰圈由 smart-canvas.css 的 .image-node::before 统一绘制。 */
 html body .world .image-node.empty-node,
 html body .world .image-node.upload-entry-node,
 html body .world .image-node.prompt-smart-node:not(.smart-group-member-node),
@@ -69,7 +74,7 @@ html body .world .image-node.loop-smart-node:not(.smart-group-member-node),
 html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node),
 html body .world .image-node.minimax-h3-node:not(.smart-group-member-node) {
     background: var(--gbz-node-bg) !important;
-    border: 1px solid var(--gbz-node-line) !important;
+    border: 1px solid transparent !important;
     border-radius: var(--gbz-node-radius) !important;
     color: var(--gbz-node-text) !important;
     box-shadow: var(--gbz-node-shadow) !important;
@@ -87,7 +92,8 @@ html body .world .image-node.prompt-smart-node:not(.smart-group-member-node).sel
 html body .world .image-node.loop-smart-node:not(.smart-group-member-node).selected,
 html body .world .image-node.storyboard-smart-node:not(.smart-group-member-node).selected,
 html body .world .image-node.minimax-h3-node:not(.smart-group-member-node).selected {
-    border-color: var(--gbz-node-line-strong) !important;
+    /* 悬停不再出线（用户选择「不加线」），选中也不再靠边框，统一交给 ::before */
+    border-color: transparent !important;
 }
 
 html body .world .image-node.empty-node.selected,
@@ -377,9 +383,12 @@ html body .world .image-node.group-node {
 }
 
 /* MiniMax H3 used to have a transparent border-only treatment. It now follows
-   the same solid neutral frame as the other functional nodes. */
+   the same solid neutral frame as the other functional nodes.
+   2026-11-01（用户要求）所有素材按无描边卡片显示：H3 这条 (0,9,2) 的 !important
+   边框是最后一个还会露线的（比 smart-canvas.css 那条 :not 链还高一档），
+   改成 transparent；选中灰圈由 .image-node::before 统一绘制。 */
 html body .world .image-node.minimax-h3-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) {
-    border: 1px solid var(--gbz-node-line) !important;
+    border: 1px solid transparent !important;
     border-style: solid !important;
     border-radius: var(--gbz-node-radius) !important;
 }
