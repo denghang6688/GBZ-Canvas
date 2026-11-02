@@ -20692,17 +20692,17 @@ html body .snm-more-pop button i, html body .snm-more-pop button svg { width:14p
       生成键 #promptLlmRun / #runBtn 统一改 32 圆形白钮（见下方独立块）。
    全部写在文件最末，用 html body + 后置 + !important 压制前面的旧值，DOM / JS 不动。 */
 
-/* ① 主面板：收拢态 0px 直角（2026-11-02 用户：「去掉4周圆角的角」）
-   —— 圆角在四角会切出三角缺口，露出底下的深色层，放大看就是一个「黑色的角」。
-   直接把四个角做成直角，缺口不存在，也不必再靠投影去盖。 */
+/* ① 主面板：恢复 15px 圆角（2026-11-02 用户定稿「按原值15PX」）。
+   前一轮的「黑色的角」经放大复测确认来自旧投影（外投影不受圆角裁剪、
+   糊进四角缺口，叠深色画布后读作近黑），投影已删，圆角本身干净，故恢复。
+   收拢态与展开态同一档，压过 20174 的 16px 与 20506 的 10px。 */
 html body #composer .composer-card {
-    border-radius: 0 !important;
+    border-radius: 15px !important;
     /* 2026-11-02（用户：「输入面板不要阴影」）：与上面 20594 块一起置空 */
     box-shadow: none !important;
 }
-/* 展开态同样直角（压过 20174 的 16px 与 20506 的 10px） */
 html body #composer.prompt-expanded .composer-card {
-    border-radius: 0 !important;
+    border-radius: 15px !important;
 }
 
 /* ② LLM 编辑面板：外框 15px + 细描边（压过 14380 的 #252525 实边与 19981 的 12px） */
