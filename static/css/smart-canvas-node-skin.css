@@ -294,12 +294,15 @@ html body .world .media-thumb.video-thumb {
 /* 宫格单元的统一描边：不用 box-shadow / ::after —— 主样式表尾部有
    `.world^5 / .world^10 *::after { box-shadow:none !important }` 的隔离层，
    特异性比本文件任何单环规则都高，伪元素阴影必被吃掉。outline 不在隔离层
-   管辖内，且现代 Chrome 的 outline 跟随圆角，用负 offset 贴到边内沿画 1 个
-   「屏幕」像素的环，几何与 .image-node::before 完全同一套。 */
+   管辖内，且现代 Chrome 的 outline 跟随圆角，用负 offset 贴到边内沿画环，
+   几何与 .image-node::before 完全同一套。
+   2026-11-02（用户：「描边线要随着缩放一起」）：线宽固定 1 世界像素，
+   不乘 --canvas-inverse-scale —— 元素在 .world 的 transform 里，outline
+   宽度随缩放自然变化，和卡片环保持同一比例。 */
 html body .world .thumb-item {
     position: relative !important;
-    outline: calc(1px * var(--canvas-inverse-scale, 1)) solid rgba(255, 255, 255, .12) !important;
-    outline-offset: calc(-1px * var(--canvas-inverse-scale, 1)) !important;
+    outline: 1px solid rgba(255, 255, 255, .12) !important;
+    outline-offset: -1px !important;
 }
 /* 无缝拼图格（切图 / 智能分组拼图）不画环：环会变成拼图接缝。选中格的蓝色
    outline 在主样式表 10890 行（特异性更高），不受这里影响。 */
