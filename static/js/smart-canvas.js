@@ -16543,6 +16543,29 @@ function copySelectedNodes(){
     try { navigator.clipboard?.writeText?.(''); } catch(_) {}
     // 不弹 toast：Ctrl+C 常被拖拽手势软件/习惯性复制误触，右上角弹"已复制节点"反而造成困扰（2026-09-21）
 }
+// 2026-11-02 复制的纯文本直接粘贴成提示词节点（用户要求）：落在鼠标位置
+// （lastMouseWorld，无记录退回视口中心），多行/分号原样保留，粘贴后选中并
+// 直接进入文字编辑（光标在文末），undo 一步可整体撤销。
+function pasteTextAsPromptNode(rawText){
+    const text = String(rawText || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim();
+    if(!text || !canvas) return false;
+    const anchor = lastMouseWorld || viewportCenter();
+    const node = createPromptNode(
+        Math.round((anchor.x || 0) - PROMPT_NODE_DEFAULT_WIDTH / 2),
+        Math.round((anchor.y || 0) - 36),
+        {skipRender:true}
+    );
+    node.text = text;
+    render();
+    scheduleSave();
+    requestAnimationFrame(() => {
+        try {
+            const el = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] [data-prompt-node-text="1"]`);
+            if(el) el.dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));
+        } catch(_) {}
+    });
+    return true;
+}
 function pasteNodes(){
     const clipboard = nodeClipboardForPaste();
     if(!canvas || !clipboard?.nodes?.length || isTypingTarget(document.activeElement)) return false;
@@ -41971,6 +41994,17 @@ window.addEventListener('paste', e => {
         lastImagePasteAt = Date.now();
         handleFiles(files, selectedId);
         return;
+    }
+    // 2026-11-02 剪贴板里是外部复制的纯文本 → 直接贴成提示词节点（最近复制什么就贴什么）。
+    // 内部复制节点时 copyNodes 会清空系统剪贴板，所以这里不会抢节点剪贴板的粘贴；
+    // 光标在输入框/编辑器里（isEditableTarget）时完全不拦截，仍是原生粘贴。
+    if(!isEditableTarget(e.target)){
+        const clipText = String(e.clipboardData?.getData?.('text/plain') || '').trim();
+        if(clipText){
+            e.preventDefault();
+            pasteTextAsPromptNode(clipText);
+            return;
+        }
     }
     if(!isEditableTarget(e.target) && shouldPreferNodeClipboardPaste()){
         e.preventDefault();
