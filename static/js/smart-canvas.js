@@ -18462,10 +18462,10 @@ function promptNodeTitleHtml(node){
     return `<div class="prompt-node-title-row ${node?.llmEnabled === true ? 'is-llm' : 'is-handwrite'}"><div class="prompt-node-title prompt-node-control" data-prompt-node-title="${escapeAttr(node.id)}" title="双击编辑标题">${llmIcon}<span>${escapeHtml(promptNodeTitleText(node))}</span></div>${promptNodeKindBadgeHtml(node)}</div>`;
 }
 // 2026-10-29（用户要求）参考图：提示词正文底色调深一档 #202020 → #171717（首项即默认色）。
-// 2026-10-30（用户要求）「节点颜色统一右边的灰度」：画布上所有节点卡片统一到
-// 同一档中性灰（深色主题 #262626 / 浅色主题 #f7f7f7，与 skin.css 的
-// --gbz-node-bg 同值），不再允许单个节点自带深色/彩色底盘。色板保留常量
-// 仅为兼容历史数据与可能的回滚，渲染侧已不再读取它。
+// 2026-10-30（用户要求）「节点颜色统一右边的灰度」：画布上所有节点默认统一到
+// 同一档中性灰（深色主题 #262626 / 浅色主题 #f7f7f7，与 skin.css 的 --gbz-node-bg 同值）。
+// 2026-11-02（用户要求）色板恢复：显式选色的节点（promptStyle.bgManual）才用这里的色，
+// 其余一律回到统一底色，历史数据里的 bg 不会被误认成用户选择。
 const PROMPT_NODE_BG_COLORS = ['#171717', '#342b2d', '#3c2c30', '#443522', '#4b4528', '#2d4635', '#2d454a', '#2d3d52', '#41344d'];
 // 节点统一底色：直接读 skin.css 的 --gbz-node-bg（深色 #262626 / 浅色 #f7f7f7），
 // 这样自定义主题改了变量也能自动跟随；读不到时按主题类名兜底。
@@ -18492,11 +18492,18 @@ const PROMPT_NODE_SIZE_PRESETS = [
 // 2026-10-29（用户要求）提示词正文大 2 号：实际渲染原被 skin.css 写死的 12px 卡住，
 // 这里把「节点字号」真正接通（skin 内改为跟随 --prompt-node-font-size）。
 // 2026-10-30（用户要求）整体再大 3 号：默认 14 → 17，旧档位同步 +3。
+// 2026-11-02：只有「用户手动选过色板」的节点才认 promptStyle.bg。
+// 历史节点里残留的深色/彩色 bg 没有 bgManual 标记，继续按统一画布底色渲染，
+// 避免恢复色板后整块画布突然跳回旧配色。
+function promptNodeBgManual(node){
+    const raw = node && typeof node.promptStyle === 'object' ? node.promptStyle : {};
+    return raw.bgManual === true && PROMPT_NODE_BG_COLORS.includes(String(raw.bg || '').trim().toLowerCase());
+}
 function promptNodeStyle(node){
     const raw = node && typeof node.promptStyle === 'object' ? node.promptStyle : {};
-    // 2026-10-30（用户要求）统一灰度：无视节点自带的 promptStyle.bg（历史 #171717
-    // 与各种彩色底盘），一律返回画布节点底色，保证所有卡片观感一致。
-    const bg = canvasNodeBaseColor();
+    // 2026-11-02（用户要求）恢复「文字背板改色」：工具栏色板重新可用。
+    // 未选过色 / 选「默认」时仍回到画布节点底色（skin 的 --gbz-node-bg）。
+    const bg = promptNodeBgManual(node) ? String(raw.bg).trim().toLowerCase() : canvasNodeBaseColor();
     let baseFontSize = Math.max(9, Math.min(32, Number(raw.fontSize || 17) || 17));
     // 旧节点存量里 ≤14（历史默认 12/14）归一到 17 档，即本轮「大 3 号」。
     if(baseFontSize <= 14) baseFontSize = 17;
@@ -18570,9 +18577,18 @@ function placeCaretAtEnd(el){
 }
 function promptFormatControlsHtml(node, {includeExpand=true}={}){
     const style = promptNodeStyle(node);
-    // 2026-10-30（用户要求）节点底色已统一为画布灰，色板按钮失去意义且会误导
-    // （点了不变），这里整块停用；需要恢复时把下面注释的模板放回即可。
-    const colorControlHtml = '';
+    // 2026-11-02（用户要求）「文字背板改色的按钮没有了」→ 恢复色板。
+    // 首项「默认」= 跟随节点统一底色（不写 promptStyle.bg），其余为固定色板。
+    const rawBg = String(node?.promptStyle?.bg || '').trim().toLowerCase();
+    const isAutoBg = !promptNodeBgManual(node);
+    const colorControlHtml = `
+        <div class="prompt-color-control">
+            <button class="prompt-format-btn prompt-color-current" type="button" data-prompt-bg-current title="背景颜色" aria-label="背景颜色" style="--swatch:${escapeAttr(style.bg)}"></button>
+            <div class="prompt-color-palette">
+                <button type="button" class="prompt-color-auto ${isAutoBg ? 'active' : ''}" data-prompt-bg="auto" style="--swatch:var(--gbz-node-bg, ${escapeAttr(canvasNodeBaseColor())})" title="默认（跟随节点底色）"></button>
+                ${PROMPT_NODE_BG_COLORS.map(color => `<button type="button" class="${color === rawBg ? 'active' : ''}" data-prompt-bg="${escapeAttr(color)}" style="--swatch:${escapeAttr(color)}" title="${escapeAttr(color)}"></button>`).join('')}
+            </div>
+        </div>`;
     return `
         ${colorControlHtml}
         ${PROMPT_NODE_SIZE_PRESETS.map(item => `<button class="prompt-format-btn ${Math.abs((style.baseFontSize ?? style.fontSize) - item.size) < 0.2 ? 'active' : ''}" type="button" data-prompt-size="${item.size}" title="字号 ${item.label}">${item.label}</button>`).join('')}
@@ -24136,9 +24152,14 @@ function applyPromptNodeStyleToDom(node, scope=null){
         });
     });
     const toolbarRoots = [scope, nodeEl?.querySelector('.prompt-format-toolbar'), promptExpandToolbar].filter(Boolean);
+    const rawBg = String(node?.promptStyle?.bg || '').trim().toLowerCase();
+    const isAutoBg = !promptNodeBgManual(node);
     toolbarRoots.forEach(root => {
         root.querySelectorAll?.('.prompt-color-current').forEach(btn => btn.style.setProperty('--swatch', style.bg));
-        root.querySelectorAll?.('[data-prompt-bg]').forEach(btn => btn.classList.toggle('active', btn.dataset.promptBg === style.bg));
+        root.querySelectorAll?.('[data-prompt-bg]').forEach(btn => {
+            const key = String(btn.dataset.promptBg || '').toLowerCase();
+            btn.classList.toggle('active', key === 'auto' ? isAutoBg : key === rawBg);
+        });
     });
 }
 function bindPromptFormatControls(scope, node){
@@ -24174,8 +24195,11 @@ function bindPromptFormatControls(scope, node){
         btn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
-            const color = btn.dataset.promptBg || '';
-            if(PROMPT_NODE_BG_COLORS.includes(color)) updateBackplate({bg:color});
+            const color = String(btn.dataset.promptBg || '').toLowerCase();
+            // 「默认」= 清掉节点自带 bg，回到画布统一底色。
+            // 选具体颜色时打上 bgManual 标记，历史遗留的 bg 才不会跟着生效。
+            if(color === 'auto') updateBackplate({bg:'', bgManual:false});
+            else if(PROMPT_NODE_BG_COLORS.includes(color)) updateBackplate({bg:color, bgManual:true});
         };
     });
     scope.querySelectorAll('[data-prompt-size]').forEach(btn => {

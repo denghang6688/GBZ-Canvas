@@ -9191,6 +9191,24 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     box-shadow:0 0 0 2px #f2f2f2 !important;
 }
 
+/* 2026-11-02：「默认」色点画一道斜杠，和同色的画布灰区分开（表示不设底色）。 */
+.prompt-color-palette button.prompt-color-auto {
+    position:relative !important;
+    overflow:hidden !important;
+}
+.prompt-color-palette button.prompt-color-auto::after {
+    content:"" !important;
+    position:absolute !important;
+    left:-4px !important;
+    right:-4px !important;
+    top:50% !important;
+    height:1px !important;
+    background:#fff !important;
+    mix-blend-mode:difference !important;
+    transform:rotate(-45deg) !important;
+    pointer-events:none !important;
+}
+
 .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-card {
     overflow:visible !important;
 }
