@@ -9402,48 +9402,41 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
     border-color: transparent !important;
 }
 
-/* 选中线 = 卡片「外面」紧贴着的一圈：卡片 8px 圆角、外面 1.5 个「屏幕」像素的线、线的圆角 9.5px。
-   2026-11-01（用户定稿）：不要空隙，线就贴卡片外沿走，靠圆角同心把它读成「外圈」。
-
-   ⚠ 这里用**外** box-shadow 画线，不用 border、也不再用 outline ——
-   两次断线事故的两个根因都在这里收口：
-   ① border 的四条边分别 snap 到设备像素网格，元素边界带小数（缩放不是整数倍时必然
-      带）就会出现「上左下三条边各 1px、底边取整成 0px」的断线；
-   ② outline 的宽度在 Chrome 里有 1 CSS px 下限：calc(1px * inverse-scale) 想画「1 个
-      屏幕像素」，在 500% 缩放下会被放大成 5 个屏幕像素的粗线，而且 outline 是画在
-      伪元素盒**外侧**的，放大后整条线会跟卡片脱开。
-   外阴影（非 inset）的 spread 从伪元素边向外长，伪元素又和卡片 border-box 重合：
-   环正好占满「卡片边 → 卡片边外 w」，内沿就是卡片边，不切进卡片、也不留缝，
-   且 spread 没有 1px 下限，任何倍率都是同一个屏幕像素宽度。
-   圆角：伪元素 = 卡片圆角，外阴影的外沿半径 = 卡片圆角 + w，即 8 / 1.5 / 9.5。 */
+/* 2026-11-02（用户确认「所有素材卡片统一：8px 圆角 + 1px 描边」）：描边重写为
+   与卡片 border-box 完全重合的**内阴影环**（伪元素 inset:0）。内阴影沿元素自己的
+   圆角走，和卡片圆弧是同一条曲线 —— 数学上必然同心，从结构上消灭「外圈线 /
+   内层弧」错位；inset spread 支持亚像素，无 1px 下限，抗锯齿稳定。
+   （取代旧方案：border → outline → 外阴影外扩环，那些方案的断线 / 脱离根因
+   都不再适用 —— 内环与卡片同盒同圆角，不存在 snap 分歧和向外脱开。）
+   三态只换颜色，线宽恒为 1 屏幕像素：
+     常态 rgba(255,255,255,.12) / 悬停 .22 / 选中 #a8a8a8。
+   分组容器未选中时保留自己的彩色分类边框，此时不画常态环（否则双线）。 */
 .world .image-node {
-    /* 线宽 = 1.5 个「屏幕」像素（世界 px 数随缩放反向变化）。
-       2026-11-01（用户报「描边线有点细了」）：原来是 1 个屏幕像素，在高分屏上正好
-       落在 2 个物理像素、又只有 #787878 这一档灰度，视觉重量偏轻，浅色卡片旁边几乎
-       看不出来。加到 1.5（DPR2 → 3 物理像素）后轮廓清晰但没有粗框感；再往上 2 个
-       屏幕像素就开始抢内容了。 */
-    --node-ring-w: calc(1.5px * var(--canvas-inverse-scale, 1));
-    --node-ring-radius: var(--gbz-node-radius, 8px);
+    /* 线宽 = 1 个「屏幕」像素（世界 px 数随缩放反向变化） */
+    --card-ring-w: calc(1px * var(--canvas-inverse-scale, 1));
+    --card-ring-color: rgba(255, 255, 255, .12);
+}
+.world .image-node:hover {
+    --card-ring-color: rgba(255, 255, 255, .22);
+}
+.world .image-node.selected {
+    --card-ring-color: #a8a8a8;
+}
+.world .image-node.group-node:not(.selected),
+.world .image-node.smart-group-node:not(.selected),
+.world .image-node.workflow-group-node:not(.selected),
+.world .image-node.history-group-node:not(.selected) {
+    --card-ring-color: transparent;
 }
 
 .world .image-node:not(.drop-target):not(.image-replace-target-node)::before {
     content: "" !important;
     position: absolute !important;
-    /* 伪元素与卡片的 border-box 重合，线用**外**阴影向外长。
-       2026-11-01（用户报「API生图现在是内圈描边」）：上一版这里是
-       `inset: -w` + `inset 0 0 0 w` 的**内**阴影环。内阴影的 spread 是往盒子里
-       长的 —— 环占 [边-w, 边]，伪元素边又在卡片外 w，于是环落在「卡片边外
-       w → 外 2w」，跟卡片之间空出一条 1 屏幕 px 的画布缝。放大看就是一条浮在
-       卡片外面、没贴住的灰线，读起来像描边跑进了卡片里（内圈）。
-       改成外阴影：伪元素贴死卡片边，spread 向外长 w，环正好占「卡片边 →
-       卡片边外 w」，内沿就是卡片边，无缝、无线宽下限、抗锯齿。 */
     inset: 0 !important;
     border: 0 !important;
-    border-radius: var(--node-ring-radius) !important;
-    /* 默认与悬停都不画线：卡片就是干净的卡片 */
+    border-radius: var(--gbz-node-radius, 8px) !important;
     outline: 0 !important;
-    outline-offset: 0 !important;
-    box-shadow: 0 0 0 var(--node-ring-w, 1px) transparent !important;
+    box-shadow: inset 0 0 0 var(--card-ring-w) var(--card-ring-color) !important;
     pointer-events: none !important;
     z-index: 8;
 }
@@ -9458,19 +9451,6 @@ body.theme-custom .image-node.prompt-smart-node.prompt-llm-smart-node:not(.smart
 .world .image-node.image-node.workflow-group-node::before,
 .world .image-node.image-node.history-group-node::before {
     inset: -1px !important;
-}
-.world .image-node.selected:not(.drop-target):not(.image-replace-target-node)::before {
-    /* 选中 = 卡片外圈紧贴的 1.5 屏幕 px 灰线（线的圆角 9.5px，卡片 8px）。
-
-       2026-11-01（用户第二次报「下面还有点不齐」）：原来是 rgba(244,244,245,.45) 的
-       半透明白线，画在节点 1px 的透明边沟里。这条沟正好卡在卡片外沿：左右上三面沟里
-       是画布，线看起来是 121 灰；但素材画面会溢出到边沟里（尤其是底边，图片高度带小数，
-       底边那一截常常多出不到 1 CSS px），线盖在画面上就被染成画面色 —— 用户的青色卡片
-       底部因此变成一条淡绿，同一圈线「边上 8px 灰、底下只剩 2px 灰」，读起来就是右边、
-       下面没包住、跟左右不齐。半透明线没法解决这个：它天生会被底下的东西染色。
-       所以改成实色 #787878 —— 与 .45 白压黑底（121）几乎一模一样，但压在任何背景上
-       都是同一根灰线，四个方向永远一致。 */
-    box-shadow: 0 0 0 var(--node-ring-w, 1px) #787878 !important;
 }
 
 /* H3 节点是全仓唯一还带可见 1px 灰边框的类型：node-skin 里那条

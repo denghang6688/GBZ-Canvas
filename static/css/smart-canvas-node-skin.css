@@ -268,30 +268,56 @@ html body .world .image-node .image-wrap > img.node-img {
     clip-path: inset(0 round var(--gbz-node-radius)) !important;
 }
 
-html body .world .thumb-item,
+/* 2026-11-02（用户确认「统一卡片样式」）：宫格单元 / 参考图卡 / 上传预览卡
+   不再自带 1px 边框和自己的底色 —— 它们就是素材卡片，圆角、描边一律走
+   统一变量（8px 世界圆角 + ::after 画的 1 屏幕像素环），第二道弧从源头消失。 */
+html body .world .thumb-item {
+    border: 0 !important;
+    border-radius: var(--gbz-node-radius) !important;
+    background: #28282a !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    clip-path: inset(0 round var(--gbz-node-radius)) !important;
+}
 html body .world .image-node .smart-run-ref-state.is-image-card,
 html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media,
 html body .world .image-node.upload-entry-node .upload-preview-card,
 html body .world .media-thumb.video-thumb {
-    border: 1px solid var(--gbz-node-line) !important;
+    border: 0 !important;
     border-radius: var(--gbz-node-radius) !important;
-    background: #111 !important;
+    background: transparent !important;
     box-sizing: border-box !important;
     overflow: hidden !important;
     clip-path: inset(0 round var(--gbz-node-radius)) !important;
 }
 
-/* 2026-10-08（用户反馈）双圈同心：.media-card / .media-video-card /
-   .media-thumb 是贴在 .image-wrap / .thumb-item 外圈描边内侧 1px 的内层圈，
-   半径同步减 1px（17px），否则四角两段弧不平行、错位交叉。 */
+/* 宫格单元的统一描边：不用 box-shadow / ::after —— 主样式表尾部有
+   `.world^5 / .world^10 *::after { box-shadow:none !important }` 的隔离层，
+   特异性比本文件任何单环规则都高，伪元素阴影必被吃掉。outline 不在隔离层
+   管辖内，且现代 Chrome 的 outline 跟随圆角，用负 offset 贴到边内沿画 1 个
+   「屏幕」像素的环，几何与 .image-node::before 完全同一套。 */
+html body .world .thumb-item {
+    position: relative !important;
+    outline: calc(1px * var(--canvas-inverse-scale, 1)) solid rgba(255, 255, 255, .12) !important;
+    outline-offset: calc(-1px * var(--canvas-inverse-scale, 1)) !important;
+}
+/* 无缝拼图格（切图 / 智能分组拼图）不画环：环会变成拼图接缝。选中格的蓝色
+   outline 在主样式表 10890 行（特异性更高），不受这里影响。 */
+html body .world .thumb-grid.grid-split-layout > .thumb-item:not(.image-selected),
+html body .world .image-node.smart-group-node .smart-group-card .smart-group-thumb-grid > .thumb-item:not(.image-selected) {
+    outline: 0 !important;
+}
+
+/* 2026-10-08（用户反馈）双圈同心 → 2026-11-02 统一几何：内层 media 卡不再
+   自杀 1px 半径，内外同用 --gbz-node-radius，同一条弧。 */
 html body .world .media-card,
 html body .world .media-video-card,
 html body .world .media-thumb.video-thumb,
 html body .world .image-node .image-wrap > .media-card,
 html body .world .image-node .image-wrap > .media-video-card,
 html body .world .image-node .image-wrap > img.node-img {
-    border-radius: calc(var(--gbz-node-radius) - 1px) !important;
-    clip-path: inset(0 round calc(var(--gbz-node-radius) - 1px)) !important;
+    border-radius: var(--gbz-node-radius) !important;
+    clip-path: inset(0 round var(--gbz-node-radius)) !important;
 }
 
 html body .world .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) .image-wrap > .media-video-card,
@@ -970,7 +996,7 @@ html body .world .thumb-item {
     border-radius: var(--smart-unified-media-radius) !important;
     overflow: hidden !important;
     clip-path: inset(0 round var(--smart-unified-media-radius)) !important;
-    background: #101010 !important;
+    background: #28282a !important;
     contain: paint !important;
     backface-visibility: hidden !important;
     transform: translateZ(0) !important;
@@ -1096,7 +1122,7 @@ html body .world .image-node.smart-group-node .smart-group-card.generated-image-
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    background: #111111 !important;
+    background: #28282a !important;
 }
 
 html body .world .image-node.smart-group-node .smart-group-card.generated-media-group .smart-group-thumb-grid > .thumb-item > img,
@@ -1111,7 +1137,7 @@ html body .world .image-node.smart-group-node .smart-group-card.generated-image-
     min-height: 0 !important;
     object-fit: contain !important;
     object-position: center center !important;
-    background: #111111 !important;
+    background: #28282a !important;
     border-radius: inherit !important;
 }
 
@@ -1137,7 +1163,7 @@ html body .world .image-node.smart-group-node .smart-group-card.generated-image-
     max-height: 100% !important;
     object-fit: contain !important;
     object-position: center center !important;
-    background: #111111 !important;
+    background: #28282a !important;
     border-radius: inherit !important;
 }
 
@@ -1513,10 +1539,12 @@ html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item {
     /* 2026-10-29（用户要求）：格子在亮图上会被看成第二圈线，取消描边 */
     /* 2026-10-30（用户要求）节点外框收到 8px：格子裁剪/圆角与外框同源 12px → 8px，
        避免「内层比外框圆」。 */
-    border: 1px solid transparent !important;
+    /* 2026-11-02（统一卡片样式）：1px transparent 边框换成 0，底色 #242424 →
+       #28282a 与卡片同源；环由上面 .thumb-item 基础规则的 outline 统一画。 */
+    border: 0 !important;
     border-radius: 8px !important;
     clip-path: inset(0 round 8px) !important;
-    background: var(--soft) !important;
+    background: #28282a !important;
 }
 html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > img,
 html body .world .image-node .thumb-grid.thumb-grid-cols > .thumb-item > .media-thumb > img,
@@ -2577,7 +2605,7 @@ html body .world .image-node.upload-entry-node .upload-entry-inner {
     border: 0 !important;
     box-shadow: none !important;
     border-radius: var(--gbz-node-radius, 8px) !important;
-    background-image: none !important;
+    background: transparent !important;
 }
 
 /* 2026-11-02（用户报「显示怎么这么多线」）：媒体层不要再自带底色。
