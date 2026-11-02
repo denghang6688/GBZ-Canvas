@@ -16636,9 +16636,24 @@ def grsai_video_result_url(provider, task_id):
     query = urllib.parse.urlencode({"id": str(task_id)})
     return f"{grsai_api_base_url(provider)}{GRSAI_RESULT_PATH}?{query}"
 
-def grsai_aspect_ratio(value):
-    """画布里的比例 → Grsai 的 portrait / landscape / square。"""
+def grsai_is_wan_model(model=""):
+    """Grsai 上的 wan 系列（wan-3.0 等）与 minimax-h3 的参数体系完全不同：
+    分辨率 480p/720p/1080p（没有 768p）、比例只认 9:16 / 16:9 / 1:1 / adaptive
+    （不认 portrait/landscape）、时长 2~30 秒。2026-11-03 实测上游校验。"""
+    return "wan" in str(model or "").lower()
+
+def grsai_aspect_ratio(value, model=""):
+    """画布比例 → Grsai 上游比例。h3 用 portrait/landscape/square，
+    wan 用 9:16 / 16:9 / 1:1 / adaptive。"""
     raw = str(value or "").strip().lower()
+    if grsai_is_wan_model(model):
+        if raw == "adaptive" or re.fullmatch(r"\d{1,2}:\d{1,2}", raw):
+            return raw
+        if raw in GRSAI_ASPECT_SQUARE:
+            return "1:1"
+        if raw in GRSAI_ASPECT_PORTRAIT:
+            return "9:16"
+        return "16:9"
     if raw in GRSAI_ASPECT_PORTRAIT:
         return "portrait"
     if raw in GRSAI_ASPECT_SQUARE:
@@ -16647,11 +16662,20 @@ def grsai_aspect_ratio(value):
         return "landscape"
     return "landscape"
 
-def grsai_resolution(value):
-    """Grsai 只支持 480p / 768p / 1080p，界面的 720p 归到 768p。"""
+def grsai_resolution(value, model=""):
+    """h3：480p / 768p / 1080p（界面 720p 归到 768p）。
+    wan：480p / 720p / 1080p（没有 768p，768p 会直接 resolution not found）。"""
     raw = str(value or "").strip().lower()
+    if grsai_is_wan_model(model):
+        if raw in {"480p", "720p", "1080p"}:
+            return raw
+        if raw in {"768p", "2k", "4k"}:
+            return "720p" if raw == "768p" else "1080p"
+        return "720p"
     if raw in GRSAI_RESOLUTIONS:
         return raw
+    if raw in {"720p", "2k", "4k"}:
+        return "768p"
     return "768p"
 
 def grsai_media_input(value):
@@ -17262,17 +17286,22 @@ async def generate_grsai_video(payload, provider, base_url, model):
         normalized = grsai_media_input(item)
         if normalized:
             audios.append(normalized)
-    resolution = grsai_resolution(payload.resolution)
+    resolution = grsai_resolution(payload.resolution, model)
     try:
         seconds = int(payload.duration or 5)
     except Exception:
         seconds = 5
-    # 文档：总时长 1~15 秒，1080p 最多 10 秒
-    seconds = max(1, min(10 if resolution == "1080p" else 15, seconds))
+    if grsai_is_wan_model(model):
+        # wan-3.0：2~30 秒（上游原话：duration maximum value is 30 seconds, and must be greater than 2）
+        seconds = max(2, min(30, seconds))
+    else:
+        # minimax-h3：1~15 秒，1080p 最多 10 秒
+        seconds = max(1, min(10 if resolution == "1080p" else 15, seconds))
+    aspect_ratio = grsai_aspect_ratio(payload.aspect_ratio, model)
     body = {
         "model": model,
         "prompt": str(payload.prompt or "").strip(),
-        "aspectRatio": grsai_aspect_ratio(payload.aspect_ratio),
+        "aspectRatio": aspect_ratio,
         "images": images,
         "audios": audios,
         "seed": int(payload.seed) if isinstance(payload.seed, int) else random.randint(1, 999999),
@@ -17293,15 +17322,25 @@ async def generate_grsai_video(payload, provider, base_url, model):
             return None
         text = response.text or ""
         if response.status_code >= 400:
-            if looks_like_unsupported_endpoint(response.status_code, text):
+            # 只有「路径本身不存在（404）」或返回 HTML 才认定为这家站没有原生入口；
+            # 其余 4xx 一律把上游原话抛出来。2026-11-03 修：原来用
+            # looks_like_unsupported_endpoint 里的 "not found" 兜底，会把
+            # 「resolution not found: 768p」这种参数错误当成「没有该接口」静默回落，
+            # 最后被 OpenAI 风格端点覆盖成一句 「model not found」，真实原因全丢。
+            if response.status_code == 404 or looks_like_html_response(text):
                 return None
             if looks_like_unregistered_model(text):
                 raise HTTPException(
                     status_code=400,
-                    detail=(f"Grsai 没有注册视频模型「{model}」。该站视频模型目前只有 minimax-h3，"
-                            f"请在节点的视频模型里换成它。上游返回：{text[:200]}"),
+                    detail=(f"Grsai 没有注册视频模型「{model}」。该站视频模型目前支持 "
+                            f"{'、'.join(GRSAI_DEFAULT_VIDEO_MODELS)}，请在节点的视频模型里换一个。"
+                            f"上游返回：{text[:200]}"),
                 )
-            raise HTTPException(status_code=response.status_code, detail=f"Grsai 视频接口错误：{text[:400]}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=(f"Grsai 视频接口错误（模型 {model}｜分辨率 {resolution}｜比例 {aspect_ratio}"
+                        f"｜时长 {seconds}s）：{text[:400]}"),
+            )
         if looks_like_html_response(text):
             return None
         try:
@@ -17482,6 +17521,18 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
         "audio": True,
     },
+    "wan-3-0": {
+        "label": "Wan 3.0",
+        # 2026-11-03 用上游实测校准（零成本探针：非法 resolution / duration 触发校验）：
+        # 分辨率只有 480p / 720p / 1080p（768p 会 resolution not found）；
+        # 比例必须是 "16:9"/"9:16"/"1:1"/"4:3"/"3:4"/"21:9" 这类 w:h 或 adaptive，
+        # 传 portrait/landscape/square 会 aspect ratio not supported；时长 2~30 秒。
+        "duration": {"min": 2, "max": 30, "step": 1},
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
+        "audio": True,
+    },
     "seedance-2-5": {
         "label": "Seedance 2.5",
         "duration": {"min": 4, "max": 30, "step": 1},
@@ -17538,6 +17589,8 @@ VIDEO_MODEL_CAP_KEYWORDS: List[Tuple[str, str]] = [
     ("minimax-h3", "minimax-h3"),
     ("minimax-h-3", "minimax-h3"),
     ("h3", "minimax-h3"),
+    ("wan-3", "wan-3-0"),
+    ("wan3", "wan-3-0"),
     ("seedance-2-5", "seedance-2-5"),
     ("seedance2-5", "seedance-2-5"),
     ("seedance", "seedance"),

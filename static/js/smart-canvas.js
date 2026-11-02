@@ -10211,6 +10211,16 @@ const API_VIDEO_MODEL_CAPS = {
         modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
         audio:true
     },
+    'wan-3-0': {
+        label:'Wan 3.0',
+        // 2026-11-03 上游实测校准：分辨率只有 480p/720p/1080p（768p 报 resolution not found）；
+        // 比例必须 w:h 或 adaptive（portrait/landscape/square 一律被拒）；时长 2~30 秒。
+        duration:{min:2, max:30, step:1},
+        resolutions:['480p', '720p', '1080p'],
+        ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
+        audio:true
+    },
     'seedance-2-5': {
         label:'Seedance 2.5',
         duration:{min:4, max:30, step:1},
@@ -10264,6 +10274,7 @@ const API_VIDEO_MODEL_CAPS = {
 };
 const API_VIDEO_CAP_KEYWORDS = [
     ['minimax-h3', 'minimax-h3'], ['minimax-h-3', 'minimax-h3'], ['h3', 'minimax-h3'],
+    ['wan-3', 'wan-3-0'], ['wan3', 'wan-3-0'],
     ['seedance-2-5', 'seedance-2-5'], ['seedance2-5', 'seedance-2-5'], ['seedance', 'seedance'],
     ['hailuo', 'hailuo'], ['kling', 'kling'], ['可灵', 'kling'], ['veo', 'veo'], ['sora', 'sora']
 ];
