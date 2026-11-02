@@ -20593,7 +20593,10 @@ html body #composer .composer-card {
    真正压住缺口的是下面这层投影（把 1~2px 的接缝盖成渐隐），肉眼不再读成黑角。 */
 html body #composer .composer-card {
     border-radius: 8px !important;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, .40) !important;
+    /* 2026-11-02（用户：「输入面板不要阴影」）：投影改为 none。
+       原先这层 0 14px 34px 是用来把四角 1~2px 接缝盖成渐隐的，
+       去掉后如果又露出「黑色的角」，应当去修内层底色，不要再把它加回来。 */
+    box-shadow: none !important;
 }
 /* 展开态压在整屏遮罩上、背后是均匀色，不需要跟着卡片走；10px 保持大面板的柔和感 */
 html body #composer.prompt-expanded .composer-card {
@@ -20692,7 +20695,8 @@ html body .snm-more-pop button i, html body .snm-more-pop button svg { width:14p
 /* ① 主面板：收拢态 15px（压过 20308 / 20501 两处 8px） */
 html body #composer .composer-card {
     border-radius: 15px !important;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, .40) !important;
+    /* 2026-11-02（用户：「输入面板不要阴影」）：与上面 20594 块一起置空 */
+    box-shadow: none !important;
 }
 /* 展开态也统一 15px（压过 20174 的 16px 与 20506 的 10px） */
 html body #composer.prompt-expanded .composer-card {
