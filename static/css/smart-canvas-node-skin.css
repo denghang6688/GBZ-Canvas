@@ -2535,3 +2535,64 @@ html body .world .image-node.workflow-group-node.selected,
 html body .world .image-node.history-group-node.selected {
     border-color: transparent !important;
 }
+
+/* 2026-11-02（用户报「显示怎么这么多线，只保留 8PX 圆角的卡片不要边线」）：
+   空态生成位 / 上传位这类卡片历史上叠了四层「边」，放大后非常明显：
+     ① .image-node.empty-node 自己的 1px 虚线框（smart-canvas.css:11485，hover 还变色）
+     ② 卡片内的 inset 0 0 30~42px 光晕 —— 34px 的内阴影在放大后就是一整圈暗带
+     ③ .empty-node.selected / .upload-entry-node.selected 自带的 0 0 0 1.5px 环
+     ④ 我们统一的 .image-node::before 选中外圈
+   再加上圆角不统一（16px / 14px，而统一外圈线按 8px 算），放大后卡片边上就是
+   「两条不同半径的弧 + 一条虚线 + 一条实线」。这里一次性收干净：卡片本体 =
+   8px 圆角、纯色、无边框、无内阴影、无自带环；选中只保留 ::before 那一条外圈线。
+   文字颜色/图标不动（空态图标的绿色是功能性提示，不属于「边线」）。 */
+html body .world .image-node.empty-node,
+html body .world .image-node.upload-entry-node {
+    border: 0 !important;
+    border-radius: var(--gbz-node-radius, 8px) !important;
+    box-shadow: none !important;
+    background: #28282a !important;
+    background-image: none !important;
+}
+html body .world .image-node.empty-node:hover,
+html body .world .image-node.upload-entry-node:hover {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #2e2e31 !important;
+    background-image: none !important;
+}
+html body .world .image-node.empty-node.selected,
+html body .world .image-node.upload-entry-node.selected {
+    border: 0 !important;
+    box-shadow: none !important;
+}
+/* 卡片内部这几层历史里也各带 border / 14px 圆角，一并压平 —— 它们贴到卡片边就是内圈线 */
+html body .world .image-node.empty-node .node-body,
+html body .world .image-node.empty-node .node-inner,
+html body .world .image-node.empty-node .node-content,
+html body .world .image-node.empty-node .smart-run-empty-state,
+html body .world .image-node.empty-node .smart-run-empty-canvas,
+html body .world .image-node.upload-entry-node .upload-entry-drop,
+html body .world .image-node.upload-entry-node .upload-entry-inner {
+    border: 0 !important;
+    box-shadow: none !important;
+    border-radius: var(--gbz-node-radius, 8px) !important;
+    background-image: none !important;
+}
+
+/* 2026-11-02（用户报「显示怎么这么多线」）：媒体层不要再自带底色。
+   .image-wrap 和 .media-card / .media-video-card 一直写着 background:#111，本意是
+   给未加载的图一个深色底。但它们的圆角比卡片小 1px（7px 对 8px，见上面「双圈同心」
+   那条），图片/视频一没加载出来，这层 #111 就在卡片内侧画出**第二条弧** —— 放大后
+   看起来就是卡片边上叠了两道线。有图时图片自己铺满、本来也看不见这层底色，所以直接
+   改透明：空/未加载时露出的就是卡片自己的底色，只剩卡片这一条轮廓。 */
+html body .world .image-node .image-wrap,
+html body .world .image-node .image-wrap > .media-card,
+html body .world .image-node .image-wrap > .media-video-card,
+html body .world .image-node .image-wrap > img.node-img,
+html body .world .image-node.upload-entry-node .upload-preview-card,
+html body .world .image-node .smart-run-ref-state.is-image-card,
+html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-media {
+    background: transparent !important;
+    box-shadow: none !important;
+}
