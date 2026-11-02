@@ -301,7 +301,7 @@ html body .world .media-thumb.video-thumb {
    宽度随缩放自然变化，和卡片环保持同一比例。 */
 html body .world .thumb-item {
     position: relative !important;
-    outline: 1px solid rgba(255, 255, 255, .12) !important;
+    outline: 1px solid #363637 !important;
     outline-offset: -1px !important;
 }
 /* 无缝拼图格（切图 / 智能分组拼图）不画环：环会变成拼图接缝。选中格的蓝色
