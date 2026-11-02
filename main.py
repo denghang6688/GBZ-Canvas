@@ -17273,15 +17273,20 @@ async def generate_grsai_video(payload, provider, base_url, model):
         "Authorization": bearer_auth_value(api_key),
     }
     images = []
+    # 2026-11-03 wan-3.0 上游实测可收 10 张图（11 张才报 "image file count maximum value is 10"），
+    # 其余视频模型维持 9 张的历史上限。
+    video_max_images = 10 if grsai_is_wan_model(model) else GRSAI_VIDEO_MAX_IMAGES
     for ref in (payload.images or []):
-        if len(images) >= GRSAI_VIDEO_MAX_IMAGES:
+        if len(images) >= video_max_images:
             break
         item = grsai_media_input(getattr(ref, "url", "") or "")
         if item:
             images.append(item)
     audios = []
+    # wan-3.0 音频上限 5（探针：6 段报 "audio file count maximum value is 5"），其余模型维持 3。
+    video_max_audios = 5 if grsai_is_wan_model(model) else GRSAI_VIDEO_MAX_AUDIOS
     for item in (payload.audios or []):
-        if len(audios) >= GRSAI_VIDEO_MAX_AUDIOS:
+        if len(audios) >= video_max_audios:
             break
         normalized = grsai_media_input(item)
         if normalized:
@@ -17530,7 +17535,9 @@ VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
         "duration": {"min": 2, "max": 30, "step": 1},
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
-        "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
+        # 2026-11-03 探针实测：11 张图报 "image file count maximum value is 10"、
+        # 6 段音频报 "audio file count maximum value is 5"；视频官方上限 5 段。
+        "modes": {"frames": True, "reference_image": 10, "reference_video": 5, "reference_audio": 5},
         "audio": True,
     },
     "seedance-2-5": {

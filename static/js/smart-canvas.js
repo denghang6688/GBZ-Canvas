@@ -10218,7 +10218,8 @@ const API_VIDEO_MODEL_CAPS = {
         duration:{min:2, max:30, step:1},
         resolutions:['480p', '720p', '1080p'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-        modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
+        // 2026-11-03 探针实测：11 图报 image file count maximum 10、6 音频报 maximum 5；视频官方 5 段。
+        modes:{frames:true, reference_image:10, reference_video:5, reference_audio:5},
         audio:true
     },
     'seedance-2-5': {
