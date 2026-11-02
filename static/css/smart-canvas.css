@@ -20692,17 +20692,31 @@ html body .snm-more-pop button i, html body .snm-more-pop button svg { width:14p
       生成键 #promptLlmRun / #runBtn 统一改 32 圆形白钮（见下方独立块）。
    全部写在文件最末，用 html body + 后置 + !important 压制前面的旧值，DOM / JS 不动。 */
 
-/* ① 主面板：恢复 15px 圆角（2026-11-02 用户定稿「按原值15PX」）。
-   前一轮的「黑色的角」经放大复测确认来自旧投影（外投影不受圆角裁剪、
-   糊进四角缺口，叠深色画布后读作近黑），投影已删，圆角本身干净，故恢复。
+/* ① 主面板：15px 圆角 + 彻底消除四角「黑角」。
+   2026-11-02 用户两次报「黑色的角」，截图逐像素复测后定位到两件事：
+   ① 卡片自带的 1px 描边（border: 1px solid rgba(255,255,255,.05)）压在卡片边界上，
+      在深色画布上渲染成一条比面板本体更暗的细线（实测边缘亮度 28，面板本体 38），
+      放大后沿弧线看就是一圈「黑边」，四角最明显 —— 描边直接改透明；
+   ② 卡片后面任何比它大 1~2px、且是**直角**的深色层（容器底色 / 旧投影残留 / 滚动容器），
+      都会在圆角缺口处露出来，读成方块黑角 —— 用一个和面板同色的 2px 外环
+      （box-shadow 0 0 0 2px #262626）把这一圈盖住；外环随卡片圆角走，轮廓仍是圆的。
    收拢态与展开态同一档，压过 20174 的 16px 与 20506 的 10px。 */
 html body #composer .composer-card {
     border-radius: 15px !important;
-    /* 2026-11-02（用户：「输入面板不要阴影」）：与上面 20594 块一起置空 */
-    box-shadow: none !important;
+    border-color: transparent !important;
+    box-shadow: 0 0 0 2px #262626 !important;
 }
 html body #composer.prompt-expanded .composer-card {
     border-radius: 15px !important;
+    border-color: transparent !important;
+    box-shadow: 0 0 0 2px #262626 !important;
+}
+/* 容器层兜底：任何包住卡片的层都不许有直角深色底，否则必在圆角处露角 */
+html body #composer,
+html body #composer .composer {
+    background: transparent !important;
+    border-radius: 15px !important;
+    box-shadow: none !important;
 }
 
 /* ② LLM 编辑面板：外框 15px + 细描边（压过 14380 的 #252525 实边与 19981 的 12px） */
