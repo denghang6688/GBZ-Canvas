@@ -16543,10 +16543,49 @@ function copySelectedNodes(){
     try { navigator.clipboard?.writeText?.(''); } catch(_) {}
     // 不弹 toast：Ctrl+C 常被拖拽手势软件/习惯性复制误触，右上角弹"已复制节点"反而造成困扰（2026-09-21）
 }
+// 2026-11-02 表格粘贴支持：剪贴板里的 <table>（Excel/Word/网页复制都带 text/html）
+// 或 TSV 纯文本（Excel/表格软件的 text/plain）转成 Markdown 表格，LLM 可直接读。
+function clipboardTableRowsToMarkdown(rows){
+    if(rows.length < 2) return null;
+    const colCount = Math.max(...rows.map(r => r.length));
+    if(colCount < 2) return null;
+    const norm = rows.map(r => { const c = r.slice(); while(c.length < colCount) c.push(''); return c; });
+    const line = cells => '| ' + cells.join(' | ') + ' |';
+    const md = [line(norm[0]), line(norm[0].map(() => '---')), ...norm.slice(1).map(line)].join('\n');
+    return { md, rows: norm.length, cols: colCount };
+}
+function clipboardHtmlTableToMarkdown(html){
+    if(!html || !/<table[\s>]/i.test(html)) return null;
+    let table;
+    try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        table = doc.querySelector('table');
+    } catch(_) { return null; }
+    if(!table) return null;
+    const cleanCell = el => String(el?.textContent || '')
+        .replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+    const rows = [...table.querySelectorAll('tr')]
+        .map(tr => [...tr.querySelectorAll('th,td')].map(cleanCell))
+        .filter(cells => cells.some(c => c));
+    return clipboardTableRowsToMarkdown(rows);
+}
+function clipboardTsvToMarkdown(text){
+    const raw = String(text || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
+    // 至少 2 行 × 2 列才算表格：避免把带 Tab 缩进的代码误判成表格
+    if(!raw.includes('\t') || !raw.includes('\n')) return null;
+    const rows = raw.split('\n')
+        .map(l => l.split('\t').map(c => c.replace(/\|/g, '\\|').trim()))
+        .filter(cells => cells.some(c => c));
+    // 任何一行的首格为空（行首 Tab）都视为代码缩进而非表格——Excel/表格软件
+    // 导出的 TSV 首列总是有值的，而缩进的代码行首格必为空。
+    if(rows.some(r => !r[0])) return null;
+    return clipboardTableRowsToMarkdown(rows);
+}
 // 2026-11-02 复制的纯文本直接粘贴成提示词节点（用户要求）：落在鼠标位置
 // （lastMouseWorld，无记录退回视口中心），多行/分号原样保留，粘贴后选中并
 // 直接进入文字编辑（光标在文末），undo 一步可整体撤销。
-function pasteTextAsPromptNode(rawText){
+// 表格粘贴时按行列数放大节点（opts.width/opts.height）。
+function pasteTextAsPromptNode(rawText, opts={}){
     const text = String(rawText || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim();
     if(!text || !canvas) return false;
     const anchor = lastMouseWorld || viewportCenter();
@@ -16556,6 +16595,9 @@ function pasteTextAsPromptNode(rawText){
         {skipRender:true}
     );
     node.text = text;
+    const width = Number(opts.width), height = Number(opts.height);
+    if(Number.isFinite(width) && width > PROMPT_NODE_DEFAULT_WIDTH) node.w = Math.round(width);
+    if(Number.isFinite(height) && height > PROMPT_NODE_DEFAULT_HEIGHT) node.h = Math.round(height);
     render();
     scheduleSave();
     requestAnimationFrame(() => {
@@ -41996,13 +42038,21 @@ window.addEventListener('paste', e => {
         return;
     }
     // 2026-11-02 剪贴板里是外部复制的纯文本 → 直接贴成提示词节点（最近复制什么就贴什么）。
-    // 内部复制节点时 copyNodes 会清空系统剪贴板，所以这里不会抢节点剪贴板的粘贴；
-    // 光标在输入框/编辑器里（isEditableTarget）时完全不拦截，仍是原生粘贴。
+    // 表格内容（Excel/Word/网页的 <table>，或表格软件的 TSV 纯文本）先转成 Markdown 表格，
+    // 并按行列数放大节点。内部复制节点时 copyNodes 会清空系统剪贴板，所以这里不会抢
+    // 节点剪贴板的粘贴；光标在输入框/编辑器里（isEditableTarget）时完全不拦截。
     if(!isEditableTarget(e.target)){
-        const clipText = String(e.clipboardData?.getData?.('text/plain') || '').trim();
+        const table = clipboardHtmlTableToMarkdown(String(e.clipboardData?.getData?.('text/html') || ''))
+            || clipboardTsvToMarkdown(e.clipboardData?.getData?.('text/plain'));
+        const clipText = table ? table.md : String(e.clipboardData?.getData?.('text/plain') || '').trim();
         if(clipText){
             e.preventDefault();
-            pasteTextAsPromptNode(clipText);
+            const opts = {};
+            if(table){
+                opts.width = Math.min(620, Math.max(300, table.cols * 130 + 40));
+                opts.height = Math.min(620, Math.max(280, table.rows * 30 + 120));
+            }
+            pasteTextAsPromptNode(clipText, opts);
             return;
         }
     }
