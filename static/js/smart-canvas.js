@@ -10203,8 +10203,9 @@ function syncPackedDurPillSummary(input){
 const API_VIDEO_MODEL_CAPS = {
     'minimax-h3': {
         label:'MiniMax H3',
-        // 2026-10-26 按优云智算 H3 面板实测校准：时长 4-30s、分辨率 5 档、画幅 6 种（首尾帧模式后端强制 adaptive）
-        duration:{min:4, max:30, step:1},
+        // 2026-11-02 纠正：官方 API duration 只收 4~15 整数（超出 RetCode 230），
+        // 30 秒要用「末帧接力」拼两段，面板不再允许直接选 16-30。
+        duration:{min:4, max:15, step:1},
         resolutions:['480p', '768p', '1080p', '2k', '4k'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
         modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
@@ -10456,7 +10457,17 @@ function renderVideoPackedControl(){
     const shownAspOptions = allowedAsp.length ? aspOptions.filter(o => o[0] ? allowedAsp.includes(o[0]) : showAutoAsp) : aspOptions;
     // 2026-10-19 时长按模型判定；2026-10-25 读档案（固定档模型走 ticks 按钮而非滑条）。
     const durRange = videoDurationRangeForProvider(settings.videoProvider, settings.videoModel);
-    const dur = Math.max(durRange.min, Math.min(durRange.max, Number(settings.videoDuration) || (durRange.ticks ? durRange.ticks[0] : 5)));
+    const rawDur = Number(settings.videoDuration) || 0;
+    const dur = Math.max(durRange.min, Math.min(durRange.max, rawDur || (durRange.ticks ? durRange.ticks[0] : 5)));
+    // 2026-11-02：超出模型上限的旧值（如 H3 存了 27s）被钳回后要说一声，
+    // 否则用户以为生成了 27 秒、实际只出 15 秒还照扣费。同一个越界值只提示一次。
+    if(rawDur > durRange.max){
+        const key = `${settings.videoProvider}|${settings.videoModel}|${rawDur}`;
+        if(renderVideoPackedControl._clampToastKey !== key){
+            renderVideoPackedControl._clampToastKey = key;
+            toast(`${settings.videoModel || '当前模型'} 单次最长 ${durRange.max} 秒，已按 ${durRange.max} 秒提交`);
+        }
+    }
     settings.videoDuration = dur;
     // 生成数量：方舟没有批量参数，前端并发提交 N 次（官方并发上限 3，第 4 个排队补发）。
     const count = [1, 2, 4].includes(Number(settings.videoCount)) ? Number(settings.videoCount) : 1;

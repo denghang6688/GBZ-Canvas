@@ -16950,8 +16950,9 @@ async def generate_compshare_video(payload, provider):
         seconds = int(payload.duration or 5)
     except Exception:
         seconds = 5
-    # 2026-10-26 按优云智算 H3 面板校准：时长 4-30 秒（面板滑杆最高 30s）
-    seconds = max(4, min(30, seconds))
+    # 2026-11-02 纠正：H3 官方只接受 4~15 秒整数，30 秒需要用「末帧接力」拼两段。
+    # 这里只做兜底钳制（前端已按能力档案限制到 4-15）。
+    seconds = max(4, min(15, seconds))
     has_videos = any(str(v or "").strip() for v in (payload.videos or []))
     has_audios = any(str(a or "").strip() for a in (payload.audios or []))
     frame_roles = [str(getattr(ref, "role", "") or "").strip().lower() for ref in (payload.images or [])]
@@ -17440,8 +17441,11 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
 VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
     "minimax-h3": {
         "label": "MiniMax H3",
-        # 2026-10-26 按优云智算 H3 面板实测校准：时长滑杆 4-30s、分辨率 480P/768P/1080P/2K/4K、画幅 6 种（无 adaptive，首尾帧模式由适配器强制 adaptive）
-        "duration": {"min": 4, "max": 30, "step": 1},
+        # 2026-11-02 纠正：官方 API 的 duration 只收 4~15 的整数（platform.minimax.cn 视频生成 v2
+        # 文档：MiniMax-H3 可用值 4..15），超出会直接 RetCode 230
+        # 「Params [Duration] not available」。10-26 按优云智算页面滑杆误判成 4-30，
+        # 导致用户在面板选 27s 提交后上游拒单。
+        "duration": {"min": 4, "max": 15, "step": 1},
         "resolutions": ["480p", "768p", "1080p", "2k", "4k"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},
