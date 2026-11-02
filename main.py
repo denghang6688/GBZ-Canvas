@@ -16950,9 +16950,11 @@ async def generate_compshare_video(payload, provider):
         seconds = int(payload.duration or 5)
     except Exception:
         seconds = 5
-    # 2026-11-02 纠正：H3 官方只接受 4~15 秒整数，30 秒需要用「末帧接力」拼两段。
-    # 这里只做兜底钳制（前端已按能力档案限制到 4-15）。
-    seconds = max(4, min(15, seconds))
+    # 2026-11-02 纠正（用户实测官网可出 30 秒）：优云智算 H3 的 duration 支持 4~30 秒，
+    # 但 16~30 秒必须同时传 use_context_ir=true，否则上游返回
+    # 「Params [Duration/UseContextIR] not available」（RetCode 230）。
+    # 上一版误按 MiniMax 官方 API 的 4-15 收窄，已回滚到 4-30。
+    seconds = max(4, min(30, seconds))
     has_videos = any(str(v or "").strip() for v in (payload.videos or []))
     has_audios = any(str(a or "").strip() for a in (payload.audios or []))
     frame_roles = [str(getattr(ref, "role", "") or "").strip().lower() for ref in (payload.images or [])]
@@ -16977,6 +16979,10 @@ async def generate_compshare_video(payload, provider):
     }
     if payload.watermark:
         body["aigc_watermark"] = True
+    # 2026-11-02：时长 >15 秒必须显式开 Context-IR（平台先优化提示词再生成），
+    # 这是优云智算 H3 出 16~30 秒成片的硬前置；15 秒及以下保持不传，避免改变原有出片表现。
+    if seconds > 15:
+        body["use_context_ir"] = True
     root = compshare_api_root(provider)
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=1800.0, pool=20.0)) as client:
         submit = await client.post(f"{root}/minimax/v2/video_generation", headers=headers, json=body)
@@ -17441,11 +17447,9 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
 VIDEO_MODEL_CAPS_PROFILES: Dict[str, Dict[str, Any]] = {
     "minimax-h3": {
         "label": "MiniMax H3",
-        # 2026-11-02 纠正：官方 API 的 duration 只收 4~15 的整数（platform.minimax.cn 视频生成 v2
-        # 文档：MiniMax-H3 可用值 4..15），超出会直接 RetCode 230
-        # 「Params [Duration] not available」。10-26 按优云智算页面滑杆误判成 4-30，
-        # 导致用户在面板选 27s 提交后上游拒单。
-        "duration": {"min": 4, "max": 15, "step": 1},
+        # 2026-11-02（用户实测官网可出 30 秒）：优云智算 H3 时长 4~30 秒；
+        # 16~30 秒要求请求体带 use_context_ir=true（适配器已自动补），15 秒及以下不必传。
+        "duration": {"min": 4, "max": 30, "step": 1},
         "resolutions": ["480p", "768p", "1080p", "2k", "4k"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "modes": {"frames": True, "reference_image": 9, "reference_video": 3, "reference_audio": 3},

@@ -12721,6 +12721,15 @@ html body .world .image-node.minimax-h3-node .smart-run-upload-icon i {
     cursor: pointer;
 }
 
+/* 2026-11-02：H3 选 16~30 秒时的 Context-IR 说明（浅色/深色都跟主题走） */
+.packed-dur-hint {
+    margin: 7px 7px 0;
+    font-size: 11px;
+    line-height: 1.55;
+    color: rgba(255,255,255,.46);
+}
+html body.theme-light .packed-dur-hint { color: rgba(0,0,0,.5); }
+
 /* Stop generation X button - bottom right corner */
 .generation-pending-actions {
     position: absolute !important;

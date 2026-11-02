@@ -10203,9 +10203,9 @@ function syncPackedDurPillSummary(input){
 const API_VIDEO_MODEL_CAPS = {
     'minimax-h3': {
         label:'MiniMax H3',
-        // 2026-11-02 纠正：官方 API duration 只收 4~15 整数（超出 RetCode 230），
-        // 30 秒要用「末帧接力」拼两段，面板不再允许直接选 16-30。
-        duration:{min:4, max:15, step:1},
+        // 2026-11-02（用户实测官网可出 30 秒）：优云智算 H3 时长 4~30 秒；
+        // 16~30 秒必须带 use_context_ir=true（后端适配器自动补），15 秒及以下不需要。
+        duration:{min:4, max:30, step:1},
         resolutions:['480p', '768p', '1080p', '2k', '4k'],
         ratios:['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
         modes:{frames:true, reference_image:9, reference_video:3, reference_audio:3},
@@ -10504,6 +10504,11 @@ function renderVideoPackedControl(){
         h += '</div>';
     } else {
         h += '<div class="packed-dur-row"><input type="range" min="' + durRange.min + '" max="' + durRange.max + '" step="1" class="packed-dur-slider" data-param="videoDuration" value="' + dur + '"><span class="packed-dur-val">' + dur + 's</span></div>';
+        // 2026-11-02：优云智算 H3 的 16~30 秒必须开 Context-IR，后端会自动补这个参数，
+        // 但平台会先润色提示词——这里说明一句，免得用户以为提示词被改坏了。
+        if(caps.profile === 'minimax-h3' && dur > 15){
+            h += '<div class="packed-dur-hint">16 秒以上会自动开启提示词优化（Context-IR）：平台先润色提示词再生成，成片更稳，但与原句可能略有差异。</div>';
+        }
     }
     // 生成数量（多结果并发提交，单价×数量即总费用）
     h += '<div class="packed-section-label">\u751f\u6210\u6570\u91cf</div>';
