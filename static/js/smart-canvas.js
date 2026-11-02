@@ -10507,7 +10507,7 @@ function renderVideoPackedControl(){
         // 2026-11-02：优云智算 H3 的 16~30 秒必须开 Context-IR，后端会自动补这个参数，
         // 但平台会先润色提示词——这里说明一句，免得用户以为提示词被改坏了。
         if(caps.profile === 'minimax-h3' && dur > 15){
-            h += '<div class="packed-dur-hint">16 秒以上会自动开启提示词优化（Context-IR）：平台先润色提示词再生成，成片更稳，但与原句可能略有差异。</div>';
+            h += '<div class="packed-dur-hint">16 秒以上会自动开启提示词优化（Context-IR），并自动补一段覆盖全时长的时间轴：平台先排时间轴、再分段生成，因此成片与原句可能略有差异。</div>';
         }
     }
     // 生成数量（多结果并发提交，单价×数量即总费用）

@@ -16938,6 +16938,21 @@ def compshare_video_content(payload):
             content.append({"type": "image_url", "image_url": {"url": url}, "role": role})
     return content
 
+def h3_long_video_timeline_text(seconds: int) -> str:
+    """2026-11-02：duration>15 时平台会先用 Context-IR 整理出一条「长视频时间轴」，
+    再按时间轴分段生成。若提示词里完全没有时间信息（例如素材编号 + 需求说明的写法），
+    优化器估出的时间轴覆盖不到请求时长，任务会失败并返回
+    「optimized long-video timeline does not cover the requested duration」。
+    这里补一段只依赖时长、不猜内容的时间轴要求，保证 0~seconds 全程被覆盖。"""
+    total = max(16, int(seconds))
+    a = max(1, round(total / 3))
+    b = max(a + 1, round(total * 2 / 3))
+    return (
+        f"本片总时长必须为 {total} 秒，画面与声音连续覆盖 0 秒至 {total} 秒的完整时间轴，"
+        f"不要提前结束，不要用黑场或静止定格收尾：0–{a} 秒建立场景、主体与基调；"
+        f"{a}–{b} 秒推进主要动作与镜头运动；{b}–{total} 秒完成动作收束与画面落点。"
+        f"三段保持同一场景、同一主体、同一光线与色调，动作连续衔接。"
+    )
 async def generate_compshare_video(payload, provider):
     """优云智算 MiniMax H3 视频：POST /minimax/v2/video_generation（幂等键）→
     轮询 GET /minimax/v2/query/video_generation/{id}，成功取 task.content.url 落盘。"""
@@ -16983,6 +16998,11 @@ async def generate_compshare_video(payload, provider):
     # 这是优云智算 H3 出 16~30 秒成片的硬前置；15 秒及以下保持不传，避免改变原有出片表现。
     if seconds > 15:
         body["use_context_ir"] = True
+        # 长视频时间轴兜底：多段 text 会按顺序换行拼接，这段只约束时长覆盖，不覆盖用户内容。
+        try:
+            body.setdefault("content", []).append({"type": "text", "text": h3_long_video_timeline_text(seconds)})
+        except Exception:
+            pass
     root = compshare_api_root(provider)
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=1800.0, pool=20.0)) as client:
         submit = await client.post(f"{root}/minimax/v2/video_generation", headers=headers, json=body)
@@ -17013,6 +17033,13 @@ async def generate_compshare_video(payload, provider):
             if status in COMPSHARE_FAILED_STATUSES:
                 err = (node or {}).get("error") or {}
                 reason = err.get("message") if isinstance(err, dict) else str(err or "")
+                if "timeline does not cover" in str(reason).lower():
+                    raise HTTPException(status_code=502, detail=(
+                        "优云智算视频任务失败：长视频时间轴覆盖不足（optimized long-video timeline does not cover the requested duration）。"
+                        "16 秒以上平台会先排出时间轴再分段生成，提示词里需要有覆盖全时长的时间信息；"
+                        "系统已自动补一段全时长时间轴，若仍失败，请把需求写成带时间点的分镜（如 0-9s / 9-18s / 18-27s），"
+                        "或把时长降到 15 秒以内。"
+                    ))
                 raise HTTPException(status_code=502, detail=f"优云智算视频任务失败：{reason or json.dumps(node, ensure_ascii=False)[:300]}")
         raise HTTPException(status_code=504, detail=f"优云智算视频任务超时：{json.dumps(last_payload, ensure_ascii=False)[:300]}")
 
