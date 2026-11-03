@@ -20177,9 +20177,9 @@ async function shotComposeRun(){
 const ASSET_CARD_WIDTH = 240;
 const ASSET_CARD_HEIGHT = 296;
 const ASSET_KINDS = [
-    {key:'character', label:'角色', unit:'个角色', empty:'生成或上传角色照', promptHint:'单人全身立绘，正面，中性灰背景，完整入画'},
-    {key:'scene', label:'场景', unit:'个场景', empty:'生成或上传场景图', promptHint:'场景全景空镜，无人物，透视自然'},
-    {key:'prop', label:'道具', unit:'个道具', empty:'生成或上传道具图', promptHint:'道具静物特写，中性背景，材质细节清晰'}
+    {key:'character', label:'角色', unit:'个人物角色', empty:'生成或上传角色照', genLabel:'AI 生角色', promptHint:'单人全身立绘，正面，中性灰背景，完整入画'},
+    {key:'scene', label:'场景', unit:'个场景', empty:'生成或上传场景图', genLabel:'AI 生场景', promptHint:'场景全景空镜，无人物，透视自然'},
+    {key:'prop', label:'道具', unit:'个道具', empty:'生成或上传道具图', genLabel:'AI 生道具', promptHint:'道具静物特写，中性背景，材质细节清晰'}
 ];
 const ASSET_DEFAULT_SPEC = '画面比例 2:1，均匀柔光，35mm 胶片质感，高清电影级';
 const ASSET_DEFAULT_NEGATIVE = '多人同框、夸张表情、文字水印、额外配饰、透视畸变、低分辨率';
@@ -20311,11 +20311,33 @@ function assetStudioProgress(shotNode){
         prompts:{done:prompts, total:rows.length}
     };
 }
-function assetStudioStepHtml(index, label, progress, detail, done){
-    return `<div class="asset-step${done ? ' is-done' : ''}">
+function assetStudioStepHtml(index, label, progress, detail, done, current){
+    return `<div class="asset-step${done ? ' is-done' : ''}${current ? ' is-current' : ''}">
         <i>${done ? '<b data-lucide="check"></b>' : index}</i>
         <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></div>
     </div>`;
+}
+function assetStudioStepsHtml(progress, detail){
+    const shotsDone = progress.shots.total > 0;
+    const assetsDone = progress.assets.total > 0 && progress.assets.done >= progress.assets.total;
+    const promptsDone = progress.prompts.total > 0 && progress.prompts.done >= progress.prompts.total;
+    const flags = [shotsDone, assetsDone, promptsDone];
+    const currentIndex = flags.findIndex(item => !item);
+    return [
+        assetStudioStepHtml(1, '确认镜头', progress.shots, detail.shots, shotsDone, currentIndex === 0),
+        assetStudioStepHtml(2, '准备资产', progress.assets, detail.assets, assetsDone, currentIndex === 1),
+        assetStudioStepHtml(3, '合成提示词', progress.prompts, detail.prompts, promptsDone, currentIndex === 2)
+    ].join('');
+}
+// 右上角进度提示：几步做完之后就能整批出镜头视频
+function assetStudioHintText(progress){
+    const flags = [
+        progress.shots.total > 0,
+        progress.assets.total > 0 && progress.assets.done >= progress.assets.total,
+        progress.prompts.total > 0 && progress.prompts.done >= progress.prompts.total
+    ];
+    const done = flags.filter(Boolean).length;
+    return done >= 3 ? '3/3 可以批量生视频了' : `${done}/3 完成后可批量生视频`;
 }
 function assetStudioDetail(progress){
     const shots = progress.shots.total ? `${progress.shots.total} 个镜头已就绪` : '还没有镜头';
@@ -20324,23 +20346,30 @@ function assetStudioDetail(progress){
         ? `${progress.assets.done}/${progress.assets.total} 已生成${assetGap > 0 ? `，还差 ${assetGap} 个` : ''}`
         : '还没有资产';
     const prompts = progress.prompts.total
-        ? `${progress.prompts.done}/${progress.prompts.total} 已生成`
+        ? `${progress.prompts.done}/${progress.prompts.total} 已合成`
         : '还没有镜头';
     return {shots, assets, prompts};
+}
+// 只有填过名字的卡才算「已建立」，其余在格子里显示「待创建」，跟截图里的空态一致
+function assetHasName(node){
+    return Boolean(String(node?.assetMeta?.name || '').trim());
 }
 function assetStudioCardHtml(node, kind){
     const meta = node.assetMeta || {};
     const url = assetImageUrl(node);
     const generating = meta.status === 'generating';
+    const named = assetHasName(node);
     const desc = String(meta.desc || '').replace(/\s+/g, ' ').trim();
-    return `<button class="asset-tile${url ? ' has-image' : ' is-empty'}${generating ? ' is-generating' : ''}" type="button" data-asset-open="${escapeAttr(node.id)}">
+    const emptyText = named ? kind.empty : '待创建';
+    return `<div class="asset-tile${url ? ' has-image' : ' is-empty'}${generating ? ' is-generating' : ''}${named ? '' : ' is-blank'}" role="button" tabindex="0" data-asset-open="${escapeAttr(node.id)}">
         <span class="asset-tile-media">
-            ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<i data-lucide="plus"></i><em>${escapeHtml(kind.empty)}</em>`}
+            ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<em>${escapeHtml(emptyText)}</em>`}
             ${generating ? '<span class="asset-tile-loading"><i data-lucide="loader-2"></i></span>' : ''}
         </span>
-        <span class="asset-tile-name">${escapeHtml(assetDisplayName(node))}</span>
-        ${desc ? `<span class="asset-tile-desc">${escapeHtml(desc)}</span>` : ''}
-    </button>`;
+        <button class="asset-tile-more" type="button" title="更多操作" aria-label="更多操作" data-asset-more="${escapeAttr(node.id)}"><i data-lucide="more-horizontal"></i></button>
+        ${named ? `<span class="asset-tile-name">${escapeHtml(assetDisplayName(node))}</span>` : ''}
+        ${named && desc ? `<span class="asset-tile-desc">${escapeHtml(desc)}</span>` : ''}
+    </div>`;
 }
 function assetStudioBodyHtml(){
     const state = assetStudioState || {};
@@ -20350,21 +20379,16 @@ function assetStudioBodyHtml(){
     const sections = ASSET_KINDS.map(kind => {
         const list = assetAllNodes(kind.key);
         return `<section class="asset-section" data-asset-section="${kind.key}">
-            <header><strong>${escapeHtml(kind.label)}</strong><em>${list.length}</em></header>
+            <header><strong>${escapeHtml(kind.label)}</strong></header>
             <div class="asset-row">
                 ${list.map(node => assetStudioCardHtml(node, kind)).join('')}
-                <button class="asset-add-tile" type="button" data-asset-add="${kind.key}"><i data-lucide="plus"></i><span>添加</span></button>
+                <button class="asset-add-tile" type="button" data-asset-add="${kind.key}"><i data-lucide="plus"></i><span>新增</span></button>
             </div>
         </section>`;
     }).join('');
     const style = shotNode ? shotTableStyleGuide(shotNode) : '';
-    return `<div class="asset-steps">
-            ${assetStudioStepHtml(1, '确认镜头', progress.shots, detail.shots, progress.shots.total > 0)}
-            ${assetStudioStepHtml(2, '准备资产', progress.assets, detail.assets, progress.assets.total > 0 && progress.assets.done >= progress.assets.total)}
-            ${assetStudioStepHtml(3, '合成图片提示词', progress.prompts, detail.prompts, progress.prompts.total > 0 && progress.prompts.done >= progress.prompts.total)}
-        </div>
-        <div class="asset-style-bar">
-            <label>全局风格</label>
+    return `<div class="asset-style-bar">
+            <label>全片风格</label>
             <input type="text" class="asset-style-input" spellcheck="false" placeholder="例：盛唐古风，电影级写实真人，暖金与朱红主色调，高对比度，伦勃朗光" value="${escapeAttr(style)}">
         </div>
         <div class="asset-sections">${sections}</div>`;
@@ -20376,7 +20400,7 @@ function assetStudioNoteText(){
         const count = missing.filter(node => node.assetMeta.kind === kind.key).length;
         return count ? `${count} ${kind.unit}` : '';
     }).filter(Boolean);
-    return `检测到有 ${counts.join('、')} 没有设定图，您可以手动上传或 AI 批量生成`;
+    return `检测到有 ${counts.join(' 和 ')} 没有设定图，您可以手动上传或 AI 批量生成`;
 }
 let assetGlobalKeysBound = false;
 // 浮层里的输入框拿不到 Escape（监听在各自容器上），这里统一收口：
@@ -20392,6 +20416,8 @@ function assetBindGlobalKeys(){
         if(e.key === 'Escape'){
             if(addOpen){ closeAssetAddPanel(); e.stopPropagation(); e.preventDefault(); return; }
             if(editorOpen){ closeAssetEditor(); e.stopPropagation(); e.preventDefault(); return; }
+            // 卡片右上角的「⋯」菜单比工作台更靠上层，先收它
+            if(studioOpen && assetCardMenuTarget){ closeAssetCardMenu(); e.stopPropagation(); e.preventDefault(); return; }
             if(studioOpen){ closeAssetStudio(); e.stopPropagation(); e.preventDefault(); }
             return;
         }
@@ -20410,27 +20436,50 @@ function assetStudioEnsureDom(){
     wrap.hidden = true;
     wrap.innerHTML = `<section class="asset-studio" role="dialog" aria-modal="true" aria-label="准备资产">
         <header class="asset-studio-head">
-            <div class="asset-studio-title"><strong>准备资产</strong><span>角色 / 场景 / 道具，只写一次，全片复用</span></div>
-            <button class="asset-studio-close" type="button" title="关闭" aria-label="关闭" data-asset-studio-close="1">&times;</button>
+            <div class="asset-steps"></div>
+            <div class="asset-studio-aside">
+                <span class="asset-studio-hint"></span>
+                <button class="asset-studio-close" type="button" title="关闭" aria-label="关闭" data-asset-studio-close="1">&times;</button>
+            </div>
         </header>
         <div class="asset-studio-body"></div>
         <footer class="asset-studio-foot">
             <span class="asset-studio-note"></span>
             <button class="asset-studio-batch" type="button" data-asset-gen-all="1">一键生成所有资产</button>
         </footer>
+        <div class="asset-tile-menu" hidden></div>
     </section>`;
     document.body.appendChild(wrap);
     assetStudioEl = wrap;
     wrap.addEventListener('mousedown', e => {
         if(e.target === wrap || e.target.closest('[data-asset-studio-close]')) closeAssetStudio();
+        if(!e.target.closest('.asset-tile-menu') && !e.target.closest('[data-asset-more]')) closeAssetCardMenu();
+    });
+    wrap.addEventListener('contextmenu', e => {
+        const more = e.target.closest('[data-asset-more]');
+        if(!more) return;
+        e.preventDefault();
+        openAssetCardMenu(more.dataset.assetMore, more);
     });
     wrap.addEventListener('click', e => {
+        const more = e.target.closest('[data-asset-more]');
+        if(more){ e.preventDefault(); e.stopPropagation(); openAssetCardMenu(more.dataset.assetMore, more); return; }
+        const menuItem = e.target.closest('[data-asset-menu]');
+        if(menuItem){ e.preventDefault(); e.stopPropagation(); runAssetCardMenuAction(menuItem.dataset.assetMenu, menuItem.dataset.assetMenuNode); return; }
         const open = e.target.closest('[data-asset-open]');
         if(open){ openAssetEditor(open.dataset.assetOpen); return; }
         const add = e.target.closest('[data-asset-add]');
         if(add){ openAssetAddPanel(add.dataset.assetAdd); return; }
         if(e.target.closest('[data-asset-gen-all]')){ assetGenerateAllMissing(); return; }
     });
+    wrap.addEventListener('keydown', e => {
+        if(e.key === 'Escape' && !assetEditorEl?.hidden){ closeAssetEditor(); return; }
+        if((e.key === 'Enter' || e.key === ' ') && e.target?.classList?.contains('asset-tile')){
+            e.preventDefault();
+            openAssetEditor(e.target.dataset.assetOpen);
+        }
+    });
+    // 菜单开着时点面板空白处也要收起来（起手在卡片上的拖动不打断）
     wrap.addEventListener('input', e => {
         if(!e.target.classList.contains('asset-style-input')) return;
         const shotNode = nodes.find(node => node.id === assetStudioState?.shotNodeId);
@@ -20438,11 +20487,112 @@ function assetStudioEnsureDom(){
         shotNode.styleGuide = String(e.target.value || '');
         scheduleSave();
     });
-    wrap.addEventListener('keydown', e => { if(e.key === 'Escape' && !assetEditorEl?.hidden){ closeAssetEditor(); } });
     return wrap;
+}
+/* ---------- 卡片「⋯」菜单 ---------- */
+let assetCardMenuTarget = '';
+function closeAssetCardMenu(){
+    assetCardMenuTarget = '';
+    const menu = assetStudioEl?.querySelector('.asset-tile-menu');
+    if(menu){ menu.hidden = true; menu.innerHTML = ''; }
+    assetStudioEl?.querySelectorAll('.asset-tile.is-menu-open').forEach(el => el.classList.remove('is-menu-open'));
+}
+function assetCardMenuHtml(node){
+    const kind = assetKindMeta(node.assetMeta?.kind);
+    const hasImage = Boolean(assetImageUrl(node));
+    const rows = [
+        {action:'pick', label:'选择图片'},
+        {action:'gen', label:kind.genLabel || 'AI 生成'},
+        {action:'jump', label:'跳转至节点'},
+        {action:'clear', label:'清除图片', disabled:!hasImage},
+        {action:'save', label:'保存到个人资产', disabled:!hasImage},
+        {action:'delete', label:'删除', danger:true, divider:true}
+    ];
+    return rows.map(row => `${row.divider ? '<i class="asset-tile-menu-sep"></i>' : ''}
+        <button type="button" class="asset-tile-menu-item${row.danger ? ' is-danger' : ''}" data-asset-menu="${row.action}" data-asset-menu-node="${escapeAttr(node.id)}"${row.disabled ? ' disabled' : ''}>${escapeHtml(row.label)}</button>`).join('');
+}
+function openAssetCardMenu(nodeId, anchor){
+    const node = nodes.find(item => item.id === nodeId && isAssetNode(item));
+    const menu = assetStudioEl?.querySelector('.asset-tile-menu');
+    if(!node || !menu || !anchor) return;
+    if(assetCardMenuTarget === nodeId && !menu.hidden){ closeAssetCardMenu(); return; }
+    closeAssetCardMenu();
+    assetCardMenuTarget = nodeId;
+    menu.innerHTML = assetCardMenuHtml(node);
+    menu.hidden = false;
+    const rect = anchor.getBoundingClientRect();
+    const width = menu.offsetWidth || 188;
+    const height = menu.offsetHeight || 0;
+    let left = rect.right - width;
+    if(left < 10) left = Math.max(10, rect.left);
+    let top = rect.bottom + 6;
+    if(top + height > window.innerHeight - 10) top = Math.max(10, rect.top - height - 6);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    anchor.closest('.asset-tile')?.classList.add('is-menu-open');
+    refreshIcons();
+}
+async function runAssetCardMenuAction(action, nodeId){
+    const node = nodes.find(item => item.id === nodeId && isAssetNode(item));
+    closeAssetCardMenu();
+    if(!node) return;
+    if(action === 'pick'){ assetPickUploadForNode(node); return; }
+    if(action === 'gen'){ assetGenerateNode(node); return; }
+    if(action === 'jump'){
+        const scale = safeScale(viewport.scale);
+        closeAssetStudio();
+        selectedId = node.id;
+        selectedIds = [];
+        viewport = {
+            scale,
+            x: window.innerWidth / 2 - (node.x + node.w / 2) * scale,
+            y: window.innerHeight / 2 - (node.y + node.h / 2) * scale
+        };
+        render();
+        applyViewport();
+        return;
+    }
+    if(action === 'clear'){
+        if(!assetImageUrl(node)){ toast('这张卡还没有设定图'); return; }
+        pushUndo();
+        node.images = [];
+        if(node.assetMeta) node.assetMeta.status = 'empty';
+        render();
+        scheduleSave();
+        assetRefreshSurfaces();
+        return;
+    }
+    if(action === 'save'){
+        const url = assetImageUrl(node);
+        if(!url){ toast('先生成或上传设定图，再保存到个人资产'); return; }
+        toast('正在保存到资产库…');
+        try{
+            await addUrlToAssetLibrary(url, assetDisplayName(node));
+        } catch(err){
+            toast((err.message || '保存失败').slice(0, 160));
+        }
+        return;
+    }
+    if(action === 'delete'){
+        pushUndo();
+        nodes = nodes.filter(item => item.id !== node.id);
+        if(selectedId === node.id) selectedId = null;
+        if(assetEditorState?.nodeId === node.id) closeAssetEditor();
+        render();
+        scheduleSave();
+        assetRefreshSurfaces();
+    }
 }
 function assetStudioRefresh(){
     if(!assetStudioEl || assetStudioEl.hidden) return;
+    closeAssetCardMenu();
+    const shotNode = nodes.find(node => node.id === assetStudioState?.shotNodeId) || null;
+    const progress = assetStudioProgress(shotNode);
+    const detail = assetStudioDetail(progress);
+    const steps = assetStudioEl.querySelector('.asset-steps');
+    if(steps) steps.innerHTML = assetStudioStepsHtml(progress, detail);
+    const hint = assetStudioEl.querySelector('.asset-studio-hint');
+    if(hint) hint.textContent = assetStudioHintText(progress);
     const body = assetStudioEl.querySelector('.asset-studio-body');
     if(body) body.innerHTML = assetStudioBodyHtml();
     const note = assetStudioEl.querySelector('.asset-studio-note');
@@ -20587,7 +20737,9 @@ function assetEditorEnsureDom(){
             if(nameEl) nameEl.textContent = assetDisplayName(node);
             if(assetStudioEl && !assetStudioEl.hidden){
                 const tileName = assetStudioEl.querySelector(`[data-asset-open="${node.id}"] .asset-tile-name`);
+                // 没名字的卡片本来不显示名字行（空态是「待创建」），改名后要整块重画
                 if(tileName) tileName.textContent = assetDisplayName(node);
+                else assetStudioRefresh();
             }
         }
     });
