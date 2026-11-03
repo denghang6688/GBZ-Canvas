@@ -192,7 +192,9 @@ html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .pr
 html body .world .image-node.prompt-smart-node:not(.smart-group-member-node) .prompt-node-text {
     margin: 12px 14px 0 !important;
     padding: 12px 13px !important;
-    min-height: 72px !important;
+    /* 2026-11-03（用户要求任意形状）：原来是 72px，节点缩到 120×80 时文字区顶出卡片。
+       文字区本来就是 flex:1，正常尺寸下自动铺满；放开 0 只在节点很小时起作用（内部滚动）。 */
+    min-height: 0 !important;
     /* 2026-10-29（用户要求）：原先硬编码 12px 会压掉节点自带的字号设置，
        导致提示词字号改不动；改为跟随节点变量（默认 16px）。 */
     font-size: var(--prompt-node-font-size, 17px) !important;

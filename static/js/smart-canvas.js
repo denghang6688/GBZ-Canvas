@@ -5167,8 +5167,9 @@ const PROMPT_NODE_DEFAULT_WIDTH = 280;
 const PROMPT_NODE_DEFAULT_HEIGHT = 280;
 const PROMPT_NODE_PREVIOUS_DEFAULT_HEIGHT = 220;
 const PROMPT_NODE_LLM_EXPANDED_HEIGHT = 258;
-const PROMPT_NODE_MIN_WIDTH = 176;
-const PROMPT_NODE_MIN_HEIGHT = 132;
+// 2026-11-03（用户要求：提示词/文本节点任意形状自由缩放，最小放宽到 120 × 80）
+const PROMPT_NODE_MIN_WIDTH = 120;
+const PROMPT_NODE_MIN_HEIGHT = 80;
 const SMART_GROUP_DEFAULT_WIDTH = 340;
 const SMART_GROUP_DEFAULT_HEIGHT = 286;
 const SMART_GROUP_LEGACY_HEIGHT = 220;
@@ -6928,14 +6929,18 @@ function promptNodeCompactDimension(value, legacyValue, defaultValue){
     return n;
 }
 function promptNodeLayoutSize(node){
-    const explicitW = promptNodeCompactDimension(node?.w, PROMPT_NODE_LEGACY_WIDTH, PROMPT_NODE_DEFAULT_WIDTH);
-    const explicitH = promptNodeCompactDimension(node?.h, PROMPT_NODE_LEGACY_HEIGHT, PROMPT_NODE_DEFAULT_HEIGHT);
+    // 2026-11-03：用户手动拉过尺寸（boxManual）后不得再被「旧默认尺寸吸附」改写。
+    // promptNodeCompactDimension 原本会把接近 280/220/258 的历史尺寸归位到默认值，
+    // 用户拖到 275 之类的宽度时会被弹回 280，读作“拉不动”。
+    const manualBox = node?.boxManual === true;
+    const explicitW = manualBox ? Number(node?.w) : promptNodeCompactDimension(node?.w, PROMPT_NODE_LEGACY_WIDTH, PROMPT_NODE_DEFAULT_WIDTH);
+    const explicitH = manualBox ? Number(node?.h) : promptNodeCompactDimension(node?.h, PROMPT_NODE_LEGACY_HEIGHT, PROMPT_NODE_DEFAULT_HEIGHT);
     if(isSmartGroupCompactMember(node) && Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24){
         return {width:Math.round(explicitW), height:Math.round(explicitH)};
     }
     const rawW = Number(node?.w);
     const rawH = Number(node?.h);
-    const previousDefaultBox = Math.abs(rawW - PROMPT_NODE_DEFAULT_WIDTH) <= 2
+    const previousDefaultBox = !manualBox && Math.abs(rawW - PROMPT_NODE_DEFAULT_WIDTH) <= 2
         && (Math.abs(rawH - PROMPT_NODE_PREVIOUS_DEFAULT_HEIGHT) <= 2 || Math.abs(rawH - PROMPT_NODE_LLM_EXPANDED_HEIGHT) <= 2);
     const width = Number.isFinite(explicitW) && explicitW > 24 ? explicitW : PROMPT_NODE_DEFAULT_WIDTH;
     const height = previousDefaultBox ? PROMPT_NODE_DEFAULT_HEIGHT : (Number.isFinite(explicitH) && explicitH > 24 ? explicitH : PROMPT_NODE_DEFAULT_HEIGHT);
@@ -7291,11 +7296,12 @@ function fitSmartLoopNode(node){
 }
 function nodeRect(node){
     const layout = imageLayout(node.images || [], nodeScale(node), node);
-    // 普通文本/LLM 节点的 CSS 最小尺寸是 280x280，但历史数据里可能仍保存
-    // 176x213 等旧尺寸。连线必须按实际显示盒计算，否则会从节点左上方向偏移。
+    // 普通文本/LLM 节点历史上被 CSS 的 280×280 最小尺寸兜着，这里也按 280 抬过。
+    // 2026-11-03（用户要求任意形状）：CSS 与 JS 下限都放开到 120×80，这里同步，
+    // 否则拉伸手势的起点高度会被抬到 280，拖一下高度就“跳”。
     if(node?.type === 'smart-prompt' && !isSmartGroupCompactMember(node)){
-        layout.width = Math.max(Number(layout.width) || 0, PROMPT_NODE_DEFAULT_WIDTH);
-        layout.height = Math.max(Number(layout.height) || 0, PROMPT_NODE_DEFAULT_HEIGHT);
+        layout.width = Math.max(Number(layout.width) || 0, PROMPT_NODE_MIN_WIDTH);
+        layout.height = Math.max(Number(layout.height) || 0, PROMPT_NODE_MIN_HEIGHT);
     }
     return {x:node.x || 0, y:node.y || 0, width:layout.width, height:layout.height};
 }
@@ -16948,6 +16954,10 @@ function updateNodeElementDuringResize(node, options={}){
     }
     const imgs = isSmartGroupNode(node) ? smartGroupImageRefs(node).map(ref => ref.item) : (node.images || []);
     const layout = imageLayout(imgs, nodeScale(node), node);
+    // 2026-11-03：四角拉伸里 nw/ne/sw 方向会同时改 x/y，拖动过程必须同步左上坐标，
+    // 否则只有松手重渲染后节点才“跳”到新位置。
+    el.style.left = `${Number(node.x) || 0}px`;
+    el.style.top = `${Number(node.y) || 0}px`;
     el.style.width = `${layout.width}px`;
     el.style.height = `${layout.height}px`;
     const body = el.querySelector('.node-body');
@@ -23494,7 +23504,13 @@ function render(){
             <div class="node-body">${body}</div>
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             ${uploadPreviewOnly ? '' : `<div class="node-hint">${hint}</div>`}
-            ${canResizeNode ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
+            ${canResizeNode ? (isPrompt && !isCompactMember
+                // 2026-11-03（用户要求）：提示词/文本节点四角自由拉伸，任意形状；每角带方向标记，
+                // 拖哪角就固定它的对角（见 mousemove 里的 dir 计算）。
+                // 智能分组内的成员仍用单个右下角手柄，避免和分组整体缩放打架。
+                ? ['nw','ne','sw','se'].map(dir => `<div class="node-resize-handle prompt-corner-handle" data-resize="${dir}" data-resize-dir="${dir}" title="拖动缩放"></div>`).join('')
+                : '<div class="node-resize-handle" data-resize="1"></div>')
+                : ''}
             ${portInHtml}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
@@ -26011,14 +26027,18 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
         });
         // 2026-10-29（用户要求）：工作流组四角拉伸走独立覆盖层（见 workflowGroupResizeOverlayHtml），
         // 因为它必须浮在组内素材之上，而组框自身 z-index:0，框内的手柄会被素材盖住。
-        el.querySelector('.node-resize-handle')?.addEventListener('mousedown', e => {
+        el.querySelectorAll('.node-resize-handle').forEach(handle => handle.addEventListener('mousedown', e => {
             if(e.button !== 0) return;
             e.preventDefault(); e.stopPropagation();
             const node = nodes.find(n => n.id === id);
             if(!node) return;
             const rect = nodeRect(node);
-            resizeState = {id, dir:'se', startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height,
+            // 2026-11-03：每个角各带方向（nw/ne/sw/se），缺省仍按右下角处理。
+            const dir = handle.dataset.resizeDir || 'se';
+            resizeState = {id, dir, startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height,
                 startLeft:Number(node.x) || 0, startTop:Number(node.y) || 0};
+            // 手动拉过尺寸的提示词节点打标记：布局不再按“旧默认尺寸”把它吸附回 280/220。
+            if(node.type === 'smart-prompt') node.boxManual = true;
             if(node.type === 'smart-prompt') document.body.classList.add('smart-prompt-node-resizing');
             // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
             // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
@@ -26039,7 +26059,7 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
             }
             document.body.classList.add('smart-node-resize');
             capturePendingUndo();
-        });
+        }));
         const beginNodeDrag = e => {
             const promptTextTarget = e.target.closest('.prompt-node-text');
             if(e.button !== 0) return;
@@ -41384,8 +41404,28 @@ window.onmousemove = e => {
             updateNodeElementDuringResize(node);
             return;
         }
-        node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-        node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+        // 2026-11-03（用户要求）：四角自由拉伸 —— 拖动哪个角，就固定它的对角。
+        // 只有带 north/west 的方向才会改动 x/y，右下角（历史唯一手柄）行为保持不变。
+        const dir = resizeState.dir || 'se';
+        const startLeft = Number(resizeState.startLeft) || 0;
+        const startTop = Number(resizeState.startTop) || 0;
+        const startRight = startLeft + (resizeState.startW || 0);
+        const startBottom = startTop + (resizeState.startH || 0);
+        let left = startLeft, top = startTop, right = startRight, bottom = startBottom;
+        if(dir.includes('w')) left = startLeft + dx;
+        if(dir.includes('e')) right = startRight + dx;
+        if(dir.includes('n')) top = startTop + dy;
+        if(dir.includes('s')) bottom = startBottom + dy;
+        if(right - left < minW){
+            if(dir.includes('w')) left = right - minW; else right = left + minW;
+        }
+        if(bottom - top < minH){
+            if(dir.includes('n')) top = bottom - minH; else bottom = top + minH;
+        }
+        node.x = Math.round(left);
+        node.y = Math.round(top);
+        node.w = Math.round(right - left);
+        node.h = Math.round(bottom - top);
         node.scale = 1;
         // 2026-10-31：画布手柄拖出来的框是「用户自己定的尺寸」，记下来，
         // 这样 singleImageLayout 不会按成片比例把它重新 fit（见 boxManual 说明）。

@@ -12338,11 +12338,13 @@ html body .world .image-node.prompt-llm-smart-node:not(.smart-group-member-node)
 }
 
 /* 280px 是 API 空生图节点的默认边长，提示词和 LLM 的默认布局也已使用同一尺寸。
-   这里仅统一最小视觉约束，用户手动缩放仍然有效。 */
+   2026-11-03（用户要求：任意形状自由缩放）：这里原来是 min-*:280px !important，
+   等于把节点钉死在 280，JS 里放开到 120×80 也拉不动（实测 style.height=200 仍渲成 280）。
+   改为与 JS 常量一致的下限，视觉约束只保证还能看清一两行字。 */
 html body .world .image-node.prompt-basic-smart-node:not(.smart-group-member-node),
 html body .world .image-node.prompt-llm-smart-node:not(.smart-group-member-node) {
-    min-width: 280px !important;
-    min-height: 280px !important;
+    min-width: 120px !important;
+    min-height: 80px !important;
 }
 
 /* LLM 只保留外层节点边框，避免内部卡片圆角从外框边缘露出来。 */
@@ -21032,3 +21034,41 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 /* 低清档整画布给个「可点开」的手型，提示这里点了会变清晰 */
 .world.smart-lod-low .image-node:not(.node-pending):not(.group-node) { cursor: zoom-in; }
 
+
+/* 2026-11-03（用户要求）：提示词/文本节点四角自由拉伸（任意形状）。
+   原来只有一个右下角手柄，且只改 w/h、x/y 不动，左上方向拉不长。
+   现在四个角各一个手柄，拖哪角固定对角；最小尺寸放开到 120×80（见 JS 常量）。 */
+.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle {
+    width:14px !important;
+    height:14px !important;
+    border-radius:5px !important;
+    z-index:21 !important;
+    background:rgba(16,16,16,.78) !important;
+    border:1px solid rgba(154,154,154,.34) !important;
+    color:rgba(232,232,232,.72) !important;
+}
+.image-node.prompt-smart-node .prompt-corner-handle::before {
+    width:6px; height:6px;
+}
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="nw"] {
+    left:4px !important; top:4px !important; right:auto !important; bottom:auto !important;
+    cursor:nwse-resize !important;
+}
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="ne"] {
+    right:4px !important; top:4px !important; left:auto !important; bottom:auto !important;
+    cursor:nesw-resize !important;
+}
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="sw"] {
+    left:4px !important; bottom:4px !important; right:auto !important; top:auto !important;
+    cursor:nesw-resize !important;
+}
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="se"] {
+    right:4px !important; bottom:4px !important; left:auto !important; top:auto !important;
+    cursor:nwse-resize !important;
+}
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="nw"]::before { transform:rotate(180deg); }
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="ne"]::before { transform:rotate(-90deg); }
+.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="sw"]::before { transform:rotate(90deg); }
+/* 拉到 120×80 这种小尺寸时，文字区必须能收缩并内部滚动，不能顶出卡片 */
+.image-node.prompt-smart-node .node-body { overflow:hidden; }
+.image-node.prompt-smart-node .prompt-node-text { min-height:0 !important; }
