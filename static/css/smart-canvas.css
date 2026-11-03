@@ -21076,7 +21076,7 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 .shot-gen-body { display:flex; flex-direction:column; gap:12px; padding:14px; }
 .shot-gen-field { display:flex; flex-direction:column; gap:6px; }
 .shot-gen-field[hidden] { display:none; }
-.shot-gen-field > span { font-size:11px; font-weight:800; color:var(--muted); }
+.shot-gen-field > span { font-size:11px; font-weight:800; color:var(--text); opacity:.62; }
 .shot-gen-field select,
 .shot-gen-field textarea { width:100%; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text); font-size:13px; font-family:inherit; outline:0; box-sizing:border-box; }
 .shot-gen-field select { height:34px; padding:0 10px; }
@@ -21095,3 +21095,78 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 .shot-gen-go { margin-left:auto; background:var(--text); color:var(--card); }
 .shot-gen-go:hover { opacity:.86; }
 .shot-gen-go[disabled] { opacity:.5; cursor:default; }
+
+/* ===== 2026-11-03 分镜表 · 视频提示词闭环（行详情抽屉 + 批量合成）=====
+   参考截图那条三步流水线，这一期只做「合成提示词」这一段：
+   主表仍是六列，音效 / 运动 / 视频提示词收进右侧抽屉。 */
+.shot-foot-prompts { font-style:normal; opacity:.8; }
+html body .world .image-node.shot-table-smart-node.shot-w-narrow .shot-foot-prompts { display:none; }
+
+.shot-drawer-mask { position:fixed; inset:0; z-index:93; display:flex; justify-content:flex-end; background:rgba(5,5,5,.32); }
+.shot-drawer-mask[hidden] { display:none; }
+.shot-drawer { width:min(420px, 100vw); height:100%; display:flex; flex-direction:column; background:var(--card); color:var(--text); border-left:1px solid var(--line); box-shadow:-24px 0 70px rgba(0,0,0,.32); animation:shot-drawer-in .18s ease; }
+@keyframes shot-drawer-in { from { transform:translateX(26px); opacity:.35; } to { transform:none; opacity:1; } }
+.shot-drawer-head { display:flex; align-items:center; gap:10px; padding:14px 14px 12px; border-bottom:1px solid var(--line); }
+.shot-drawer-head strong { font-size:14px; font-weight:900; }
+.shot-drawer-close { margin-left:auto; width:26px; height:26px; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:17px; line-height:1; cursor:pointer; }
+.shot-drawer-close:hover { background:var(--soft); color:var(--text); }
+.shot-drawer-body { flex:1 1 auto; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:12px; padding:14px; }
+.shot-drawer-sub { font-size:11px; font-weight:800; color:var(--text); opacity:.62; }
+.shot-drawer-field { display:flex; flex-direction:column; gap:6px; }
+.shot-drawer-label { display:flex; align-items:center; gap:8px; font-size:11px; font-weight:800; color:var(--text); opacity:.66; }
+.shot-drawer-mini { margin-left:auto; height:22px; padding:0 8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--muted); font-size:11px; font-weight:700; cursor:pointer; }
+.shot-drawer-mini:hover { color:var(--text); background:var(--soft); }
+.shot-drawer-field input,
+.shot-drawer-field textarea { width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--text); font-size:12.5px; font-family:inherit; line-height:1.6; padding:8px 10px; outline:0; }
+.shot-drawer-field input { height:32px; }
+.shot-drawer-field textarea { resize:vertical; }
+.shot-drawer-field input:focus,
+.shot-drawer-field textarea:focus { border-color:var(--muted); }
+.shot-drawer-field input::placeholder,
+.shot-drawer-field textarea::placeholder { color:var(--text); opacity:.34; }
+.shot-compose-style::placeholder { color:var(--text); opacity:.34; }
+.shot-drawer-role { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 10px; border-radius:9px; background:var(--soft); font-size:11.5px; }
+.shot-drawer-role > span { color:var(--text); opacity:.6; font-weight:800; }
+.shot-drawer-role b { font-weight:800; }
+.shot-drawer-role em { font-style:normal; color:var(--muted); }
+.shot-drawer-tip { font-size:11px; line-height:1.6; color:var(--muted); }
+.shot-drawer-foot { display:flex; align-items:center; gap:8px; padding:12px 14px; border-top:1px solid var(--line); }
+.shot-drawer-foot button { height:32px; padding:0 14px; border-radius:10px; border:1px solid transparent; font-size:12px; font-weight:800; cursor:pointer; }
+.shot-drawer-delete { background:transparent; color:#d4685f; }
+.shot-drawer-delete:hover { background:rgba(212,104,95,.12); }
+.shot-drawer-done { margin-left:auto; background:var(--text); color:var(--card); }
+.shot-drawer-done:hover { opacity:.86; }
+
+.shot-compose-mask { position:fixed; inset:0; z-index:94; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(5,5,5,.42); backdrop-filter:blur(6px); }
+.shot-compose-mask[hidden] { display:none; }
+.shot-compose-panel { width:min(660px, calc(100vw - 32px)); max-height:calc(100vh - 60px); display:flex; flex-direction:column; border-radius:16px; border:1px solid var(--line); background:var(--card); color:var(--text); box-shadow:0 24px 80px rgba(0,0,0,.28); overflow:hidden; }
+.shot-compose-head { display:flex; align-items:center; gap:10px; padding:14px 14px 12px; border-bottom:1px solid var(--line); }
+.shot-compose-head strong { font-size:14px; font-weight:900; }
+.shot-compose-head span { font-size:11px; color:var(--muted); }
+.shot-compose-close { margin-left:auto; width:26px; height:26px; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:17px; line-height:1; cursor:pointer; }
+.shot-compose-close:hover { background:var(--soft); color:var(--text); }
+.shot-compose-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:10px; padding:14px; }
+.shot-compose-field { display:flex; flex-direction:column; gap:6px; }
+.shot-compose-field > span { font-size:11px; font-weight:800; color:var(--text); opacity:.62; }
+.shot-compose-style { width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text); font-size:12.5px; font-family:inherit; line-height:1.6; padding:8px 10px; resize:vertical; outline:0; }
+.shot-compose-style:focus { border-color:var(--muted); }
+.shot-compose-list-head { display:flex; align-items:center; gap:10px; }
+.shot-compose-all { height:24px; padding:0 9px; border:1px solid var(--line); border-radius:7px; background:transparent; color:var(--muted); font-size:11px; font-weight:800; cursor:pointer; }
+.shot-compose-all:hover { color:var(--text); background:var(--soft); }
+.shot-compose-count { margin-left:auto; font-style:normal; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.shot-compose-list { flex:1 1 auto; min-height:120px; max-height:38vh; overflow:auto; display:flex; flex-direction:column; gap:2px; border:1px solid var(--line); border-radius:10px; padding:4px; }
+.shot-compose-item { display:grid; grid-template-columns:16px 26px minmax(0, 1fr) auto; align-items:center; gap:8px; padding:7px 8px; border-radius:7px; cursor:pointer; font-size:12px; }
+.shot-compose-item:hover { background:var(--soft); }
+.shot-compose-item input { margin:0; }
+.shot-compose-item b { color:var(--muted); font-weight:800; font-size:11px; font-variant-numeric:tabular-nums; }
+.shot-compose-item span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shot-compose-state { font-style:normal; font-size:10.5px; color:var(--muted); }
+.shot-compose-state.is-ready { color:#3f9d6d; }
+.shot-compose-foot { display:flex; align-items:center; gap:10px; padding:12px 14px; border-top:1px solid var(--line); }
+.shot-compose-modes { display:flex; gap:4px; padding:2px; border:1px solid var(--line); border-radius:9px; }
+.shot-compose-modes button { height:24px; padding:0 9px; border:0; border-radius:7px; background:transparent; color:var(--muted); font-size:11px; font-weight:800; cursor:pointer; }
+.shot-compose-modes button.is-on { background:var(--soft); color:var(--text); }
+.shot-compose-model { margin-left:auto; font-size:11px; color:var(--muted); }
+.shot-compose-go { height:32px; padding:0 16px; border:0; border-radius:10px; background:var(--text); color:var(--card); font-size:12px; font-weight:800; cursor:pointer; }
+.shot-compose-go:hover { opacity:.86; }
+.shot-compose-go[disabled] { opacity:.55; cursor:default; }

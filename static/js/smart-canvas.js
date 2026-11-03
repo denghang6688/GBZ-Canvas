@@ -18974,7 +18974,6 @@ function syncShotTableWidthClasses(el, width){
 }
 function shotTableNodeBodyHtml(node){
     const rows = shotTableRows(node);
-    const secs = shotTableTotalSeconds(node);
     const rowsHtml = rows.map((row, index) => {
         const cells = SHOT_TABLE_FIELDS.map(field => {
             const value = String(row?.[field] ?? '');
@@ -18991,8 +18990,9 @@ function shotTableNodeBodyHtml(node){
         <div class="shot-foot">
             <button class="shot-foot-btn" type="button" data-shot-add-row="1">+ 添加一行</button>
             <button class="shot-foot-btn shot-foot-ai" type="button" data-shot-ai="1" title="从剧本或画布上的分镜脚本拆镜">AI 拆镜</button>
-            <span class="shot-foot-meta">${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}</span>
-            <button class="shot-foot-btn" type="button" data-shot-all-prompts="1" title="每一镜各建一个提示词节点">全部转提示词</button>
+            <button class="shot-foot-btn shot-foot-compose" type="button" data-shot-compose="1" title="给每一镜合成一条视频提示词">合成提示词</button>
+            <span class="shot-foot-meta">${shotTableFootMetaHtml(node)}</span>
+            <button class="shot-foot-btn shot-foot-allprompts" type="button" data-shot-all-prompts="1" title="每一镜各建一个提示词节点">转提示词节点</button>
         </div>
     </div>`;
 }
@@ -19011,7 +19011,13 @@ function shotRowPromptText(row){
 function createShotTableNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
     const rows = (options.rows && options.rows.length ? options.rows : shotTableDefaultRows())
-        .map(row => SHOT_TABLE_FIELDS.reduce((acc, field) => { acc[field] = String(row?.[field] ?? ''); return acc; }, {}));
+        .map(row => {
+            const next = SHOT_TABLE_FIELDS.reduce((acc, field) => { acc[field] = String(row?.[field] ?? ''); return acc; }, {});
+            // 音效 / 运动 / 视频提示词不进主表，但要在构造时就留住，不能被六列过滤掉
+            ['sound', 'motion', 'videoPrompt'].forEach(key => { if(row?.[key]) next[key] = String(row[key]); });
+            if(row?._meta) next._meta = row._meta;
+            return next;
+        });
     const node = {
         id:uid('shots'),
         type:'smart-shot-table',
@@ -19109,6 +19115,7 @@ function shotTableRowAction(node, index, action){
         return;
     }
     if(action === 'prompt'){ shotTableCreatePromptForRow(node, index); return; }
+    if(action === 'detail'){ openShotRowDrawer(node.id, index); return; }
     pushUndo();
     if(action === 'up' && index > 0){
         [rows[index - 1], rows[index]] = [rows[index], rows[index - 1]];
@@ -19169,12 +19176,16 @@ function moveShotCell(el, cell, dir){
     }
     return false;
 }
+function shotTableFootMetaHtml(node){
+    const rows = shotTableRows(node);
+    const secs = shotTableTotalSeconds(node);
+    const ready = shotTablePromptReadyCount(node);
+    return `${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}${rows.length ? `<i class="shot-foot-prompts"> · 提示词 ${ready}/${rows.length}</i>` : ''}`;
+}
 function shotTableSyncFootMeta(el, node){
     const meta = el?.querySelector('.shot-foot-meta');
     if(!meta) return;
-    const rows = shotTableRows(node);
-    const secs = shotTableTotalSeconds(node);
-    meta.textContent = `${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}`;
+    meta.innerHTML = shotTableFootMetaHtml(node);
 }
 let shotRowMenuEl = null;
 function closeShotRowMenu(){
@@ -19191,6 +19202,7 @@ function openShotRowMenu(anchor, node, index){
     menu.className = 'shot-row-menu';
     menu.setAttribute('role', 'menu');
     const items = [
+        ['detail', '镜头详情 · 提示词', 'panel-right'],
         ['prompt', '生成提示词节点', 'sparkles'],
         ['copy', '复制这一镜提示词', 'copy'],
         ['sep'],
@@ -19291,6 +19303,13 @@ function bindShotTableNodeControls(el, node){
             e.preventDefault();
             e.stopPropagation();
             shotTableCreateAllPrompts(node);
+            return;
+        }
+        const composeBtn = e.target.closest?.('[data-shot-compose]');
+        if(composeBtn){
+            e.preventDefault();
+            e.stopPropagation();
+            openShotComposePanel(node.id);
             return;
         }
         // 2026-11-03：从剧本 / 分镜脚本拆镜，入口放在脚注条上（用户选的方案 A）
@@ -19471,14 +19490,21 @@ function shotTableApplyGeneratedRows(node, rows, mode = 'replace'){
     if(!node || !Array.isArray(rows) || !rows.length) return 0;
     const append = mode === 'append' && shotTableHasContent(node);
     const startNo = append ? shotTableRows(node).length + 1 : 1;
-    const prepared = rows.map((row, index) => Object.assign({
-        no:String(startNo + index),
-        time:String(row?.time || ''),
-        shotSize:String(row?.shotSize || ''),
-        visual:String(row?.visual || ''),
-        onScreenText:String(row?.onScreenText || ''),
-        voiceover:String(row?.voiceover || '')
-    }, row?._meta ? {_meta:row._meta} : {}));
+    const prepared = rows.map((row, index) => {
+        const item = Object.assign({
+            no:String(startNo + index),
+            time:String(row?.time || ''),
+            shotSize:String(row?.shotSize || ''),
+            visual:String(row?.visual || ''),
+            onScreenText:String(row?.onScreenText || ''),
+            voiceover:String(row?.voiceover || '')
+        }, row?._meta ? {_meta:row._meta} : {});
+        // 脚本里的音效 / 运动提示词一并带进抽屉，不然导完还得手抄一遍
+        const meta = row?._meta || {};
+        if(!item.sound && meta.sound) item.sound = String(meta.sound);
+        if(!item.motion && meta.motionPrompt) item.motion = String(meta.motionPrompt);
+        return item;
+    });
     // 追加时时间轴要接在已有内容后面，不能又从 0 开始
     if(append){
         const offset = shotTableTotalSeconds(node);
@@ -19740,6 +19766,386 @@ async function shotGenSubmit(){
         toast((e?.message || '拆镜失败').slice(0, 160));
     }
 }
+/* ===== 2026-11-03 分镜表 · 视频提示词闭环（第一期）=====
+   参考截图那条三步流水线（确认镜头 → 准备资产 → 合成提示词），这一期只做最后一段：
+   - 行详情抽屉：音效 / 运动 / 角色 / 视频提示词收进抽屉，主表仍保持六列可读
+   - 全片风格句：node.styleGuide，注入每条提示词
+   - 批量合成：勾选镜头 → 自动拼接（本地，0 成本）或智能合成（LLM，并发 3）
+   ============================================= */
+const SHOT_COMPOSE_CONCURRENCY = 3;
+const SHOT_DRAWER_PLACEHOLDERS = {
+    shotSize:'景别 / 运镜',
+    visual:'画面描述',
+    onScreenText:'屏幕文案',
+    voiceover:'旁白 / 解说',
+    sound:'环境声、音效、转场音',
+    motion:'主体动作与镜头运动',
+    videoPrompt:'还没有视频提示词，点「用当前信息拼接」先生成一版'
+};
+const SHOT_DRAWER_FIELDS = [
+    {key:'shotSize', label:'景别 / 运镜', type:'input'},
+    {key:'visual', label:'画面', type:'textarea', rows:3},
+    {key:'onScreenText', label:'屏幕文案', type:'input'},
+    {key:'voiceover', label:'旁白', type:'textarea', rows:2},
+    {key:'sound', label:'音效', type:'input'},
+    {key:'motion', label:'动作 / 运动', type:'input'},
+    {key:'videoPrompt', label:'视频提示词', type:'textarea', rows:5, assemble:true}
+];
+let shotRowDrawerEl = null;
+let shotRowDrawerState = null;
+let shotComposeEl = null;
+let shotComposeState = null;
+function shotTablePromptReadyCount(node){
+    return shotTableRows(node).filter(row => String(row?.videoPrompt || '').trim()).length;
+}
+function shotTableStyleGuide(node){
+    return String(node?.styleGuide || '').trim();
+}
+// 本地拼接：不调模型，把风格句 + 画面 + 景别 + 运动 + 音效顺成一段
+function shotComposeAssembleLocal(node, row){
+    if(!row) return '';
+    const parts = [];
+    const style = shotTableStyleGuide(node);
+    if(style) parts.push(style);
+    if(String(row.visual || '').trim()) parts.push(String(row.visual).trim().replace(/[。；;，,]$/, ''));
+    if(String(row.shotSize || '').trim()) parts.push(`景别与运镜：${String(row.shotSize).trim()}`);
+    if(String(row.motion || '').trim()) parts.push(`动作与运动：${String(row.motion).trim()}`);
+    if(String(row.sound || '').trim()) parts.push(`声音氛围：${String(row.sound).trim()}`);
+    return parts.length ? `${parts.join('，')}。` : '';
+}
+/* ---------- 行详情抽屉 ---------- */
+function shotRowDrawerBodyHtml(node, row, index){
+    const meta = row._meta || {};
+    const roleLine = [meta.role1, meta.role1Desc].filter(Boolean).join(' · ');
+    const fields = SHOT_DRAWER_FIELDS.map(field => {
+        const value = String(row[field.key] || '');
+        const placeholder = escapeAttr(SHOT_DRAWER_PLACEHOLDERS[field.key] || '');
+        const control = field.type === 'textarea'
+            ? `<textarea data-drawer="${field.key}" rows="${field.rows || 3}" spellcheck="false" placeholder="${placeholder}">${escapeHtml(value)}</textarea>`
+            : `<input type="text" data-drawer="${field.key}" value="${escapeAttr(value)}" placeholder="${placeholder}">`;
+        return `<label class="shot-drawer-field">
+            <span class="shot-drawer-label">${escapeHtml(field.label)}${field.assemble ? '<button type="button" class="shot-drawer-mini" data-drawer-assemble="1">用当前信息拼接</button>' : ''}</span>
+            ${control}
+        </label>`;
+    }).join('');
+    return `<div class="shot-drawer-sub">第 ${escapeHtml(String(row.no || index + 1))} 镜${row.time ? ` · ${escapeHtml(String(row.time))}` : ''}</div>
+        ${fields}
+        ${roleLine ? `<div class="shot-drawer-role"><span>角色</span>${meta.role1 ? `<b>${escapeHtml(String(meta.role1))}</b>` : ''}${meta.role1Desc ? `<em>${escapeHtml(String(meta.role1Desc))}</em>` : ''}</div>` : ''}
+        <div class="shot-drawer-tip">音效、运动只在抽屉里维护，不占用主表列；「转提示词节点」时会把它们一起带上。</div>`;
+}
+function shotRowDrawerEnsureDom(){
+    if(shotRowDrawerEl && document.body.contains(shotRowDrawerEl)) return shotRowDrawerEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'shot-drawer-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<aside class="shot-drawer" role="dialog" aria-modal="true" aria-label="镜头详情">
+        <div class="shot-drawer-head">
+            <strong>镜头详情</strong>
+            <button class="shot-drawer-close" type="button" title="关闭" aria-label="关闭">&times;</button>
+        </div>
+        <div class="shot-drawer-body"></div>
+        <div class="shot-drawer-foot">
+            <button class="shot-drawer-delete" type="button">删除此镜</button>
+            <button class="shot-drawer-done" type="button">完成</button>
+        </div>
+    </aside>`;
+    document.body.appendChild(wrap);
+    shotRowDrawerEl = wrap;
+    wrap.addEventListener('mousedown', e => { if(e.target === wrap) closeShotRowDrawer(); });
+    wrap.addEventListener('click', e => {
+        if(e.target.closest('.shot-drawer-close') || e.target.closest('.shot-drawer-done')){ closeShotRowDrawer(); return; }
+        if(e.target.closest('.shot-drawer-delete')){
+            const state = shotRowDrawerState;
+            const node = state ? nodes.find(item => item.id === state.nodeId) : null;
+            if(!state || !node){ closeShotRowDrawer(); return; }
+            pushUndo();
+            shotTableRows(node).splice(state.index, 1);
+            shotTableRenumber(node);
+            shotRowDrawerState.dirty = false;
+            closeShotRowDrawer();
+            render();
+            scheduleSave();
+            return;
+        }
+        if(e.target.closest('[data-drawer-assemble]')){
+            const state = shotRowDrawerState;
+            const node = state ? nodes.find(item => item.id === state.nodeId) : null;
+            const row = node ? shotTableRows(node)[state.index] : null;
+            if(!node || !row) return;
+            const text = shotComposeAssembleLocal(node, row);
+            row.videoPrompt = text;
+            state.dirty = true;
+            const area = wrap.querySelector('[data-drawer="videoPrompt"]');
+            if(area) area.value = text;
+            scheduleSave();
+        }
+    });
+    wrap.addEventListener('input', e => {
+        const field = e.target?.dataset?.drawer;
+        const state = shotRowDrawerState;
+        if(!field || !state) return;
+        const node = nodes.find(item => item.id === state.nodeId);
+        const row = node ? shotTableRows(node)[state.index] : null;
+        if(!row) return;
+        row[field] = String(e.target.value || '');
+        state.dirty = true;
+        scheduleSave();
+    });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); closeShotRowDrawer(); } });
+    // 抽屉开着时按 Delete 不该删掉背后的表格节点
+    document.addEventListener('keydown', e => {
+        if(!shotRowDrawerEl || shotRowDrawerEl.hidden || shotRowDrawerEl.contains(e.target)) return;
+        if(e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); e.stopPropagation(); }
+    }, true);
+    return wrap;
+}
+function openShotRowDrawer(nodeId, index){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'smart-shot-table');
+    const row = node ? shotTableRows(node)[index] : null;
+    if(!node || !row) return;
+    closeShotRowMenu();
+    const el = shotRowDrawerEnsureDom();
+    shotRowDrawerState = {nodeId, index, dirty:false};
+    el.querySelector('.shot-drawer-body').innerHTML = shotRowDrawerBodyHtml(node, row, index);
+    el.hidden = false;
+    document.body.classList.add('shot-drawer-open');
+}
+function closeShotRowDrawer(){
+    const state = shotRowDrawerState;
+    if(shotRowDrawerEl) shotRowDrawerEl.hidden = true;
+    document.body.classList.remove('shot-drawer-open');
+    shotRowDrawerState = null;
+    if(state?.dirty){
+        const node = nodes.find(item => item.id === state.nodeId);
+        if(node) render();
+    }
+}
+/* ---------- 批量合成视频提示词 ---------- */
+function shotComposeItemHtml(row, index, checked){
+    const summary = String(row.visual || '').trim() || '（还没写画面）';
+    const ready = Boolean(String(row.videoPrompt || '').trim());
+    return `<label class="shot-compose-item">
+        <input type="checkbox" data-compose-index="${index}"${checked ? ' checked' : ''}>
+        <b>${escapeHtml(String(row.no || index + 1))}</b>
+        <span>${escapeHtml(summary.slice(0, 46))}${summary.length > 46 ? '…' : ''}</span>
+        <i class="shot-compose-state${ready ? ' is-ready' : ''}">${ready ? '已合成' : '未合成'}</i>
+    </label>`;
+}
+function shotComposeEnsureDom(){
+    if(shotComposeEl && document.body.contains(shotComposeEl)) return shotComposeEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'shot-compose-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<div class="shot-compose-panel" role="dialog" aria-modal="true" aria-label="合成视频提示词">
+        <div class="shot-compose-head">
+            <strong>合成视频提示词</strong>
+            <span>每镜一条，可直接喂视频模型</span>
+            <button class="shot-compose-close" type="button" title="关闭" aria-label="关闭">&times;</button>
+        </div>
+        <div class="shot-compose-body">
+            <label class="shot-compose-field">
+                <span>全片风格（注入每一条提示词）</span>
+                <textarea class="shot-compose-style" rows="2" spellcheck="false" placeholder="例：盛唐古风电影级写实，暖金与朱红主色调，伦勃朗光，35mm 胶片颗粒"></textarea>
+            </label>
+            <div class="shot-compose-list-head">
+                <button class="shot-compose-all" type="button">全不选</button>
+                <em class="shot-compose-count">已选 0 / 0</em>
+            </div>
+            <div class="shot-compose-list"></div>
+        </div>
+        <div class="shot-compose-foot">
+            <div class="shot-compose-modes">
+                <button type="button" data-compose-mode="smart" class="is-on">智能合成</button>
+                <button type="button" data-compose-mode="local">自动拼接</button>
+            </div>
+            <span class="shot-compose-model"></span>
+            <button class="shot-compose-go" type="button">开始合成</button>
+        </div>
+    </div>`;
+    document.body.appendChild(wrap);
+    shotComposeEl = wrap;
+    wrap.addEventListener('mousedown', e => { if(e.target === wrap) closeShotComposePanel(); });
+    wrap.addEventListener('click', e => {
+        if(e.target.closest('.shot-compose-close')){ closeShotComposePanel(); return; }
+        const mode = e.target.closest('[data-compose-mode]');
+        if(mode){
+            if(shotComposeState?.loading) return;
+            shotComposeState.mode = mode.dataset.composeMode || 'smart';
+            wrap.querySelectorAll('[data-compose-mode]').forEach(btn => btn.classList.toggle('is-on', btn === mode));
+            const tip = wrap.querySelector('.shot-compose-model');
+            if(tip) tip.textContent = shotComposeState.mode === 'local' ? '不调模型 · 瞬时' : shotComposeModelLabel();
+            return;
+        }
+        if(e.target.closest('.shot-compose-all')){
+            const state = shotComposeState;
+            if(!state || state.loading) return;
+            const total = shotTableRows(nodes.find(item => item.id === state.nodeId) || {}).length;
+            const allOn = state.checked.size >= total && total > 0;
+            state.checked = new Set(allOn ? [] : Array.from({length:total}, (_, i) => i));
+            wrap.querySelectorAll('[data-compose-index]').forEach(box => { box.checked = state.checked.has(Number(box.dataset.composeIndex)); });
+            shotComposeSyncCount();
+            return;
+        }
+        if(e.target.closest('.shot-compose-go')){ shotComposeRun(); return; }
+    });
+    wrap.addEventListener('change', e => {
+        const box = e.target.closest?.('[data-compose-index]');
+        if(!box || !shotComposeState) return;
+        const index = Number(box.dataset.composeIndex);
+        if(box.checked) shotComposeState.checked.add(index);
+        else shotComposeState.checked.delete(index);
+        shotComposeSyncCount();
+    });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); closeShotComposePanel(); } });
+    return wrap;
+}
+function shotComposeModelLabel(){
+    const provider = resolveChatProviderId(smartAgentProvider());
+    const model = resolveChatModel(smartAgentModel(provider), provider);
+    return model ? String(model) : '未配置模型';
+}
+function shotComposeSyncCount(){
+    const el = shotComposeEl;
+    const state = shotComposeState;
+    if(!el || !state) return;
+    const total = shotTableRows(nodes.find(item => item.id === state.nodeId) || {}).length;
+    const count = el.querySelector('.shot-compose-count');
+    if(count) count.textContent = `已选 ${state.checked.size} / ${total}`;
+    const all = el.querySelector('.shot-compose-all');
+    if(all) all.textContent = total > 0 && state.checked.size >= total ? '全不选' : '全选';
+}
+function openShotComposePanel(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'smart-shot-table');
+    if(!node) return;
+    const rows = shotTableRows(node);
+    if(!rows.length){ toast('先添加几镜再合成提示词'); return; }
+    const el = shotComposeEnsureDom();
+    shotComposeState = {nodeId, mode:'smart', loading:false, checked:new Set(rows.map((_, index) => index))};
+    el.querySelector('.shot-compose-style').value = shotTableStyleGuide(node);
+    el.querySelector('.shot-compose-list').innerHTML = rows.map((row, index) => shotComposeItemHtml(row, index, true)).join('');
+    el.querySelectorAll('[data-compose-mode]').forEach(btn => btn.classList.toggle('is-on', btn.dataset.composeMode === 'smart'));
+    el.querySelector('.shot-compose-model').textContent = shotComposeModelLabel();
+    const go = el.querySelector('.shot-compose-go');
+    go.disabled = false;
+    go.textContent = '开始合成';
+    shotComposeSyncCount();
+    el.hidden = false;
+    document.body.classList.add('shot-compose-open');
+}
+function closeShotComposePanel(){
+    if(shotComposeState) shotComposeState.cancelled = true;
+    if(shotComposeEl) shotComposeEl.hidden = true;
+    document.body.classList.remove('shot-compose-open');
+    shotComposeState = null;
+}
+function shotComposeSetStatus(label, loading){
+    const el = shotComposeEl;
+    if(!el) return;
+    const go = el.querySelector('.shot-compose-go');
+    if(!go) return;
+    go.disabled = Boolean(loading);
+    go.textContent = label || '开始合成';
+    el.classList.toggle('is-loading', Boolean(loading));
+}
+async function shotComposeSmartOne(node, row){
+    const provider = resolveChatProviderId(smartAgentProvider());
+    const model = resolveChatModel(smartAgentModel(provider), provider);
+    if(!provider || !model) throw new Error(tr('smart.errNoApiModel'));
+    const style = shotTableStyleGuide(node);
+    const lines = [
+        '你是视频生成提示词工程师。根据这一镜的分镜信息，写一条可直接用于 AI 视频模型的提示词。',
+        '要求：',
+        '1. 单段中文，120-200 字，不分段、不编号。',
+        '2. 顺序：主体与动作 → 景别与镜头运动 → 光影与环境 → 画质与质感。',
+        '3. 不要出现「镜头 1」「分镜」「这一镜」这类编号词，直接描述画面。',
+        '4. 只输出 JSON：{"prompt":"..."}',
+        '',
+        `全片风格：${style || '无'}`,
+        `景别 / 运镜：${String(row.shotSize || '').trim() || '无'}`,
+        `画面：${String(row.visual || '').trim() || '无'}`,
+        `动作 / 运动：${String(row.motion || '').trim() || '无'}`,
+        `音效参考：${String(row.sound || '').trim() || '无'}`,
+        `屏幕文案：${String(row.onScreenText || '').trim() || '无'}`,
+        `旁白：${String(row.voiceover || '').trim() || '无'}`
+    ];
+    const result = await fetch('/api/llm/canvas', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            message:lines.join('\n'),
+            messages:[],
+            images:[],
+            videos:[],
+            files:[],
+            model,
+            provider,
+            ms_model:provider === 'modelscope' ? model : '',
+            system_prompt:'你是视频生成提示词工程师。你必须只输出 JSON。'
+        })
+    }).then(async response => {
+        if(!response.ok) throw new Error((await response.text()).slice(0, 160));
+        return response.json();
+    });
+    const parsed = extractStoryboardJsonFromText(result.text || '');
+    const prompt = String(parsed?.prompt || parsed?.text || '').trim();
+    if(prompt) return prompt;
+    // 模型没按 JSON 回，就把正文当提示词用（去掉代码块围栏）
+    return String(result.text || '').replace(/```(?:json)?/gi, '').replace(/```/g, '').trim().slice(0, 600);
+}
+async function shotComposeRun(){
+    const state = shotComposeState;
+    const el = shotComposeEl;
+    if(!state || !el || state.loading) return;
+    const node = nodes.find(item => item.id === state.nodeId && item.type === 'smart-shot-table');
+    if(!node){ closeShotComposePanel(); return; }
+    const rows = shotTableRows(node);
+    const indexes = [...state.checked].filter(index => rows[index]).sort((a, b) => a - b);
+    if(!indexes.length){ toast('先勾选要合成的镜头'); return; }
+    node.styleGuide = String(el.querySelector('.shot-compose-style').value || '').trim();
+    if(state.mode === 'local'){
+        pushUndo();
+        indexes.forEach(index => { rows[index].videoPrompt = shotComposeAssembleLocal(node, rows[index]); });
+        closeShotComposePanel();
+        render();
+        scheduleSave();
+        toast(`已拼接 ${indexes.length} 镜提示词`);
+        return;
+    }
+    pushUndo();
+    state.loading = true;
+    shotComposeSetStatus(`合成中 0/${indexes.length}`, true);
+    const cursor = {value:0};
+    let done = 0;
+    const worker = async () => {
+        while(!state.cancelled){
+            const at = cursor.value++;
+            if(at >= indexes.length) return;
+            const row = rows[indexes[at]];
+            try {
+                const text = await shotComposeSmartOne(node, row);
+                if(text) row.videoPrompt = text;
+            } catch(e) {
+                if(e?.name === 'AbortError') return;
+            }
+            done++;
+            if(!state.cancelled) shotComposeSetStatus(`合成中 ${done}/${indexes.length}`, true);
+        }
+    };
+    await Promise.all(Array.from({length:Math.min(SHOT_COMPOSE_CONCURRENCY, indexes.length)}, worker));
+    const cancelled = Boolean(state.cancelled);
+    state.loading = false;
+    if(!cancelled){
+        closeShotComposePanel();
+        render();
+        scheduleSave();
+        toast(`已合成 ${done} 镜提示词`);
+    } else {
+        render();
+        scheduleSave();
+        toast(`已停下，完成 ${done} 镜`);
+    }
+}
+
 function storyboardScriptNodePreviewHtml(node){
     if(node.storyboardChooser){ return `<div class="storyboard-chooser-card"><div class="storyboard-chooser-icon">☰</div><div class="storyboard-chooser-title">脚本生成器</div><div class="storyboard-chooser-sub">尝试：</div><button data-storyboard-choice="script">☷ 剧本生成分镜脚本</button><button data-storyboard-choice="character">♙ 角色生成分镜脚本</button><button data-storyboard-choice="manual">▤ 自己编写分镜脚本</button></div>`; }
     const rows = storyboardRowsForNode(node).slice(0, 5);
