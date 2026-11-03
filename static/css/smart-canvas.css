@@ -260,7 +260,7 @@ body.smart-node-drag .image-node .image-wrap > .media-video-card { transition:no
    但标题条是节点唯一的拖动把手 + 删除按钮所在（视频产物节点的删除按钮只在这里），
    隐藏它会让节点既不显示标题也不好拖拽，所以保持显示。 */
 .image-node.minimax-h3-node .node-body { height:100%; min-height:0; padding:0; align-items:stretch; justify-content:stretch; }
-.image-node.minimax-h3-node .node-resize-handle { opacity:.75; }
+.image-node.minimax-h3-node .node-resize-handle { opacity:1; }
 .h3-node-card { width:100%; height:100%; min-height:0; display:flex; flex-direction:column; gap:10px; padding:14px; box-sizing:border-box; border-radius:18px; background:linear-gradient(180deg, #202020, #151515); color:#f5f5f5; overflow:hidden; }
 .h3-node-top { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .h3-node-brand { min-width:0; display:flex; align-items:center; gap:10px; }
@@ -1324,11 +1324,39 @@ video.node-img { object-fit:cover; background:var(--soft); }
 .image-node.dragging:not(.smart-group-node):not(.workflow-group-node) { z-index:14; }
 .image-node.smart-group-node.dragging,
 .image-node.workflow-group-node.dragging { z-index:5; }
-.node-resize-handle { position:absolute; right:7px; bottom:7px; width:18px; height:18px; border-radius:8px; cursor:nwse-resize; background:rgba(255,255,255,.86); border:1px solid #eeeeee; display:flex; align-items:center; justify-content:center; color:#9a9a9a; opacity:0; transition:all .18s ease; z-index:5; }
-.node-resize-handle::before { content:""; width:8px; height:8px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; }
-.node-resize-handle:hover { color:#111111; border-color:#d0d0d0; background:#fff; }
-.theme-dark .node-resize-handle { background:rgba(16,16,16,.86); border-color:rgba(154,154,154,.28); color:#9a9a9a; }
-.theme-dark .node-resize-handle:hover { color:#f7f7f7; border-color:rgba(214,214,214,.5); background:rgba(45,45,45,.96); }
+/* 2026-11-03（用户要求）：**所有节点**的缩放角标统一成「右下角两条 45° 细斜线」的极简样式。
+   常显、不依赖悬停：静态 22% 白 → 卡内悬停 55% → 直接悬停角标 72% → 拖动中 85%；
+   亮色主题换同档深灰。命中区 18×18（好抓），视觉线只有 10px；无底色、无边框、无圆角块。 */
+.node-resize-handle {
+    position:absolute; right:2px; bottom:2px;
+    width:18px; height:18px; padding:0;
+    border:0; border-radius:4px; background:transparent; box-shadow:none;
+    cursor:nwse-resize; z-index:5; opacity:1;
+    display:flex; align-items:center; justify-content:center;
+    color:rgba(255,255,255,.22);
+    transition:color .16s ease, opacity .16s ease;
+}
+/* 两条斜线用渐变画而不是 border：Chrome 会把 1.2~1.6px 的 border 向下取整成 1px，
+   渐变能吃住亚像素线宽。第二层同角度、沿轴偏移 3.4px（= 垂直距离 3.4px）。
+   drop-shadow 只为斜线压在亮色图片上时保留一点分离度，正常深色底看不出来。 */
+.node-resize-handle::before {
+    content:"";
+    width:10px; height:10px;
+    border:0; border-radius:0;
+    background-image:
+        linear-gradient(135deg, transparent calc(50% - .62px), currentColor calc(50% - .62px), currentColor calc(50% + .62px), transparent calc(50% + .62px)),
+        linear-gradient(135deg, transparent calc(50% + 3.4px), currentColor calc(50% + 3.4px), currentColor calc(50% + 4.64px), transparent calc(50% + 4.64px));
+    background-repeat:no-repeat;
+    filter:drop-shadow(0 0 1px rgba(0,0,0,.42));
+}
+.image-node:hover .node-resize-handle { color:rgba(255,255,255,.55); }
+.node-resize-handle:hover { color:rgba(255,255,255,.72); }
+body.smart-node-resize .node-resize-handle { color:rgba(255,255,255,.85); }
+.theme-light .node-resize-handle { color:rgba(0,0,0,.24); }
+.theme-light .node-resize-handle::before { filter:drop-shadow(0 0 1px rgba(255,255,255,.55)); }
+.theme-light .image-node:hover .node-resize-handle { color:rgba(0,0,0,.55); }
+.theme-light .node-resize-handle:hover { color:rgba(0,0,0,.72); }
+body.theme-light.smart-node-resize .node-resize-handle { color:rgba(0,0,0,.85); }
 .image-node.selected .node-resize-handle, .image-node:hover .node-resize-handle { opacity:1; }
 .image-node.dragging .node-resize-handle { opacity:0 !important; pointer-events:none !important; }
 /* 2026-09-27 节点两侧磁吸+号缩小 30%：24→16.8px，十字线/边框/偏移同比缩放，端口中心位置不变 */
@@ -3305,7 +3333,7 @@ body.theme-dark.theme-custom {
     color:#17171c;
 }
 
-.theme-dark .node-resize-handle,
+/* 2026-11-03（用户要求）：缩放手柄已改为透明底 + 斜线，不再吃这条「深色主题白底」规则 */
 .theme-dark .floating-node-actions button:hover,
 .theme-dark .preview-icon-btn:hover {
     background:#f4f4f4;
@@ -5491,26 +5519,8 @@ body.theme-dark .workflow-group-title {
     border:1px solid rgba(154,154,154,.22) !important;
     box-shadow:0 -10px 24px rgba(0,0,0,.18) !important;
 }
-/* 2026-11-03（用户要求·方案 A）：提示词/文本节点缩放角标极简化。
-   只留右下角、常显不依赖悬停：去掉底色块和边框，只画两条 45° 细线（SVG 在 JS 里）。
-   18×18 仍是命中区，视觉线只有 10px 居中；颜色 20% → 卡内悬停 58% → 拖动中 85%。 */
-.image-node.prompt-smart-node:not(.smart-group-member-node) .node-resize-handle {
-    right:2px !important;
-    bottom:2px !important;
-    width:18px !important;
-    height:18px !important;
-    border-radius:4px !important;
-    z-index:20 !important;
-    background:transparent !important;
-    border:none !important;
-    box-shadow:none !important;
-    color:rgba(255,255,255,.20) !important;
-    opacity:1 !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    transition:color .16s ease !important;
-}
+/* 2026-11-03（用户要求）：提示词/文本节点的缩放角标不再单独定制尺寸与配色，
+   统一走基础 .node-resize-handle（18×18 命中区 / 右下 2px / 两条 45° 斜线三档亮度）。 */
 
 .smart-quickbar {
     z-index:1200 !important;
@@ -6317,10 +6327,11 @@ body.smart-agent-open .smart-quickbar { max-width:calc(100vw - var(--smart-agent
     left:auto !important;
 }
 .image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) .node-resize-handle {
-    right:0 !important;
-    bottom:0 !important;
+    /* 2026-11-03（用户要求）：统一成右下角 2px 内缩的极简斜线，不再贴角做异形圆角 */
+    right:2px !important;
+    bottom:2px !important;
     transform:translate(0, 0) !important;
-    border-radius:10px 0 16px 0 !important;
+    border-radius:4px !important;
 }
 .image-node.smart-group-member-node:not(.prompt-smart-node):not(.loop-smart-node) .node-resize-handle {
     display:flex !important;
@@ -21044,25 +21055,9 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 .world.smart-lod-low .image-node:not(.node-pending):not(.group-node) { cursor: zoom-in; }
 
 
-/* 2026-11-03（用户要求·方案 A）：提示词/文本节点只保留右下角缩放角标（极简两斜线）。
-   常显、不依赖悬停：静态 20% 白几乎融入边框；卡内悬停 58%、直接悬停角标 72%、拖动中 85%。
-   斜线由 JS 内联 SVG 绘制（stroke=currentColor），这里只管隐藏基础角标记和配色。
+/* 2026-11-03（用户要求）：提示词/文本节点只留右下角缩放角标，样式与其它节点完全一致
+   （斜线、配色、三档亮度全在基础 .node-resize-handle 规则里，这里不再单独覆盖）。
    最小尺寸仍为 120×80（见 JS 常量）。 */
-.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle::before { content:none !important; }
-.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle svg {
-    width:10px; height:10px; display:block; pointer-events:none;
-}
-.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle svg path {
-    stroke:currentColor; fill:none; stroke-width:1.25; stroke-linecap:round;
-}
-.image-node.prompt-smart-node:hover .node-resize-handle.prompt-corner-handle { color:rgba(255,255,255,.58) !important; }
-.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle:hover { color:rgba(255,255,255,.72) !important; }
-body.smart-node-resize .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(255,255,255,.85) !important; }
-/* 亮色主题下换深色斜线，同样三档 */
-.theme-light .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.22) !important; }
-.theme-light .image-node.prompt-smart-node:hover .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.55) !important; }
-.theme-light .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle:hover { color:rgba(0,0,0,.72) !important; }
-body.theme-light.smart-node-resize .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.85) !important; }
 /* 拉到 120×80 这种小尺寸时，文字区必须能收缩并内部滚动，不能顶出卡片 */
 .image-node.prompt-smart-node .node-body { overflow:hidden; }
 .image-node.prompt-smart-node .prompt-node-text { min-height:0 !important; }

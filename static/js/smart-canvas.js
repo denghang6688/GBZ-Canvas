@@ -23505,10 +23505,10 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             ${uploadPreviewOnly ? '' : `<div class="node-hint">${hint}</div>`}
             ${canResizeNode ? (isPrompt && !isCompactMember
-                // 2026-11-03（用户要求·方案 A）：只保留右下角一枚极简斜线角标，常显不依赖悬停。
-                // 两条 45° 细线用内联 SVG 画，颜色走 CSS currentColor；命中区仍是 18×18 手柄本体。
+                // 2026-11-03（用户要求）：只保留右下角一枚缩放角标，与其它节点共用同一套
+                // 「两条 45° 细斜线」样式（见 .node-resize-handle 基础规则），常显不依赖悬停。
                 // 智能分组内的成员仍用单个右下角手柄，避免和分组整体缩放打架。
-                ? `<div class="node-resize-handle prompt-corner-handle" data-resize="se" data-resize-dir="se" title="拖动缩放"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M11 2.4 L2.4 11"/><path d="M11 6.2 L6.2 11"/></svg></div>`
+                ? `<div class="node-resize-handle prompt-corner-handle" data-resize="se" data-resize-dir="se" title="拖动缩放"></div>`
                 : '<div class="node-resize-handle" data-resize="1"></div>')
                 : ''}
             ${portInHtml}
