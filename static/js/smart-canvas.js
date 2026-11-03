@@ -23461,7 +23461,12 @@ function render(){
         // 非媒体节点（提示词/循环/智能分组/工作流组等）及其生成中状态保留手柄。
         // 2026-10-29（用户要求）：工作流组改为四角拉伸，手柄由独立覆盖层绘制（浮在素材之上），
         // 框内不再渲染单个右下角手柄，避免两个手柄叠在一起。
-        const canResizeNode = (isGroup
+        // 2026-11-03（用户反馈：生成中的单图节点右下角冒出手柄）——组框手柄只在
+        // 「画面上真的有 2 格以上」时才挂：isGroup 把 hasAppendPending（追加生成中）
+        // 也算作组，于是空节点追加 1 张（只显示 1 格占位）也变成 group-node 挂上了手柄。
+        // 这里用可见格数（已有图 + 追加占位，或待生成的格数）判定，1 格一律不给手柄。
+        const gridFrameCount = imgs.length + (hasAppendPending ? Math.max(0, appendPendingCount) : 0);
+        const canResizeNode = ((gridFrameCount > 1 || isPendingGroup)
             || (!isImageNode
             && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup))) && !isWorkflowGroup;
         const nodeStyleExtra = isWorkflowGroup ? workflowGroupFrameStyle(node) : (isSmartGroup ? smartGroupFrameStyle(node) : (isGroup ? imageGroupFrameStyle(node) : ''));
