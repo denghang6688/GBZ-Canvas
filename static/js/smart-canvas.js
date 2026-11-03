@@ -4157,6 +4157,11 @@ function nodeResolutionHtml(node, imgs=[]){
 // 2026-10-29（用户要求）组标题条右端 meta：多图组 / 智能分组显示「N 张图 / N 个视频 / N 项」，
 // 单图节点维持分辨率角标；没有可显示内容就不渲染。
 function nodeBarMetaHtml(node, imgs=[]){
+    if(node?.type === 'smart-shot-table'){
+        const count = shotTableRows(node).length;
+        const secs = shotTableTotalSeconds(node);
+        return `<span class="node-resolution" data-node-resolution="1">${escapeHtml(`${count} 镜${secs ? ` · ${secs}s` : ''}`)}</span>`;
+    }
     const isGroupLike = node?.type === 'smart-group' || (Array.isArray(imgs) && imgs.length > 1);
     if(!isGroupLike) return nodeResolutionHtml(node, imgs);
     if(!Array.isArray(imgs) || !imgs.length) return '';
@@ -4183,6 +4188,7 @@ function smartNodeTitle(node, imgs=[]){    if(node?.type === 'workflow-group') r
     if(node?.type === 'smart-prompt') return 'Text';
     if(node?.type === 'smart-loop') return 'Loop';
     if(node?.type === 'smart-storyboard') return node.title || '分镜脚本';
+    if(node?.type === 'smart-shot-table') return node.title || '分镜表';
     // 2026-09-28 用户要求：上传节点标题统一显示「上传」
     if(node?.uploadEntry === true && !(Array.isArray(imgs) && imgs.length)) return '上传';
     if(Array.isArray(imgs) && imgs.some(i => i?.grid?.type === 'grid-split')){
@@ -7012,6 +7018,14 @@ function imageLayout(images, scale=1, node=null){
         rows:1,
         width:Math.round(Math.max(STORYBOARD_NODE_MIN_WIDTH, Number(node.w) || STORYBOARD_NODE_DEFAULT_WIDTH)),
         height:Math.round(Math.max(STORYBOARD_NODE_MIN_HEIGHT, Number(node.h) || STORYBOARD_NODE_DEFAULT_HEIGHT)),
+        thumb:96,
+        single:true
+    };
+    if(node?.type === 'smart-shot-table') return {
+        cols:1,
+        rows:1,
+        width:Math.round(Math.max(SHOT_TABLE_MIN_WIDTH, Number(node.w) || SHOT_TABLE_DEFAULT_WIDTH)),
+        height:Math.round(Math.max(SHOT_TABLE_MIN_HEIGHT, Number(node.h) || SHOT_TABLE_DEFAULT_HEIGHT)),
         thumb:96,
         single:true
     };
@@ -16572,7 +16586,7 @@ function clipboardTableRowsToMarkdown(rows){
     const md = [line(norm[0]), line(norm[0].map(() => '---')), ...norm.slice(1).map(line)].join('\n');
     return { md, rows: norm.length, cols: colCount };
 }
-function clipboardHtmlTableToMarkdown(html){
+function clipboardHtmlTableRows(html){
     if(!html || !/<table[\s>]/i.test(html)) return null;
     let table;
     try {
@@ -16585,9 +16599,13 @@ function clipboardHtmlTableToMarkdown(html){
     const rows = [...table.querySelectorAll('tr')]
         .map(tr => [...tr.querySelectorAll('th,td')].map(cleanCell))
         .filter(cells => cells.some(c => c));
-    return clipboardTableRowsToMarkdown(rows);
+    return rows.length >= 2 ? rows : null;
 }
-function clipboardTsvToMarkdown(text){
+function clipboardHtmlTableToMarkdown(html){
+    const rows = clipboardHtmlTableRows(html);
+    return rows ? clipboardTableRowsToMarkdown(rows) : null;
+}
+function clipboardTsvRows(text){
     const raw = String(text || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
     // 至少 2 行 × 2 列才算表格：避免把带 Tab 缩进的代码误判成表格
     if(!raw.includes('\t') || !raw.includes('\n')) return null;
@@ -16597,7 +16615,23 @@ function clipboardTsvToMarkdown(text){
     // 任何一行的首格为空（行首 Tab）都视为代码缩进而非表格——Excel/表格软件
     // 导出的 TSV 首列总是有值的，而缩进的代码行首格必为空。
     if(rows.some(r => !r[0])) return null;
-    return clipboardTableRowsToMarkdown(rows);
+    return rows.length >= 2 ? rows : null;
+}
+function clipboardTsvToMarkdown(text){
+    const rows = clipboardTsvRows(text);
+    return rows ? clipboardTableRowsToMarkdown(rows) : null;
+}
+// Markdown 表格纯文本（LLM/网页常见）：首行 | a | b |，第二行是 |---|，其余为数据。
+function clipboardMarkdownTableRows(text){
+    const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if(lines.length < 2 || !lines[0].startsWith('|')) return null;
+    const split = line => line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+    const header = split(lines[0]);
+    if(header.length < 2 || header.every(cell => !cell)) return null;
+    let body = lines.slice(1);
+    if(body.length && /^\|?[\s:|-]+\|?$/.test(body[0]) && body[0].includes('-')) body = body.slice(1);
+    if(!body.length) return null;
+    return [header, ...body.map(split)];
 }
 // 2026-11-02 复制的纯文本直接粘贴成提示词节点（用户要求）：落在鼠标位置
 // （lastMouseWorld，无记录退回视口中心），多行/分号原样保留，粘贴后选中并
@@ -16960,6 +16994,8 @@ function updateNodeElementDuringResize(node, options={}){
     el.style.top = `${Number(node.y) || 0}px`;
     el.style.width = `${layout.width}px`;
     el.style.height = `${layout.height}px`;
+    // 分镜表按宽度收列：拖动过程中就切档，避免松手前文字挤成一团
+    if(node.type === 'smart-shot-table') syncShotTableWidthClasses(el, layout.width);
     const body = el.querySelector('.node-body');
     if(body){
         const loadingSingle = body.querySelector('.loading-cell.single');
@@ -18877,6 +18913,413 @@ function storyboardRowsForNode(node){
     ensureStoryboardNodeData(node);
     return Array.isArray(node.rows) && node.rows.length ? node.rows : storyboardScriptDefaultRows(5);
 }
+/* ===== 2026-11-03 分镜表节点（方案 A）=====
+   用户要求：截图里的六列生产表能直接在画布上出现，而不是塞进弹窗。
+   - 六列：镜号 / 时间 / 景别·运镜 / 画面 / 屏幕文案 / 旁白
+   - 表头吸顶，行悬停浮出「⋯」，单元格就地编辑（Enter 下移、Tab 右移）
+   - 窄节点按宽度自动收列（先收屏幕文案，再收旁白，最后只留镜号 + 画面）
+   - 与现有 smart-storyboard（12+ 字段弹窗）并存，不改动它
+   ============================================= */
+const SHOT_TABLE_DEFAULT_WIDTH = 1040;
+const SHOT_TABLE_DEFAULT_HEIGHT = 280;
+const SHOT_TABLE_MIN_WIDTH = 420;
+const SHOT_TABLE_MIN_HEIGHT = 220;
+const SHOT_TABLE_FIELDS = ['no', 'time', 'shotSize', 'visual', 'onScreenText', 'voiceover'];
+const SHOT_TABLE_HEADERS = {no:'镜', time:'时间', shotSize:'景别 / 运镜', visual:'画面', onScreenText:'屏幕文案', voiceover:'旁白'};
+const SHOT_TABLE_PLACEHOLDERS = {no:'镜号', time:'时长', shotSize:'景别 / 运镜', visual:'画面描述', onScreenText:'屏幕文案', voiceover:'旁白 / 解说'};
+function shotTableDefaultRows(){
+    return Array.from({length:3}, (_, i) => ({no:String(i + 1), time:'', shotSize:'', visual:'', onScreenText:'', voiceover:''}));
+}
+function shotTableRows(node){
+    if(!node) return [];
+    if(!Array.isArray(node.shotRows)) node.shotRows = [];
+    return node.shotRows;
+}
+function shotTableRenumber(node){
+    shotTableRows(node).forEach((row, index) => { row.no = String(index + 1); });
+}
+// 时间列形如 "0-3s" / "3s" / "0:03"：取最后一个数字当这一镜的时长，加总给脚注。
+function shotTableTotalSeconds(node){
+    return shotTableRows(node).reduce((sum, row) => {
+        const nums = String(row?.time || '').match(/\d+(?:\.\d+)?/g);
+        if(!nums || !nums.length) return sum;
+        const tail = Number(nums[nums.length - 1]);
+        return sum + (Number.isFinite(tail) ? tail : 0);
+    }, 0);
+}
+// 宽度档位只切 class，样式在 skin.css 里按档位隐藏列 + 改 grid 模板；
+// 拖拽缩放过程中也能实时切，不必等松手重渲染。
+function shotTableWidthClass(width){
+    const w = Number(width) || SHOT_TABLE_DEFAULT_WIDTH;
+    if(w < 620) return 'shot-w-narrow';
+    if(w < 760) return 'shot-w-compact';
+    if(w < 900) return 'shot-w-mid';
+    return '';
+}
+function syncShotTableWidthClasses(el, width){
+    if(!el) return;
+    el.classList.remove('shot-w-mid', 'shot-w-compact', 'shot-w-narrow');
+    const cls = shotTableWidthClass(width);
+    if(cls) el.classList.add(cls);
+}
+function shotTableNodeBodyHtml(node){
+    const rows = shotTableRows(node);
+    const secs = shotTableTotalSeconds(node);
+    const rowsHtml = rows.map((row, index) => {
+        const cells = SHOT_TABLE_FIELDS.map(field => {
+            const value = String(row?.[field] ?? '');
+            return `<div class="shot-cell" contenteditable="true" spellcheck="false" role="textbox" data-shot-field="${field}" data-shot-row="${index}" data-col="${field}" data-shot-placeholder="${escapeAttr(SHOT_TABLE_PLACEHOLDERS[field] || '')}">${escapeHtml(value)}</div>`;
+        }).join('');
+        return `<div class="shot-row" data-shot-row-index="${index}">${cells}<button class="shot-row-more" type="button" data-shot-row-menu="${index}" title="这一镜的操作" aria-label="这一镜的操作">⋯</button></div>`;
+    }).join('');
+    const headHtml = SHOT_TABLE_FIELDS.map(field => `<div class="shot-th" data-col="${field}">${escapeHtml(SHOT_TABLE_HEADERS[field])}</div>`).join('');
+    return `<div class="shot-table">
+        <div class="shot-table-scroll">
+            <div class="shot-row shot-head">${headHtml}</div>
+            <div class="shot-table-rows">${rowsHtml || '<div class="shot-table-empty">粘贴一张表格，或点左下角「添加一行」</div>'}</div>
+        </div>
+        <div class="shot-foot">
+            <button class="shot-foot-btn" type="button" data-shot-add-row="1">+ 添加一行</button>
+            <span class="shot-foot-meta">${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}</span>
+            <button class="shot-foot-btn" type="button" data-shot-all-prompts="1" title="每一镜各建一个提示词节点">全部转提示词</button>
+        </div>
+    </div>`;
+}
+function shotRowPromptText(row){
+    if(!row) return '';
+    const parts = [];
+    if(String(row.shotSize || '').trim()) parts.push(`景别 / 运镜：${String(row.shotSize).trim()}`);
+    if(String(row.visual || '').trim()) parts.push(`画面：${String(row.visual).trim()}`);
+    if(String(row.onScreenText || '').trim()) parts.push(`屏幕文案：${String(row.onScreenText).trim()}`);
+    if(String(row.voiceover || '').trim()) parts.push(`旁白：${String(row.voiceover).trim()}`);
+    return parts.join('\n');
+}
+function createShotTableNode(x, y, options={}){
+    if(!options.skipUndo) pushUndo();
+    const rows = (options.rows && options.rows.length ? options.rows : shotTableDefaultRows())
+        .map(row => SHOT_TABLE_FIELDS.reduce((acc, field) => { acc[field] = String(row?.[field] ?? ''); return acc; }, {}));
+    const node = {
+        id:uid('shots'),
+        type:'smart-shot-table',
+        x,
+        y,
+        w:Number(options.width) || SHOT_TABLE_DEFAULT_WIDTH,
+        h:Number(options.height) || SHOT_TABLE_DEFAULT_HEIGHT,
+        title:options.title || '分镜表',
+        shotRows:rows,
+        created_at:Date.now()
+    };
+    nodes.push(node);
+    if(options.select !== false) selectedId = node.id;
+    if(!options.skipRender) render();
+    if(!options.skipSave) scheduleSave();
+    return node;
+}
+function pasteShotTableNode(data){
+    if(!data || !data.rows?.length || !canvas) return false;
+    const anchor = lastMouseWorld || viewportCenter();
+    const width = 1100;
+    const height = Math.min(640, Math.max(280, 112 + data.rows.length * 56));
+    const node = createShotTableNode(
+        Math.round((anchor.x || 0) - width / 2),
+        Math.round((anchor.y || 0) - 60),
+        {rows:data.rows, width, height, skipRender:true}
+    );
+    render();
+    scheduleSave();
+    toast(`已识别为分镜表（${node.shotRows.length} 镜）`);
+    return true;
+}
+function shotTableAddRow(node, atIndex){
+    if(!node) return null;
+    pushUndo();
+    const rows = shotTableRows(node);
+    const index = Number.isInteger(atIndex) ? Math.max(0, Math.min(rows.length, atIndex)) : rows.length;
+    rows.splice(index, 0, {no:'', time:'', shotSize:'', visual:'', onScreenText:'', voiceover:''});
+    shotTableRenumber(node);
+    render();
+    scheduleSave();
+    requestAnimationFrame(() => {
+        const el = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
+        if(el) focusShotCell(el, index, 'visual');
+    });
+    return index;
+}
+function shotRowPromptNodesAround(node, index){
+    return {
+        x:Math.round((Number(node.x) || 0) + (Number(node.w) || SHOT_TABLE_DEFAULT_WIDTH) + 90),
+        y:Math.round((Number(node.y) || 0) + Math.max(0, (index || 0) * 150))
+    };
+}
+function shotTableCreatePromptForRow(node, index){
+    const row = shotTableRows(node)[index];
+    const text = shotRowPromptText(row);
+    if(!text){ toast('这一镜还没有内容'); return null; }
+    pushUndo();
+    const p = shotRowPromptNodesAround(node, index);
+    const created = createPromptNode(p.x, p.y, {skipUndo:true, skipRender:true, skipSave:true});
+    created.text = text;
+    addConnection(node.id, created.id);
+    render();
+    scheduleSave();
+    toast(`已为第 ${row.no || index + 1} 镜建提示词节点`);
+    return created;
+}
+function shotTableCreateAllPrompts(node){
+    const rows = shotTableRows(node).filter(row => shotRowPromptText(row));
+    if(!rows.length){ toast('还没有可用的分镜内容'); return; }
+    pushUndo();
+    const total = rows.length;
+    const colHeight = Math.min(220, Math.max(96, Math.floor(720 / Math.max(1, total))));
+    rows.forEach((row, i) => {
+        const p = shotRowPromptNodesAround(node, 0);
+        const created = createPromptNode(p.x, p.y + i * (colHeight + 28), {skipUndo:true, select:false, skipRender:true, skipSave:true});
+        created.text = shotRowPromptText(row);
+        addConnection(node.id, created.id);
+    });
+    render();
+    scheduleSave();
+    toast(`已生成 ${total} 个提示词节点`);
+}
+function shotTableRowAction(node, index, action){
+    const rows = shotTableRows(node);
+    const row = rows[index];
+    if(!row) return;
+    if(action === 'copy'){
+        const text = shotRowPromptText(row);
+        if(!text){ toast('这一镜还没有内容'); return; }
+        try {
+            navigator.clipboard?.writeText?.(text);
+            toast('已复制这一镜的提示词');
+        } catch(_) { toast('复制失败'); }
+        return;
+    }
+    if(action === 'prompt'){ shotTableCreatePromptForRow(node, index); return; }
+    pushUndo();
+    if(action === 'up' && index > 0){
+        [rows[index - 1], rows[index]] = [rows[index], rows[index - 1]];
+    } else if(action === 'down' && index < rows.length - 1){
+        [rows[index + 1], rows[index]] = [rows[index], rows[index + 1]];
+    } else if(action === 'above' || action === 'below'){
+        const at = action === 'above' ? index : index + 1;
+        rows.splice(at, 0, {no:'', time:'', shotSize:'', visual:'', onScreenText:'', voiceover:''});
+    } else if(action === 'duplicate'){
+        rows.splice(index + 1, 0, {...row});
+    } else if(action === 'delete'){
+        rows.splice(index, 1);
+    } else {
+        return;
+    }
+    shotTableRenumber(node);
+    render();
+    scheduleSave();
+}
+function shotCellCaretEnd(cell){
+    try {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges?.();
+        sel?.addRange?.(range);
+    } catch(_) {}
+}
+function focusShotCell(el, rowIndex, field){
+    const cell = el?.querySelector(`.shot-cell[data-shot-row="${rowIndex}"][data-shot-field="${field}"]`);
+    if(!cell || cell.offsetParent === null) return false;
+    cell.focus({preventScroll:false});
+    shotCellCaretEnd(cell);
+    return true;
+}
+function moveShotCell(el, cell, dir){
+    const rowIndex = Number(cell.dataset.shotRow);
+    let fieldIndex = SHOT_TABLE_FIELDS.indexOf(cell.dataset.shotField || '');
+    let row = rowIndex;
+    const rowCount = el.querySelectorAll('.shot-row[data-shot-row-index]').length;
+    if(fieldIndex < 0) fieldIndex = 0;
+    for(let guard = 0; guard < 24; guard++){
+        if(dir === 'down') row++;
+        else if(dir === 'up') row--;
+        else if(dir === 'right') fieldIndex++;
+        else fieldIndex--;
+        if(fieldIndex >= SHOT_TABLE_FIELDS.length){ fieldIndex = 0; row++; }
+        if(fieldIndex < 0){ fieldIndex = SHOT_TABLE_FIELDS.length - 1; row--; }
+        if(row < 0 || row >= rowCount) return false;
+        const next = el.querySelector(`.shot-cell[data-shot-row="${row}"][data-shot-field="${SHOT_TABLE_FIELDS[fieldIndex]}"]`);
+        // 窄节点会隐藏部分列，隐藏列不能聚焦 → 继续找下一个可见格
+        if(next && next.offsetParent !== null){
+            next.focus();
+            shotCellCaretEnd(next);
+            return true;
+        }
+    }
+    return false;
+}
+function shotTableSyncFootMeta(el, node){
+    const meta = el?.querySelector('.shot-foot-meta');
+    if(!meta) return;
+    const rows = shotTableRows(node);
+    const secs = shotTableTotalSeconds(node);
+    meta.textContent = `${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}`;
+}
+let shotRowMenuEl = null;
+function closeShotRowMenu(){
+    if(shotRowMenuEl){
+        try { shotRowMenuEl.remove(); } catch(_) {}
+        shotRowMenuEl = null;
+    }
+}
+function openShotRowMenu(anchor, node, index){
+    closeShotRowMenu();
+    const row = shotTableRows(node)[index];
+    if(!row) return;
+    const menu = document.createElement('div');
+    menu.className = 'shot-row-menu';
+    menu.setAttribute('role', 'menu');
+    const items = [
+        ['prompt', '生成提示词节点', 'sparkles'],
+        ['copy', '复制这一镜提示词', 'copy'],
+        ['sep'],
+        ['up', '上移一行', 'arrow-up'],
+        ['down', '下移一行', 'arrow-down'],
+        ['above', '在上方插入一行', 'plus'],
+        ['below', '在下方插入一行', 'plus'],
+        ['duplicate', '复制这一行', 'copy'],
+        ['sep'],
+        ['delete', '删除这一行', 'trash-2', 'danger']
+    ];
+    menu.innerHTML = `<div class="shot-row-menu-head">第 ${escapeHtml(String(row.no || index + 1))} 镜</div>` + items.map(item => {
+        if(item[0] === 'sep') return '<div class="shot-row-menu-sep"></div>';
+        return `<button class="shot-row-menu-item${item[3] ? ' ' + item[3] : ''}" type="button" data-shot-action="${item[0]}"><i data-lucide="${item[2]}"></i><span>${escapeHtml(item[1])}</span></button>`;
+    }).join('');
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, anchorRect.right - rect.width));
+    let top = anchorRect.bottom + 4;
+    if(top + rect.height > window.innerHeight - 8) top = Math.max(8, anchorRect.top - rect.height - 4);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    menu.addEventListener('mousedown', e => e.stopPropagation());
+    menu.addEventListener('click', e => {
+        const btn = e.target.closest('[data-shot-action]');
+        if(!btn) return;
+        const action = btn.dataset.shotAction;
+        closeShotRowMenu();
+        shotTableRowAction(node, index, action);
+    });
+    convertPendingLucideIcons(menu);
+    shotRowMenuEl = menu;
+}
+document.addEventListener('mousedown', e => {
+    if(!shotRowMenuEl) return;
+    if(e.target.closest?.('.shot-row-menu')) return;
+    closeShotRowMenu();
+}, true);
+window.addEventListener('resize', () => closeShotRowMenu());
+// 画布滚动/缩放时行菜单会脱离原位，直接关掉
+world?.addEventListener('scroll', () => closeShotRowMenu(), true);
+function bindShotTableNodeControls(el, node){
+    const readCell = cell => String(cell.innerText || '').replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+    el.addEventListener('input', e => {
+        const cell = e.target.closest?.('.shot-cell');
+        if(!cell) return;
+        const row = shotTableRows(node)[Number(cell.dataset.shotRow)];
+        if(!row) return;
+        row[cell.dataset.shotField] = readCell(cell);
+        shotTableSyncFootMeta(el, node);
+        scheduleSave();
+    });
+    el.addEventListener('keydown', e => {
+        const cell = e.target.closest?.('.shot-cell');
+        if(!cell) return;
+        if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+            e.preventDefault();
+            // 最后一行的 Enter 直接续一行：整列往下敲分镜时不用回头点「添加一行」
+            if(!moveShotCell(el, cell, 'down')) shotTableAddRow(node);
+        } else if(e.key === 'Enter' && e.shiftKey){
+            e.preventDefault();
+            moveShotCell(el, cell, 'up');
+        } else if(e.key === 'Tab'){
+            e.preventDefault();
+            moveShotCell(el, cell, e.shiftKey ? 'left' : 'right');
+        } else if(e.key === 'Escape'){
+            cell.blur();
+        }
+    });
+    el.addEventListener('paste', e => {
+        // 单元格里粘贴多格内容时只保留纯文本，避免把整张表塞进一格
+        const cell = e.target.closest?.('.shot-cell');
+        if(!cell) return;
+        const text = String(e.clipboardData?.getData('text/plain') || '');
+        if(!text) return;
+        e.preventDefault();
+        const clean = text.replace(/\r\n?/g, '\n').replace(/\t/g, ' ').trim();
+        document.execCommand('insertText', false, clean);
+    });
+    el.addEventListener('click', e => {
+        const more = e.target.closest?.('[data-shot-row-menu]');
+        if(more){
+            e.preventDefault();
+            e.stopPropagation();
+            openShotRowMenu(more, node, Number(more.dataset.shotRowMenu));
+            return;
+        }
+        const addRow = e.target.closest?.('[data-shot-add-row]');
+        if(addRow){
+            e.preventDefault();
+            e.stopPropagation();
+            shotTableAddRow(node);
+            return;
+        }
+        const allPrompts = e.target.closest?.('[data-shot-all-prompts]');
+        if(allPrompts){
+            e.preventDefault();
+            e.stopPropagation();
+            shotTableCreateAllPrompts(node);
+            return;
+        }
+        const rowEl = e.target.closest?.('.shot-row[data-shot-row-index]');
+        if(rowEl && el.contains(rowEl)){
+            el.querySelectorAll('.shot-row.is-active').forEach(item => item.classList.remove('is-active'));
+            rowEl.classList.add('is-active');
+        }
+    });
+}
+// 从剪贴板表格矩阵里认分镜表：表头命中 ≥3 个已知字段且必须有「画面」。
+function shotTableHeaderField(label){
+    const s = String(label || '').toLowerCase().replace(/[\s/／\\·:：()（）\[\]【】*`]/g, '');
+    if(!s) return '';
+    if(/镜号|镜头号|序号|编号|^镜$|^no$|^#\d*$|^shotno$/.test(s)) return 'no';
+    if(/时间|时长|^duration|^time/.test(s)) return 'time';
+    if(/景别|运镜|镜头语言|机位|^camera|^shottype|^shotsize/.test(s)) return 'shotSize';
+    if(/屏幕文案|字幕|屏幕文字|字卡|文案|^caption|^onscreen|^subtitle/.test(s)) return 'onScreenText';
+    if(/旁白|解说|配音|台词|^vo$|^voiceover|^narration/.test(s)) return 'voiceover';
+    if(/画面|内容|描述|视觉|^visual|^action|^scene/.test(s)) return 'visual';
+    return '';
+}
+function shotTableFromRows(rows){
+    if(!Array.isArray(rows) || rows.length < 2) return null;
+    const header = (rows[0] || []).map(shotTableHeaderField);
+    const map = {};
+    header.forEach((field, index) => { if(field && map[field] === undefined) map[field] = index; });
+    if(map.visual === undefined) return null;
+    if(Object.keys(map).length < 3) return null;
+    const body = rows.slice(1).filter(cells => cells.some(cell => String(cell || '').trim()));
+    if(!body.length) return null;
+    const out = body.map((cells, index) => {
+        const pick = field => String(map[field] === undefined ? '' : (cells[map[field]] ?? '')).replace(/\s+/g, ' ').trim();
+        return {
+            no:pick('no') || String(index + 1),
+            time:pick('time'),
+            shotSize:pick('shotSize'),
+            visual:pick('visual'),
+            onScreenText:pick('onScreenText'),
+            voiceover:pick('voiceover')
+        };
+    });
+    return {rows:out, cols:Object.keys(map).length};
+}
 function storyboardScriptNodePreviewHtml(node){
     if(node.storyboardChooser){ return `<div class="storyboard-chooser-card"><div class="storyboard-chooser-icon">☰</div><div class="storyboard-chooser-title">脚本生成器</div><div class="storyboard-chooser-sub">尝试：</div><button data-storyboard-choice="script">☷ 剧本生成分镜脚本</button><button data-storyboard-choice="character">♙ 角色生成分镜脚本</button><button data-storyboard-choice="manual">▤ 自己编写分镜脚本</button></div>`; }
     const rows = storyboardRowsForNode(node).slice(0, 5);
@@ -20247,6 +20690,7 @@ function nodeBodyHtml(node, layout){
         return smartLoopBodyHtml(node);
     }
     if(node.type === 'smart-storyboard') return storyboardScriptNodePreviewHtml(node);
+    if(node.type === 'smart-shot-table') return shotTableNodeBodyHtml(node);
     const imgs = (node.images || []).map(imageForDisplay);
     const mediaDeleteButton = img => mediaKindForItem(img) === 'video' ? '' : `<button class="mini-x image-delete" type="button" data-image-index="0" title="${escapeHtml(tr('smart.deleteImage'))}" aria-label="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button>`;
     const isRunNode = Boolean(node.runSettings || smartNodeFixedEngine(node));
@@ -23438,6 +23882,7 @@ function render(){
         const isPrompt = node.type === 'smart-prompt';
         const isLoop = node.type === 'smart-loop';
         const isStoryboard = node.type === 'smart-storyboard';
+        const isShotTable = node.type === 'smart-shot-table';
         const isSmartGroup = node.type === 'smart-group';
         const isWorkflowGroup = node.type === 'workflow-group';
         const isPromptLlm = isPrompt && node.llmEnabled === true;
@@ -23478,7 +23923,7 @@ function render(){
         const gridFrameCount = imgs.length + (hasAppendPending ? Math.max(0, appendPendingCount) : 0);
         const canResizeNode = ((gridFrameCount > 1 || isPendingGroup)
             || (!isImageNode
-            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isSmartGroup))) && !isWorkflowGroup;
+            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isShotTable || isSmartGroup))) && !isWorkflowGroup;
         const nodeStyleExtra = isWorkflowGroup ? workflowGroupFrameStyle(node) : (isSmartGroup ? smartGroupFrameStyle(node) : (isGroup ? imageGroupFrameStyle(node) : ''));
         // 2026-10-12（用户要求：成组后与普通 Group 节点同款）：生成型智能分组也恢复显示外部标题，
         // 卡片内不再有「N 图片」摘要行（hideGeneratedGroupHead 已无意义，恒 false 保留结构）。
@@ -23495,7 +23940,7 @@ function render(){
         const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
             ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
             : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
-        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
+        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
             ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -25224,6 +25669,7 @@ function bindNodeEvents(){
                 openStoryboardScriptModal(id);
             };
         }
+        if(nodeForControls?.type === 'smart-shot-table') bindShotTableNodeControls(el, nodeForControls);
         el.onclick = e => {
             e.stopPropagation();
             if(Date.now() < suppressNodeClickUntil) return;
@@ -26084,7 +26530,7 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
                 if(lpBeginMaskPaint(node, e)) return;
             }
             const thumbDragSurface = e.target.closest('.thumb-item,.smart-group-single-thumb,.image-wrap');
-            const blockedControl = e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button');
+            const blockedControl = e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, .shot-table, select, input, textarea, button');
             if(blockedControl && !promptTextTarget){
                 const allowSingleImageSurfaceDrag = thumbDragSurface && !e.target.closest('.mini-x,.image-delete,button,.node-port') && !isSmartGroupNode(node) && isSmartImageNode(node) && (node.images || []).length <= 1;
                 if(!allowSingleImageSurfaceDrag) return;
@@ -40753,6 +41199,7 @@ function createNodeFromMenu(type){
     let created = null;
     if(type === 'prompt') created = createPromptNode(p.x - Math.round(PROMPT_NODE_DEFAULT_WIDTH / 2), p.y - Math.round(PROMPT_NODE_DEFAULT_HEIGHT / 2));
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
+    else if(type === 'shotTable') created = createShotTableNode(p.x - Math.round(SHOT_TABLE_DEFAULT_WIDTH / 2), p.y - Math.round(SHOT_TABLE_DEFAULT_HEIGHT / 2));
     // 2026-09-20 双击菜单新增：图片 / 视频 / 音频(TTS) 直接建可运行的生成节点
     else if(type === 'image' || type === 'video'){
         // 2026-09-22 修：createImageNodeAt() 内部会立刻 render()，而那一刻节点还没有 runSettings，
@@ -41339,8 +41786,8 @@ window.onmousemove = e => {
             updateNodeElementDuringResize(node);
             return;
         }
-        const minW = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_WIDTH : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_HEIGHT : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        const minW = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_WIDTH : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_WIDTH : 48;
+        const minH = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_HEIGHT : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
@@ -42099,9 +42546,21 @@ window.addEventListener('paste', e => {
     // 并按行列数放大节点。内部复制节点时 copyNodes 会清空系统剪贴板，所以这里不会抢
     // 节点剪贴板的粘贴；光标在输入框/编辑器里（isEditableTarget）时完全不拦截。
     if(!isEditableTarget(e.target)){
-        const table = clipboardHtmlTableToMarkdown(String(e.clipboardData?.getData?.('text/html') || ''))
-            || clipboardTsvToMarkdown(e.clipboardData?.getData?.('text/plain'));
-        const clipText = table ? table.md : String(e.clipboardData?.getData?.('text/plain') || '').trim();
+        const clipHtml = String(e.clipboardData?.getData?.('text/html') || '');
+        const clipPlain = String(e.clipboardData?.getData?.('text/plain') || '');
+        // 2026-11-03（用户要求·方案 A）：先认分镜表——表头含「画面」且 ≥3 个已知字段
+        // （镜号/时间/景别运镜/画面/屏幕文案/旁白）就直接建表格节点，不再转 Markdown 文本。
+        const shotData = shotTableFromRows(
+            clipboardHtmlTableRows(clipHtml) || clipboardTsvRows(clipPlain) || clipboardMarkdownTableRows(clipPlain)
+        );
+        if(shotData){
+            e.preventDefault();
+            pasteShotTableNode(shotData);
+            return;
+        }
+        const table = clipboardHtmlTableToMarkdown(clipHtml)
+            || clipboardTsvToMarkdown(clipPlain);
+        const clipText = table ? table.md : clipPlain.trim();
         if(clipText){
             e.preventDefault();
             const opts = {};

@@ -54,8 +54,8 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.03.10.202611031004">
-    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.03.10.202611031003">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.03.13.202611031331">
+    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.03.13.202611031331">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -192,6 +192,12 @@
                         <span class="create-card-icon"><i data-lucide="music"></i></span>
                         <span class="create-card-main"><span class="create-card-title">音频</span></span>
                         <span class="create-card-badge">TTS</span>
+                    </button>
+                    <!-- 2026-11-03（用户要求）：六列生产表可直接建在画布上，与分镜脚本节点并存 -->
+                    <button class="create-card" type="button" data-create-type="shotTable">
+                        <span class="create-card-icon"><i data-lucide="table-2"></i></span>
+                        <span class="create-card-main"><span class="create-card-title">分镜表</span></span>
+                        <span class="create-card-badge">6 列</span>
                     </button>
                     <button class="create-card" type="button" data-create-type="loop">
                         <span class="create-card-icon"><i data-lucide="repeat-2"></i></span>
@@ -1047,7 +1053,7 @@
     <div id="slashPeek" class="slash-peek" aria-hidden="true"></div>
     <!-- 大面板遮罩：点它收起。放 world 之外，展开时把 #world 提到 z-index 100 才不会连面板一起盖住 -->
     <div id="composerExpandMask" class="composer-expand-mask" hidden></div>
-    <script src="/static/js/smart-canvas.js?v=V26.11.03.10.202611031002"></script>
+    <script src="/static/js/smart-canvas.js?v=V26.11.03.13.202611031332"></script>
 </body>
 </html>
 

@@ -6225,7 +6225,7 @@ body.smart-agent-open .smart-quickbar { max-width:calc(100vw - var(--smart-agent
 }
 
 /* Plain uploaded image nodes: preserve media ratio, no decorative frame. */
-.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node),
+.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node),
 .image-node.upload-entry-node:not(.empty-node) {
     background:transparent !important;
     border:0 !important;
@@ -6233,7 +6233,7 @@ body.smart-agent-open .smart-quickbar { max-width:calc(100vw - var(--smart-agent
     padding:0 !important;
     overflow:visible !important;
 }
-.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node) .node-body,
+.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node) .node-body,
 .image-node.upload-entry-node:not(.empty-node) .node-body {
     padding:0 !important;
     background:transparent !important;

@@ -2639,3 +2639,304 @@ html body .world .image-node .smart-run-ref-state.is-image-card .smart-run-ref-m
     background: transparent !important;
     box-shadow: none !important;
 }
+
+/* ==========================================================================
+   2026-11-03 分镜表节点（smart-shot-table，方案 A）
+   六列生产表直接长在画布上：表头吸顶、行悬停浮出「⋯」、单元格就地编辑。
+   收列只靠 node 元素上的 shot-w-* 档位 class（渲染时与拖拽过程中都会切）。
+   ========================================================================== */
+html body .world .image-node.shot-table-smart-node:not(.smart-group-member-node) {
+    background: var(--gbz-node-bg) !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--gbz-node-radius) !important;
+    color: var(--gbz-node-text) !important;
+    box-shadow: var(--gbz-node-shadow) !important;
+    /* 不能在这里 overflow:hidden：端口和选中外圈都在节点边界外，会被裁掉。
+       圆角裁切交给 .node-body（它本来就 border-radius:inherit + overflow:hidden）。 */
+    overflow: visible !important;
+}
+html body .world .image-node.shot-table-smart-node:not(.smart-group-member-node):hover,
+html body .world .image-node.shot-table-smart-node:not(.smart-group-member-node).selected {
+    border-color: transparent !important;
+}
+html body .world .image-node.shot-table-smart-node:not(.smart-group-member-node).selected {
+    box-shadow: var(--gbz-node-shadow-selected) !important;
+}
+
+html body .world .image-node.shot-table-smart-node .node-body {
+    display: block !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border-radius: var(--gbz-node-radius) !important;
+    overflow: hidden !important;
+}
+
+html body .world .image-node.shot-table-smart-node .shot-table {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
+html body .world .image-node.shot-table-smart-node .shot-table-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+/* 行 = 一个 grid；列宽集中在这里，宽度档位只换模板 */
+html body .world .image-node.shot-table-smart-node .shot-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 44px 66px 130px minmax(200px, 1fr) 196px 180px;
+    padding-right: 26px;
+    align-items: stretch;
+}
+html body .world .image-node.shot-table-smart-node.shot-w-mid .shot-row {
+    grid-template-columns: 44px 66px 130px minmax(200px, 1fr);
+}
+html body .world .image-node.shot-table-smart-node.shot-w-compact .shot-row {
+    grid-template-columns: 44px 66px 130px minmax(180px, 1fr);
+}
+/* 最窄档保留「镜号 + 时间 + 画面」三列：时间只有几个字符，砍掉反而是信息损失 */
+html body .world .image-node.shot-table-smart-node.shot-w-narrow .shot-row {
+    grid-template-columns: 44px 62px minmax(150px, 1fr);
+}
+html body .world .image-node.shot-table-smart-node.shot-w-mid [data-col="onScreenText"],
+html body .world .image-node.shot-table-smart-node.shot-w-compact [data-col="onScreenText"],
+html body .world .image-node.shot-table-smart-node.shot-w-narrow [data-col="onScreenText"],
+html body .world .image-node.shot-table-smart-node.shot-w-compact [data-col="voiceover"],
+html body .world .image-node.shot-table-smart-node.shot-w-narrow [data-col="voiceover"],
+html body .world .image-node.shot-table-smart-node.shot-w-narrow [data-col="shotSize"] {
+    display: none !important;
+}
+
+/* 表头吸顶 */
+html body .world .image-node.shot-table-smart-node .shot-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--gbz-node-bg);
+    border-bottom: 1px solid var(--gbz-node-line-soft);
+}
+html body .world .image-node.shot-table-smart-node .shot-th {
+    padding: 9px 10px 8px;
+    font-size: 10.5px;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: .04em;
+    color: var(--gbz-node-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+html body .world .image-node.shot-table-smart-node .shot-th[data-col="no"] {
+    text-align: center;
+}
+
+/* 数据行 */
+html body .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index] {
+    border-bottom: 1px solid rgba(255, 255, 255, .055);
+    transition: background .13s ease;
+}
+html body .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index]:hover {
+    background: rgba(255, 255, 255, .055);
+}
+html body .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index].is-active {
+    background: rgba(255, 255, 255, .06);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index] {
+    border-bottom-color: rgba(0, 0, 0, .065);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index]:hover {
+    background: rgba(0, 0, 0, .028);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index].is-active {
+    background: rgba(0, 0, 0, .05);
+}
+
+html body .world .image-node.shot-table-smart-node .shot-cell {
+    padding: 8px 10px;
+    min-height: 34px;
+    max-height: 96px;
+    overflow: auto;
+    color: var(--gbz-node-text);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-right: 1px solid rgba(255, 255, 255, .045);
+    outline: none;
+    cursor: text;
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-cell {
+    border-right-color: rgba(0, 0, 0, .05);
+}
+html body .world .image-node.shot-table-smart-node .shot-cell:last-of-type {
+    border-right: 0;
+}
+html body .world .image-node.shot-table-smart-node .shot-cell[data-col="no"] {
+    text-align: center;
+    color: var(--gbz-node-muted);
+    font-variant-numeric: tabular-nums;
+}
+html body .world .image-node.shot-table-smart-node .shot-cell:empty::before {
+    content: attr(data-shot-placeholder);
+    color: var(--gbz-node-muted);
+    opacity: .42;
+}
+html body .world .image-node.shot-table-smart-node .shot-cell:focus {
+    background: rgba(255, 255, 255, .07);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .26);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-cell:focus {
+    background: rgba(0, 0, 0, .035);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .16);
+}
+
+/* 行操作入口：默认隐形，悬停/选中行才浮出 */
+html body .world .image-node.shot-table-smart-node .shot-row-more {
+    position: absolute;
+    right: 3px;
+    top: 5px;
+    width: 20px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--gbz-node-muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .13s ease, background .13s ease;
+}
+html body .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index]:hover .shot-row-more,
+html body .world .image-node.shot-table-smart-node .shot-row[data-shot-row-index].is-active .shot-row-more {
+    opacity: .8;
+}
+html body .world .image-node.shot-table-smart-node .shot-row-more:hover {
+    opacity: 1 !important;
+    background: rgba(255, 255, 255, .1);
+    color: var(--gbz-node-text);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-row-more:hover {
+    background: rgba(0, 0, 0, .07);
+}
+
+html body .world .image-node.shot-table-smart-node .shot-table-empty {
+    padding: 26px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--gbz-node-muted);
+}
+
+/* 脚注条 */
+html body .world .image-node.shot-table-smart-node .shot-foot {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    /* 右侧留 28px 给右下角缩放角标，避免压住「全部转提示词」 */
+    padding: 0 28px 0 10px;
+    border-top: 1px solid var(--gbz-node-line-soft);
+}
+html body .world .image-node.shot-table-smart-node .shot-foot-btn {
+    height: 24px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--gbz-node-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .13s ease, color .13s ease;
+}
+html body .world .image-node.shot-table-smart-node .shot-foot-btn:hover {
+    background: rgba(255, 255, 255, .09);
+    color: var(--gbz-node-text);
+}
+html body.theme-light .world .image-node.shot-table-smart-node .shot-foot-btn:hover {
+    background: rgba(0, 0, 0, .06);
+}
+html body .world .image-node.shot-table-smart-node .shot-foot-meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--gbz-node-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 行菜单（挂 body 上，fixed，避免被节点 overflow 裁掉） */
+.shot-row-menu {
+    position: fixed;
+    z-index: 9999;
+    width: 186px;
+    padding: 4px;
+    border-radius: 10px;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, .1);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .5);
+    font-size: 12.5px;
+    color: rgba(246, 246, 246, .92);
+    user-select: none;
+}
+.shot-row-menu-head {
+    padding: 6px 10px 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    color: rgba(246, 246, 246, .45);
+}
+.shot-row-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 28px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+}
+.shot-row-menu-item i {
+    width: 13px;
+    height: 13px;
+    opacity: .62;
+}
+.shot-row-menu-item:hover {
+    background: rgba(255, 255, 255, .1);
+}
+.shot-row-menu-item.danger {
+    color: #ff8a8a;
+}
+.shot-row-menu-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: rgba(255, 255, 255, .09);
+}
+body.theme-light .shot-row-menu {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, .1);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .18);
+    color: rgba(20, 20, 22, .92);
+}
+body.theme-light .shot-row-menu-head {
+    color: rgba(20, 20, 22, .45);
+}
+body.theme-light .shot-row-menu-item:hover {
+    background: rgba(0, 0, 0, .06);
+}
+body.theme-light .shot-row-menu-sep {
+    background: rgba(0, 0, 0, .08);
+}
