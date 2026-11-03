@@ -4172,6 +4172,8 @@ function nodeBarMetaHtml(node, imgs=[]){
 }
 function smartNodeTitleIcon(node, imgs=[]){
     if(node?.type === 'smart-director-stage') return 'axis-3d';
+    // 2026-11-03：脚本生成器空态跟截图一致，标题前挂「文本」图标
+    if(node?.type === 'smart-storyboard' && node.storyboardChooser) return 'file-text';
     if(Array.isArray(imgs) && imgs.length === 1){
         return smartMaterialTitleIcon(mediaKindForItem(imageForDisplay(imgs[0])));
     }
@@ -4188,7 +4190,7 @@ function smartNodeTitle(node, imgs=[]){    if(node?.type === 'workflow-group') r
     if(node?.type === 'smart-group') return node.title === '万能分组' ? '智能分组' : (node.title || '智能分组');
     if(node?.type === 'smart-prompt') return 'Text';
     if(node?.type === 'smart-loop') return 'Loop';
-    if(node?.type === 'smart-storyboard') return node.title || '分镜脚本';
+    if(node?.type === 'smart-storyboard') return node.storyboardChooser ? '脚本生成器' : (node.title || '分镜脚本');
     if(node?.type === 'smart-shot-table') return node.title || '分镜表';
     if(node?.type === 'smart-director-stage') return node.title || '导演台';
     // 2026-09-28 用户要求：上传节点标题统一显示「上传」
@@ -5187,6 +5189,12 @@ const STORYBOARD_NODE_DEFAULT_WIDTH = 420;
 const STORYBOARD_NODE_DEFAULT_HEIGHT = 220;
 const STORYBOARD_NODE_MIN_WIDTH = 300;
 const STORYBOARD_NODE_MIN_HEIGHT = 150;
+// 2026-11-03（用户要求：对齐 LibTV「脚本生成器」）：分镜脚本节点的空态（storyboardChooser）
+// 不再是原来那块小卡片，而是「居中建议卡 + 底部输入条」的完整输入面板，需要更高的默认框。
+const SCRIPT_GEN_DEFAULT_WIDTH = 420;
+const SCRIPT_GEN_DEFAULT_HEIGHT = 448;
+const SCRIPT_GEN_MIN_WIDTH = 340;
+const SCRIPT_GEN_MIN_HEIGHT = 360;
 const H3_NODE_DEFAULT_WIDTH = 380;
 const H3_NODE_DEFAULT_HEIGHT = 520;
 const H3_COMFY_WORKFLOW = 'custom/H3_Ref2VA_15s.json';
@@ -7026,14 +7034,22 @@ function imageLayout(images, scale=1, node=null){
         return {cols:1, rows:1, ...smartGroupLayoutSize(node), thumb:96, single:true};
     }
     if(node?.type === 'smart-prompt') return {cols:1, rows:1, ...promptNodeLayoutSize(node), thumb:96, single:true};
-    if(node?.type === 'smart-storyboard') return {
-        cols:1,
-        rows:1,
-        width:Math.round(Math.max(STORYBOARD_NODE_MIN_WIDTH, Number(node.w) || STORYBOARD_NODE_DEFAULT_WIDTH)),
-        height:Math.round(Math.max(STORYBOARD_NODE_MIN_HEIGHT, Number(node.h) || STORYBOARD_NODE_DEFAULT_HEIGHT)),
-        thumb:96,
-        single:true
-    };
+    if(node?.type === 'smart-storyboard') {
+        // 2026-11-03：空态（脚本生成器）是「建议卡 + 输入条」，需要比表格态更高的默认框
+        const chooser = node.storyboardChooser === true;
+        const defW = chooser ? SCRIPT_GEN_DEFAULT_WIDTH : STORYBOARD_NODE_DEFAULT_WIDTH;
+        const defH = chooser ? SCRIPT_GEN_DEFAULT_HEIGHT : STORYBOARD_NODE_DEFAULT_HEIGHT;
+        const minW = chooser ? SCRIPT_GEN_MIN_WIDTH : STORYBOARD_NODE_MIN_WIDTH;
+        const minH = chooser ? SCRIPT_GEN_MIN_HEIGHT : STORYBOARD_NODE_MIN_HEIGHT;
+        return {
+            cols:1,
+            rows:1,
+            width:Math.round(Math.max(minW, Number(node.w) || defW)),
+            height:Math.round(Math.max(minH, Number(node.h) || defH)),
+            thumb:96,
+            single:true
+        };
+    }
     if(node?.type === 'smart-shot-table') return {
         cols:1,
         rows:1,
@@ -23974,8 +23990,237 @@ function assetPromptLinesForText(text){
     });
 }
 
+/* ===== 2026-11-03 脚本生成器（对齐 LibTV 截图）=====
+   用户要求：分镜脚本节点的空态换成截图那种「居中建议卡 + 底部输入条」。
+   - 卡片：四行字形图标 + 「尝试：」+ 三条建议（剧本 / 视频参考 / 角色）
+   - 输入条：占位文案 + 右下角模型选择、输出语言、参考素材数、圆形发送键
+   - 生成完自动收起成原来的 12 字段分镜表（storyboardChooser → false）
+   - 输入内容只存在 node.scriptDraft 上，**不进节点 HTML 字符串**，
+     否则每次 render 都会判定节点脏、重建 DOM，输入焦点和光标会丢。
+   ================================================= */
+const SCRIPT_GEN_MODES = {
+    script: {
+        label: '剧本生成分镜脚本',
+        icon: 'align-left',
+        short: '剧本',
+        scaffold: '剧情梗概：\n\n人物与关系：\n\n风格与情绪：\n\n片长：30 秒'
+    },
+    video: {
+        label: '视频参考生成分镜脚本',
+        icon: 'clapperboard',
+        short: '视频参考',
+        scaffold: '参考视频：按参考视频的镜头节奏、运镜与调性改写成分镜脚本。\n\n需要保留的部分：\n\n补充要求：'
+    },
+    character: {
+        label: '角色生成分镜脚本',
+        icon: 'user-round',
+        short: '角色',
+        scaffold: '角色：\n\n场景：\n\n动作与情绪：\n\n片长：30 秒'
+    }
+};
+function scriptGenRefs(node){
+    if(!node?.id) return [];
+    const refs = [];
+    try{
+        refs.push(...upstreamReferenceImagesFor(node).filter(ref => ref?.url));
+    }catch(e){}
+    try{
+        (inputNodesFor(node) || []).forEach(input => {
+            (input?.images || []).forEach(item => { if(item?.url) refs.push(item); });
+            (input?.videos || []).forEach(item => { if(item?.url) refs.push(item); });
+        });
+    }catch(e){}
+    (node.manualInputRefs || []).forEach(item => { if(item?.url && !item.inputRowOnly && !item.composerOnly) refs.push(item); });
+    try{
+        return uniqueReferenceImages(refs.filter(ref => ref?.url));
+    }catch(e){
+        return refs.filter(ref => ref?.url);
+    }
+}
+function scriptGenModelSelectHtml(node){
+    const provider = resolveChatProviderId(node?.llmProvider || smartAgentProvider());
+    const model = resolveChatModel(node?.llmModel || smartAgentModel(provider), provider);
+    const providers = chatApiProviders();
+    if(!providers.length) return `<select class="scriptgen-model-select" data-scriptgen-model aria-label="模型"><option value="">未配置模型</option></select>`;
+    const groups = providers.map(p => {
+        const models = providerChatModels(p.id);
+        if(!models.length) return '';
+        return `<optgroup label="${escapeAttr(p.name || p.id)}">${models.map(item => `<option value="${escapeAttr(`${p.id}::${item}`)}"${p.id === provider && item === model ? ' selected' : ''}>${escapeHtml(item)}</option>`).join('')}</optgroup>`;
+    }).join('');
+    return `<select class="scriptgen-model-select" data-scriptgen-model aria-label="模型">${groups}</select>`;
+}
+function scriptGeneratorNodeHtml(node){
+    const mode = String(node?.scriptMode || '');
+    const generating = Boolean(node?.generating);
+    const refs = scriptGenRefs(node);
+    const suggestions = Object.entries(SCRIPT_GEN_MODES).map(([id, item]) => `<button type="button" class="scriptgen-suggest${mode === id ? ' active' : ''}" data-scriptgen-suggest="${escapeAttr(id)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`).join('');
+    const errorText = String(node?.scriptError || '').trim();
+    const refTip = refs.length ? `已接入 ${refs.length} 个参考素材（图片/视频）` : '把图片或视频节点连到本节点，生成时作为参考';
+    return `<div class="scriptgen-node" data-scriptgen-root="${escapeAttr(node.id)}">
+        <div class="scriptgen-scroll">
+            <div class="scriptgen-card${generating ? ' is-loading' : ''}">
+                <div class="scriptgen-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                <div class="scriptgen-try">尝试：</div>
+                ${suggestions}
+                ${generating ? `<div class="scriptgen-loading"><i data-lucide="loader-2"></i><span>正在生成分镜脚本…</span></div>` : ''}
+            </div>
+        </div>
+        <div class="scriptgen-composer${generating ? ' is-busy' : ''}">
+            <button type="button" class="scriptgen-expand" data-scriptgen-expand title="放大编辑分镜脚本" aria-label="放大编辑分镜脚本"><i data-lucide="maximize-2"></i></button>
+            <textarea class="scriptgen-input" data-scriptgen-input rows="2" spellcheck="false" placeholder="描述剧情或添加角色参考、视频参考等，为你生成分镜脚本"></textarea>
+            <div class="scriptgen-foot">
+                <label class="scriptgen-model" title="选择用于生成分镜脚本的大模型">
+                    <i data-lucide="dices" class="scriptgen-model-mark"></i>
+                    ${scriptGenModelSelectHtml(node)}
+                    <i data-lucide="chevron-down" class="scriptgen-model-caret"></i>
+                </label>
+                <div class="scriptgen-tools">
+                    <button type="button" class="scriptgen-tool${node?.scriptLang === 'en' ? ' active' : ''}" data-scriptgen-lang title="切换输出语言（中文 / English）" aria-label="切换输出语言"><i data-lucide="languages"></i></button>
+                    <span class="scriptgen-refs" title="${escapeAttr(refTip)}"><i data-lucide="zap"></i><b>${refs.length}</b></span>
+                    <button type="button" class="scriptgen-send" data-scriptgen-send title="生成分镜脚本（Enter）" aria-label="生成分镜脚本"${generating ? ' disabled' : ''}><i data-lucide="${generating ? 'loader-2' : 'arrow-up'}"></i></button>
+                </div>
+            </div>
+            ${errorText ? `<div class="scriptgen-error">${escapeHtml(errorText)}</div>` : ''}
+        </div>
+    </div>`;
+}
+function growScriptGenInput(input){
+    if(!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${Math.max(54, Math.min(126, input.scrollHeight || 54))}px`;
+}
+function scriptGeneratorApplySuggestion(nodeId, mode){
+    const node = nodes.find(item => item.id === nodeId && isStoryboardScriptNode(item));
+    const preset = SCRIPT_GEN_MODES[mode];
+    if(!node || !preset) return false;
+    node.scriptMode = mode;
+    if(!String(node.scriptDraft || '').trim()) node.scriptDraft = preset.scaffold;
+    render();
+    scheduleSave();
+    const input = world.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-scriptgen-input]`);
+    if(input){
+        input.value = String(node.scriptDraft || '');
+        growScriptGenInput(input);
+        input.focus();
+        const end = input.value.length;
+        try{ input.setSelectionRange(end, end); }catch(e){}
+    }
+    return true;
+}
+async function scriptGeneratorSend(nodeId){
+    const node = nodes.find(item => item.id === nodeId && isStoryboardScriptNode(item));
+    if(!node || node.generating) return false;
+    const input = world.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-scriptgen-input]`);
+    const text = String(input?.value || node.scriptDraft || '').trim();
+    if(!text){
+        toast('先描述剧情，或点一条「尝试」模板');
+        input?.focus?.();
+        return false;
+    }
+    node.scriptDraft = text;
+    node.scriptError = '';
+    node.sourceText = text;
+    const refs = scriptGenRefs(node);
+    if(refs.length) node.sourceRefs = refs;
+    // generateStoryboardScriptFromState 优先读弹窗里的输入框，这里同步一下，
+    // 否则弹窗上次留下的旧文本会盖掉节点输入条里刚写的内容。
+    if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = text;
+    const ok = await generateStoryboardScriptForNode(nodeId, {collapseChooser:true});
+    if(!ok){
+        node.scriptError = String(node.status || '').trim() && node.status !== '正在生成...'
+            ? node.status
+            : '生成失败，检查模型配置后重试';
+        render();
+        scheduleSave();
+    }
+    return ok;
+}
+function bindScriptGeneratorNodeControls(el, node){
+    if(!el || !node || node.storyboardChooser !== true) return;
+    const root = el.querySelector('[data-scriptgen-root]');
+    if(!root) return;
+    const live = () => nodes.find(item => item.id === node.id);
+    const input = root.querySelector('[data-scriptgen-input]');
+    if(input){
+        input.value = String(node.scriptDraft || '');
+        growScriptGenInput(input);
+        input.addEventListener('input', () => {
+            const target = live();
+            if(target) target.scriptDraft = input.value;
+            growScriptGenInput(input);
+        });
+        // 画布全局按键（Delete 删节点、空格平移等）不要吃到输入框里的内容
+        ['keydown', 'keyup', 'keypress'].forEach(type => input.addEventListener(type, e => e.stopPropagation()));
+        input.addEventListener('keydown', e => {
+            if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+                e.preventDefault();
+                scriptGeneratorSend(node.id);
+            }
+        });
+        input.addEventListener('blur', () => {
+            const target = live();
+            if(target && target.scriptDraft !== input.value){
+                target.scriptDraft = input.value;
+                scheduleSave();
+            }
+        });
+    }
+    root.querySelectorAll('[data-scriptgen-suggest]').forEach(btn => {
+        btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            scriptGeneratorApplySuggestion(node.id, btn.dataset.scriptgenSuggest || '');
+        });
+    });
+    const modelSelect = root.querySelector('[data-scriptgen-model]');
+    modelSelect?.addEventListener('mousedown', e => e.stopPropagation());
+    modelSelect?.addEventListener('change', () => {
+        const target = live();
+        const raw = String(modelSelect.value || '');
+        const sep = raw.indexOf('::');
+        if(!target || sep <= 0) return;
+        target.llmProvider = raw.slice(0, sep);
+        target.llmModel = raw.slice(sep + 2);
+        rememberLlmSelection(target.llmProvider, target.llmModel);
+        scheduleSave();
+    });
+    const langBtn = root.querySelector('[data-scriptgen-lang]');
+    langBtn?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = live();
+        if(!target) return;
+        target.scriptLang = target.scriptLang === 'en' ? 'zh' : 'en';
+        scheduleSave();
+        render();
+        toast(target.scriptLang === 'en' ? '分镜脚本语言：English' : '分镜脚本语言：中文');
+    });
+    const sendBtn = root.querySelector('[data-scriptgen-send]');
+    sendBtn?.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+    sendBtn?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        scriptGeneratorSend(node.id);
+    });
+    const expandBtn = root.querySelector('[data-scriptgen-expand]');
+    expandBtn?.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+    expandBtn?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = live();
+        const text = String(input?.value || '').trim();
+        if(target && text){
+            target.scriptDraft = text;
+            target.sourceText = text;
+        }
+        // 弹窗优先读自己的输入框，先同步过去，否则会用上次残留的旧文本
+        if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = text;
+        openStoryboardScriptModal(node.id);
+    });
+}
 function storyboardScriptNodePreviewHtml(node){
-    if(node.storyboardChooser){ return `<div class="storyboard-chooser-card"><div class="storyboard-chooser-icon">☰</div><div class="storyboard-chooser-title">脚本生成器</div><div class="storyboard-chooser-sub">尝试：</div><button data-storyboard-choice="script">☷ 剧本生成分镜脚本</button><button data-storyboard-choice="character">♙ 角色生成分镜脚本</button><button data-storyboard-choice="manual">▤ 自己编写分镜脚本</button></div>`; }
+    if(node.storyboardChooser){ return scriptGeneratorNodeHtml(node); }
     const rows = storyboardRowsForNode(node).slice(0, 5);
     return `<div class="storyboard-node-card">
         <div class="storyboard-node-toolbar">
@@ -24002,6 +24247,35 @@ function storyboardScriptNodePreviewHtml(node){
         <div class="storyboard-node-footer"><select class="storyboard-node-model" data-storyboard-model="${escapeAttr(node.id)}" aria-label="LLM模型"><option>LLM大模型</option><option>GLM-4</option><option>豆包</option></select><button type="button" class="storyboard-node-generate" data-storyboard-generate="${escapeAttr(node.id)}"><i data-lucide="sparkles"></i><span>生成</span></button></div>
     </div>`;
 }
+function createScriptGeneratorNode(x, y, options={}){
+    if(!options.skipUndo) pushUndo();
+    const node = ensureStoryboardNodeData({
+        id: uid('storyboard'),
+        type: 'smart-storyboard',
+        x: Math.round(Number(x) || 0),
+        y: Math.round(Number(y) || 0),
+        w: SCRIPT_GEN_DEFAULT_WIDTH,
+        h: SCRIPT_GEN_DEFAULT_HEIGHT,
+        title: '分镜脚本',
+        storyboardChooser: true,
+        scriptDraft: '',
+        scriptMode: '',
+        scriptLang: 'zh',
+        sourceText: '',
+        sourceRefs: [],
+        rows: [],
+        created_at: Date.now()
+    }, null);
+    nodes.push(node);
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId: '', index: -1};
+    if(!options.skipUndo){
+        render();
+        scheduleSave();
+    }
+    return node;
+}
 function createStoryboardScriptNodeFromSource(sourceNode, point, options={}){
     if(!sourceNode) return null;
     if(!options.skipUndo) pushUndo();
@@ -24010,12 +24284,15 @@ function createStoryboardScriptNodeFromSource(sourceNode, point, options={}){
     const node = ensureStoryboardNodeData({
         id:uid('storyboard'),
         type:'smart-storyboard',
-        x:Math.round((p.x || 0) - STORYBOARD_NODE_DEFAULT_WIDTH / 2),
-        y:Math.round((p.y || 0) - STORYBOARD_NODE_DEFAULT_HEIGHT / 2),
-        w:STORYBOARD_NODE_DEFAULT_WIDTH,
-        h:STORYBOARD_NODE_DEFAULT_HEIGHT,
+        x:Math.round((p.x || 0) - SCRIPT_GEN_DEFAULT_WIDTH / 2),
+        y:Math.round((p.y || 0) - SCRIPT_GEN_DEFAULT_HEIGHT / 2),
+        w:SCRIPT_GEN_DEFAULT_WIDTH,
+        h:SCRIPT_GEN_DEFAULT_HEIGHT,
         title:'分镜脚本',
         storyboardChooser:true,
+        scriptDraft:'',
+        scriptMode:'',
+        scriptLang:'zh',
         sourceNodeId:sourceNode.id,
         sourceLabel:String(sourceNode.title || '').trim() || sourceNode.type || '节点',
         sourceText:storyboardScriptSourceTextForNode(sourceNode),
@@ -24281,6 +24558,12 @@ async function generateStoryboardScriptFromState(){
         const refSummary = sourceRefs.length
             ? sourceRefs.map((ref, index) => `${index + 1}. ${ref.name || smartImageNameFromUrl(ref.url) || `参考图${index + 1}`}`).join('\n')
             : '无';
+        // 2026-11-03：脚本生成器输入条上的「尝试」模式 / 输出语言，跟着提示词一起送模型
+        const modeNode = nodes.find(item => item.id === state.nodeId);
+        const extraLines = [];
+        const modeLabel = SCRIPT_GEN_MODES[modeNode?.scriptMode]?.label;
+        if(modeLabel) extraLines.push(`创作方式：${modeLabel}`);
+        if(modeNode?.scriptLang === 'en') extraLines.push('输出语言：所有字段一律用英文撰写（JSON 的 key 保持不变）。');
         const result = await fetch('/api/llm/canvas', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -24298,6 +24581,7 @@ async function generateStoryboardScriptFromState(){
                     '7. 分镜提示词和视频运动提示词要可直接用于创作，像专业分镜表一样完整。',
                     '8. 如果有参考图，尽量让不同分镜继承参考图的视觉特征，并保持整体连贯。',
                     '9. 如果素材是产品、穿搭、饰品、手表或电商内容，要围绕卖点拆镜头，不要重复同一画面。',
+                    ...extraLines,
                     '',
                     `素材文本：\n${sourceText || '无'}`,
                     '',
@@ -24346,7 +24630,7 @@ async function generateStoryboardScriptFromState(){
     }
     return true;
 }
-async function generateStoryboardScriptForNode(nodeId, {openAfter=false}={}){
+async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collapseChooser=false}={}){
     const node = nodes.find(n => n.id === nodeId && isStoryboardScriptNode(n));
     if(!node) return false;
     ensureStoryboardNodeData(node, nodes.find(n => n.id === node.sourceNodeId) || null);
@@ -24356,7 +24640,9 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false}={}){
     const previousState = storyboardScriptState;
     storyboardScriptState = {
         nodeId:node.id,
-        sourceLabel:node.title || '分镜脚本',
+        // 脚本生成器空态的标题就是「脚本生成器」，不能拿它当脚本名；
+        // 让它走兜底「分镜脚本」，等模型返回 title 再改名。
+        sourceLabel:node.storyboardChooser ? '分镜脚本' : (node.title || '分镜脚本'),
         sourceText:node.sourceText || '',
         sourceRefs:Array.isArray(node.sourceRefs) ? node.sourceRefs.slice() : [],
         rows:normalizeStoryboardScriptRows(node.rows, node.sourceRefs || []).slice(0, 12),
@@ -24375,6 +24661,14 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false}={}){
     node.sourceText = finalState?.sourceText || node.sourceText || '';
     node.sourceRefs = Array.isArray(finalState?.sourceRefs) ? finalState.sourceRefs.slice() : node.sourceRefs;
     node.rows = normalizeStoryboardScriptRows(finalState?.rows || node.rows, node.sourceRefs || []).slice(0, 12);
+    // 脚本生成器 → 分镜表：生成成功才收起，失败时保留输入条让用户改完再试
+    if(collapseChooser && node.storyboardChooser && ok){
+        node.storyboardChooser = false;
+        node.scriptError = '';
+        node.status = node.status || '已生成';
+        node.w = Math.max(STORYBOARD_NODE_DEFAULT_WIDTH, Math.round(Number(node.w) || 0));
+        node.h = STORYBOARD_NODE_DEFAULT_HEIGHT;
+    }
     storyboardScriptState = previousState;
     render();
     scheduleSave();
@@ -28495,6 +28789,15 @@ function render(){
     // 用户正在提示词框(contenteditable)输入时,本次重渲染不要移动 composer:
     // 移动 DOM 节点会打断输入法合成会话,导致输入中断(即使保留焦点描边也接不上)。
     const promptHadFocus = document.activeElement === promptInput;
+    // 2026-11-03（脚本生成器）：节点里的 textarea 在 render 时会被 appendChild 挪一次，
+    // 浏览器会顺手 blur —— 用户输到一半的操作（保存/选中同步/生成进度）都会把光标弄丢。
+    // 这里先记下焦点和光标位置，等 DOM 摆好再原地恢复。
+    const scriptGenFocus = (() => {
+        const active = document.activeElement;
+        if(!active || typeof active.matches !== 'function' || !active.matches('[data-scriptgen-input]')) return null;
+        const nodeEl = active.closest('.image-node');
+        return { nodeId:nodeEl?.dataset?.id || '', start:active.selectionStart, end:active.selectionEnd };
+    })();
     const reusableNodes = new Map();
     const existingNodeEls = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
@@ -28597,7 +28900,7 @@ function render(){
         const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
             ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
             : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
-        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isDirectorStage ? 'director-stage-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
+        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isStoryboard && node.storyboardChooser ? 'script-generator-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isDirectorStage ? 'director-stage-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
             ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -28695,6 +28998,16 @@ function render(){
     });
     // 节点尺寸和位置先写入 DOM，再计算连线端点，避免改尺寸后线路仍使用旧边界。
     world.insertAdjacentHTML('beforeend', renderConnections());
+    // 2026-11-03：节点 appendChild 挪位会把里面 textarea 的焦点弄丢，挪完立刻恢复光标。
+    if(scriptGenFocus?.nodeId){
+        const input = world.querySelector(`.image-node[data-id="${CSS.escape(scriptGenFocus.nodeId)}"] [data-scriptgen-input]`);
+        if(input && document.activeElement !== input){
+            try{
+                input.focus({preventScroll:true});
+                if(Number.isInteger(scriptGenFocus.start) && Number.isInteger(scriptGenFocus.end)) input.setSelectionRange(scriptGenFocus.start, scriptGenFocus.end);
+            }catch(e){}
+        }
+    }
     // 2026-10-06 挂回端口拖拽临时连线（右拉菜单打开期间保持连线不断）
     if(portDragTempPath){
         world.querySelector('svg.connection-layer')?.appendChild(portDragTempPath);
@@ -30322,11 +30635,15 @@ function bindNodeEvents(){
             };
         }
         if(nodeForControls?.type === 'smart-storyboard') {
-            el.ondblclick = e => {
-                e.preventDefault();
-                e.stopPropagation();
-                openStoryboardScriptModal(id);
-            };
+            // 2026-11-03：空态（脚本生成器）双击不要弹大弹窗，否则输入条就白做了
+            if(!nodeForControls.storyboardChooser){
+                el.ondblclick = e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openStoryboardScriptModal(id);
+                };
+            }
+            bindScriptGeneratorNodeControls(el, nodeForControls);
         }
         if(nodeForControls?.type === 'smart-shot-table') bindShotTableNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-director-stage') bindDirectorStageNodeControls(el, nodeForControls);
@@ -45865,7 +46182,7 @@ function openCreateMenu(event, options={}){
     createMenuPoint = screenToWorld(event);
     const bounds = smartUsableScreenBounds(14);
     const w = 240;
-    const h = 620; // 2026-11-03 创建菜单新增「导演台」一行（原 432）
+    const h = 680; // 2026-11-03 创建菜单新增「脚本生成器」一行（620 → 680）
     const left = Math.max(bounds.left, Math.min(bounds.right - w, event.clientX + 8));
     const top = Math.max(bounds.top, Math.min(bounds.bottom - h, event.clientY + 8));
     createMenu.style.maxWidth = `${w}px`;
@@ -45893,6 +46210,7 @@ function createNodeFromMenu(type){
     if(type === 'prompt') created = createPromptNode(p.x - Math.round(PROMPT_NODE_DEFAULT_WIDTH / 2), p.y - Math.round(PROMPT_NODE_DEFAULT_HEIGHT / 2));
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
     else if(type === 'shotTable') created = createShotTableNode(p.x - Math.round(SHOT_TABLE_DEFAULT_WIDTH / 2), p.y - Math.round(SHOT_TABLE_DEFAULT_HEIGHT / 2));
+    else if(type === 'scriptGen') created = createScriptGeneratorNode(p.x - Math.round(SCRIPT_GEN_DEFAULT_WIDTH / 2), p.y - Math.round(SCRIPT_GEN_DEFAULT_HEIGHT / 2));
     else if(type === 'directorStage') created = createDirectorStageNode(p.x - Math.round(DIRECTOR_NODE_DEFAULT_WIDTH / 2), p.y - Math.round(DIRECTOR_NODE_DEFAULT_HEIGHT / 2));
     // 2026-09-20 双击菜单新增：图片 / 视频 / 音频(TTS) 直接建可运行的生成节点
     else if(type === 'image' || type === 'video'){

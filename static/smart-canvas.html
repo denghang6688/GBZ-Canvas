@@ -54,8 +54,8 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.03.20.202611031957">
-    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.03.20.202611031957">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.03.25.1793710074">
+    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.03.25.1793710074">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -198,6 +198,12 @@
                         <span class="create-card-icon"><i data-lucide="table-2"></i></span>
                         <span class="create-card-main"><span class="create-card-title">分镜表</span></span>
                         <span class="create-card-badge">6 列</span>
+                    </button>
+                    <!-- 2026-11-03（用户要求）：脚本生成器节点，空态「建议卡 + 输入条」，生成后变分镜脚本表 -->
+                    <button class="create-card" type="button" data-create-type="scriptGen">
+                        <span class="create-card-icon"><i data-lucide="file-text"></i></span>
+                        <span class="create-card-main"><span class="create-card-title">脚本生成器</span></span>
+                        <span class="create-card-badge">LLM</span>
                     </button>
                     <!-- 2026-11-03（用户要求）：3D 导演台节点，摆角色 / 摆机位 / 多视角截图 -->
                     <button class="create-card" type="button" data-create-type="directorStage">
@@ -1059,7 +1065,7 @@
     <div id="slashPeek" class="slash-peek" aria-hidden="true"></div>
     <!-- 大面板遮罩：点它收起。放 world 之外，展开时把 #world 提到 z-index 100 才不会连面板一起盖住 -->
     <div id="composerExpandMask" class="composer-expand-mask" hidden></div>
-    <script src="/static/js/smart-canvas.js?v=V26.11.03.20.202611031957"></script>
+    <script src="/static/js/smart-canvas.js?v=V26.11.03.25.1793710074"></script>
 </body>
 </html>
 
