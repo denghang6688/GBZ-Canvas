@@ -19812,6 +19812,50 @@ const DIRECTOR_PRIMITIVES = [
     {kind:'sphere', label:'球体'},
     {kind:'slab', label:'地台'}
 ];
+/* 人偶体型表：所有尺寸都是身高的比例，换体型只是换一行参数，不需要任何模型文件。
+   shoulder / hip 是肩宽 / 胯宽（米），head 是头高，arm / leg 是四肢半径，depth 是躯干厚度压缩。 */
+const DIRECTOR_BUILDS = [
+    {id:'male',   label:'标准男性', height:1.80, shoulder:0.44, hip:0.32, head:0.235, arm:0.052, leg:0.070, depth:0.72},
+    {id:'female', label:'标准女性', height:1.68, shoulder:0.36, hip:0.33, head:0.225, arm:0.045, leg:0.062, depth:0.70},
+    {id:'bulky',  label:'壮硕',     height:1.86, shoulder:0.56, hip:0.36, head:0.245, arm:0.064, leg:0.080, depth:0.88},
+    {id:'slim',   label:'修长',     height:1.88, shoulder:0.38, hip:0.30, head:0.230, arm:0.043, leg:0.060, depth:0.66},
+    {id:'elder',  label:'老者',     height:1.72, shoulder:0.40, hip:0.31, head:0.230, arm:0.048, leg:0.064, depth:0.74, lean:0.16},
+    {id:'teen',   label:'少年',     height:1.56, shoulder:0.36, hip:0.28, head:0.216, arm:0.044, leg:0.058, depth:0.70},
+    {id:'child',  label:'儿童',     height:1.16, shoulder:0.27, hip:0.23, head:0.200, arm:0.038, leg:0.050, depth:0.74},
+    {id:'chibi',  label:'二头身',   height:0.92, shoulder:0.34, hip:0.26, head:0.330, arm:0.054, leg:0.064, depth:0.84}
+];
+const DIRECTOR_COLORS = ['#F75353', '#4F8CF7', '#52C08A', '#F0B34E', '#B07BE8', '#E8ECF1', '#8D9AA8'];
+const DIRECTOR_POSES = [
+    {id:'stand', label:'站立'},
+    {id:'walk',  label:'行走'},
+    {id:'wave',  label:'挥手'},
+    {id:'raise', label:'举臂'}
+];
+// 姿势只存关节欧拉角，人偶是按关节层级搭的，换姿势不用重建几何
+const DIRECTOR_POSE_TABLE = {
+    stand: {},
+    walk: {legL:[-0.34, 0, 0], legR:[0.30, 0, 0], kneeL:[0.30, 0, 0], kneeR:[0.12, 0, 0], armL:[0.26, 0, 0.05], armR:[-0.28, 0, -0.05], elbowL:[0.22, 0, 0], elbowR:[0.18, 0, 0]},
+    wave: {armR:[0, 0, -2.30], elbowR:[-0.25, 0, -0.45], armL:[0.05, 0, 0.06]},
+    raise: {armL:[-0.15, 0, 1.15], armR:[-0.15, 0, -1.15], elbowL:[0, 0, 0.2], elbowR:[0, 0, -0.2]}
+};
+/* 预设机位：frame = 取景高度（米），az = 方位角（0 正面 / ±90 侧面 / 180 背后），el = 俯仰角（负数为仰拍） */
+const DIRECTOR_PRESETS = [
+    {id:'current',       label:'当前视角'},
+    {id:'front-wide',    label:'正面全景', frame:2.95, az:0,    el:6,  target:0.52},
+    {id:'front-medium',  label:'正面中景', frame:2.30, az:0,    el:4,  target:0.60},
+    {id:'front-close',   label:'正面特写', frame:0.80, az:0,    el:2,  target:0.90},
+    {id:'left-medium',   label:'左侧近景', frame:1.90, az:-80,  el:4,  target:0.62},
+    {id:'left-close',    label:'左侧特写', frame:0.80, az:-80,  el:2,  target:0.90},
+    {id:'right-medium',  label:'右侧中景', frame:1.90, az:80,   el:4,  target:0.62},
+    {id:'right-close',   label:'右侧近景', frame:0.80, az:80,   el:2,  target:0.90},
+    {id:'angle45-close', label:'45° 特写', frame:0.85, az:-45,  el:8,  target:0.88},
+    {id:'low-wide',      label:'低角度广角', frame:2.90, az:-18, el:-20, target:0.55},
+    {id:'low-medium',    label:'低角度仰拍', frame:1.90, az:12,  el:-16, target:0.60},
+    {id:'over-left',     label:'过肩镜头',  frame:1.50, az:158,  el:10, target:0.72, shoulder:0.28},
+    {id:'over-right',    label:'过肩（右）', frame:1.50, az:-158, el:10, target:0.72, shoulder:-0.28},
+    {id:'top-wide',      label:'俯拍全景',  frame:4.00, az:0,    el:55, target:0.50}
+];
+const DIRECTOR_DEFAULT_VIEW = {theta:0.66, phi:1.02, radius:8.8, target:[0, 0.85, 0]};
 let directorThreePromise = null;
 let directorStageEl = null;
 let directorStage = null;
@@ -19831,7 +19875,7 @@ function directorRatioValue(ratio){
 function directorStageData(node, create){
     if(!node) return null;
     if(!node.stage3d && create){
-        node.stage3d = {version:1, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[]};
+        node.stage3d = {version:2, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[], view:null};
     }
     const data = node.stage3d;
     if(!data) return null;
@@ -19840,7 +19884,36 @@ function directorStageData(node, create){
     if(!Array.isArray(data.shots)) data.shots = [];
     if(!data.ratio) data.ratio = '16:9';
     if(!data.mode) data.mode = 'director';
+    if(data.version !== 2) directorUpgradeStage(data);
     return data;
+}
+/* v1 → v2：老画布只是没有旋转/缩放/机位注视目标，补齐默认值即可，场景原样保留 */
+function directorUpgradeStage(data){
+    data.version = 2;
+    data.objects.forEach(obj => {
+        if(!Array.isArray(obj.position) || obj.position.length < 3) obj.position = [0, 0, 0];
+        if(!Array.isArray(obj.rotation) || obj.rotation.length < 3) obj.rotation = [0, 0, 0];
+        if(!Array.isArray(obj.scale) || obj.scale.length < 3) obj.scale = [1, 1, 1];
+        if(obj.kind === 'person') obj.build = obj.build || 'male';
+    });
+    data.cameras.forEach(cam => {
+        if(!Array.isArray(cam.position) || cam.position.length < 3) cam.position = [2.4, 1.6, 3.2];
+        if(!Array.isArray(cam.target) || cam.target.length < 3) cam.target = [0, 1.1, 0];
+        if(cam.fov == null) cam.fov = 40;
+        if(!cam.targetMode) cam.targetMode = 'manual';
+        if(cam.targetHeight == null) cam.targetHeight = 0.72;
+    });
+    return data;
+}
+function directorBuildMeta(buildId){
+    return DIRECTOR_BUILDS.find(item => item.id === buildId) || DIRECTOR_BUILDS[0];
+}
+function directorObjectHeight(obj){
+    if(!obj) return 1.8;
+    if(obj.kind === 'person') return directorBuildMeta(obj.build).height;
+    if(obj.kind === 'slab') return 0.1;
+    if(obj.kind === 'asset') return 1.8;
+    return 1;
 }
 function directorShotCount(node){
     return directorStageData(node)?.shots?.length || 0;
@@ -19881,7 +19954,7 @@ function createDirectorStageNode(x, y, options={}){
         w: Number(options.width) || DIRECTOR_NODE_DEFAULT_WIDTH,
         h: Number(options.height) || DIRECTOR_NODE_DEFAULT_HEIGHT,
         title: options.title || '导演台',
-        stage3d: options.stage3d || {version:1, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[]},
+        stage3d: options.stage3d || {version:2, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[], view:null},
         created_at: Date.now()
     };
     nodes.push(node);
@@ -19915,16 +19988,19 @@ function directorEnsureDom(){
                 <button class="director-toggle" type="button" data-director-grid>九宫格</button>
             </div>
             <div class="director-head-right">
+                <button class="director-ghost" type="button" data-director-reset-view><i data-lucide="undo-2"></i><span>重置视角</span></button>
                 <button class="director-shoot" type="button" data-director-shoot><i data-lucide="camera"></i><span>拍摄</span></button>
                 <button class="director-close" type="button" data-director-close aria-label="关闭">&times;</button>
             </div>
         </header>
         <div class="director-main">
             <aside class="director-rail">
-                <div class="director-rail-head">画布资产</div>
-                <div class="director-rail-list" data-director-rail></div>
-                <div class="director-rail-head">基础形体</div>
-                <div class="director-prims">${DIRECTOR_PRIMITIVES.map(item => `<button type="button" class="director-prim" data-director-prim="${item.kind}"><i data-lucide="${item.kind === 'sphere' ? 'circle' : item.kind === 'cylinder' ? 'cylinder' : item.kind === 'slab' ? 'square' : 'box'}"></i><span>${item.label}</span></button>`).join('')}</div>
+                <div class="director-rail-tabs">
+                    <button type="button" data-director-rail-tab="person" class="is-active">角色</button>
+                    <button type="button" data-director-rail-tab="camera">机位</button>
+                    <button type="button" data-director-rail-tab="prop">道具</button>
+                </div>
+                <div class="director-rail-body" data-director-rail></div>
             </aside>
             <div class="director-viewport" data-director-viewport>
                 <canvas class="director-canvas" data-director-canvas></canvas>
@@ -19935,7 +20011,16 @@ function directorEnsureDom(){
                     <i class="director-grid-h" style="top:66.666%"></i>
                     <span class="director-frame-label" data-director-frame-label></span>
                 </div>
-                <div class="director-tip">左键旋转 · 滚轮缩放 · 右键平移 · 拖动物体移动 · 点空白处取消选择</div>
+                <div class="director-labels" data-director-labels></div>
+                <div class="director-compass" data-director-compass aria-hidden="true">
+                    <svg viewBox="-26 -26 52 52">
+                        <circle cx="0" cy="0" r="19" fill="none" stroke="rgba(255,255,255,.10)"/>
+                        <line data-compass-axis="0" x1="0" y1="0" x2="0" y2="-15" stroke="#E24B4A" stroke-width="1.7" stroke-linecap="round"/>
+                        <line data-compass-axis="1" x1="0" y1="0" x2="13" y2="7" stroke="#639922" stroke-width="1.7" stroke-linecap="round"/>
+                        <line data-compass-axis="2" x1="0" y1="0" x2="-13" y2="7" stroke="#378ADD" stroke-width="1.7" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <div class="director-tip">左键旋转 · 滚轮缩放 · 右键平移 · 拖动物体或轴移动 · 点空白处取消选择</div>
             </div>
             <aside class="director-props" data-director-props></aside>
         </div>
@@ -19960,6 +20045,8 @@ function directorBindDom(wrap){
     wrap.addEventListener('click', e => {
         if(e.target === wrap){ closeDirectorStage(); return; }
         if(e.target.closest('[data-director-close]')){ closeDirectorStage(); return; }
+        const label = e.target.closest('[data-director-label]');
+        if(label){ directorSelectObject(label.dataset.directorLabel); return; }
         const mode = e.target.closest('[data-director-mode]');
         if(mode){ directorStage.data.mode = mode.dataset.directorMode; directorSyncChrome(); scheduleSave(); return; }
         const ratio = e.target.closest('[data-director-ratio]');
@@ -19970,30 +20057,58 @@ function directorBindDom(wrap){
             scheduleSave();
             return;
         }
+        if(e.target.closest('[data-director-reset-view]')){ directorResetView(); return; }
         if(e.target.closest('[data-director-shoot]')){ directorShoot(); return; }
+
+        const railTab = e.target.closest('[data-director-rail-tab]');
+        if(railTab){ directorStage.railTab = railTab.dataset.directorRailTab; directorSyncChrome(); return; }
+
+        const build = e.target.closest('[data-director-build]');
+        if(build){ directorAddPerson(build.dataset.directorBuild); return; }
+        const preset = e.target.closest('[data-director-preset]');
+        if(preset){ directorAddPresetCamera(preset.dataset.directorPreset); return; }
+
         if(e.target.closest('[data-director-add-cam]')){ directorAddCamera(); return; }
+        const camSelect = e.target.closest('[data-director-cam-select]');
+        if(camSelect){
+            directorStage.selectedCameraId = camSelect.dataset.directorCamSelect;
+            directorStage.selectedId = '';
+            directorApplyObjectSelection();
+            directorRenderProps();
+            return;
+        }
         const camUse = e.target.closest('[data-director-cam-use]');
         if(camUse){
             directorStage.data.activeCameraId = camUse.dataset.directorCamUse;
             directorStage.data.mode = 'camera';
+            directorStage.selectedCameraId = camUse.dataset.directorCamUse;
+            directorStage.selectedId = '';
+            directorApplyObjectSelection();
             directorSyncChrome();
             scheduleSave();
             return;
         }
         const camDel = e.target.closest('[data-director-cam-del]');
         if(camDel){
-            const id = camDel.dataset.directorCamDel;
-            directorStage.data.cameras = directorStage.data.cameras.filter(cam => cam.id !== id);
-            if(directorStage.data.activeCameraId === id) directorStage.data.activeCameraId = directorStage.data.cameras[0]?.id || '';
-            directorRemoveCameraMarker(id);
-            directorSyncChrome();
-            scheduleSave();
+            directorDeleteCamera(camDel.dataset.directorCamDel);
             return;
         }
         const asset = e.target.closest('[data-director-asset]');
         if(asset){ directorAddAssetObject(asset.dataset.directorAsset); return; }
         const prim = e.target.closest('[data-director-prim]');
         if(prim){ directorAddPrimitive(prim.dataset.directorPrim); return; }
+        const pose = e.target.closest('[data-director-pose]');
+        if(pose){
+            const obj = directorSelectedObject();
+            if(obj){
+                obj.poseId = pose.dataset.directorPose;
+                const root = directorStage.objectRoots.get(obj.id);
+                if(root) directorApplyPose(root, obj.poseId);
+                directorRenderProps();
+                scheduleSave();
+            }
+            return;
+        }
         if(e.target.closest('[data-director-obj-del]')){
             directorDeleteSelected();
             return;
@@ -20007,27 +20122,138 @@ function directorBindDom(wrap){
             if(Number.isFinite(index)) directorInsertShot(index);
         }
     });
+    wrap.addEventListener('dblclick', e => {
+        const label = e.target.closest('[data-director-label]');
+        if(!label) return;
+        e.preventDefault();
+        e.stopPropagation();
+        directorStartLabelRename(label.dataset.directorLabel);
+    });
     // 画布上有些浮层（视频截取、深度图等）在 window 捕获阶段就把 Escape 吞掉了，
     // 这里同样挂在捕获阶段（同节点后注册的监听仍会执行），保证 Esc 一定能关导演台。
     window.addEventListener('keydown', e => {
         if(!directorStageEl || directorStageEl.hidden) return;
-        if(e.key === 'Escape'){ e.preventDefault(); closeDirectorStage(); }
+        if(e.key === 'Escape'){
+            if(e.target.closest?.('.director-label-input')){ e.target.blur(); e.stopPropagation(); return; }
+            e.preventDefault();
+            closeDirectorStage();
+        }
     }, true);
     wrap.addEventListener('input', e => {
-        const input = e.target.closest('[data-director-prop]');
-        if(!input || !directorStage) return;
-        const obj = directorStage.data.objects.find(item => item.id === directorStage.selectedId);
-        if(!obj) return;
-        const value = Number(input.value);
-        if(!Number.isFinite(value)) return;
-        const key = input.dataset.directorProp;
-        if(key === 'px') obj.position[0] = value;
-        else if(key === 'pz') obj.position[2] = value;
-        else if(key === 'ry') obj.rotation[1] = value * Math.PI / 180;
-        else if(key === 's'){ obj.scale = [value, value, value]; }
-        directorApplyObjectTransform(obj);
-        scheduleSave();
+        if(!directorStage) return;
+        const propInput = e.target.closest('[data-director-prop]');
+        if(propInput){
+            const obj = directorSelectedObject();
+            if(!obj) return;
+            const value = Number(propInput.value);
+            if(!Number.isFinite(value)) return;
+            directorApplyObjectField(obj, propInput.dataset.directorProp, value);
+            return;
+        }
+        const nameInput = e.target.closest('[data-director-name]');
+        if(nameInput){
+            const obj = directorSelectedObject();
+            if(!obj) return;
+            obj.name = nameInput.value.slice(0, 24) || '未命名';
+            const title = wrap.querySelector('.director-prop-title b');
+            if(title) title.textContent = obj.name;
+            directorUpdateLabel(obj.id);
+            scheduleSave();
+            return;
+        }
+        const colorInput = e.target.closest('[data-director-color]');
+        if(colorInput){
+            const obj = directorSelectedObject();
+            if(!obj) return;
+            obj.color = colorInput.value;
+            directorApplyObjectColor(obj);
+            wrap.querySelectorAll('[data-director-color-swatch]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.directorColorSwatch === obj.color));
+            scheduleSave();
+            return;
+        }
+        const camField = e.target.closest('[data-director-cam-field]');
+        if(camField){
+            const cam = directorSelectedCamera();
+            if(!cam) return;
+            directorApplyCameraField(cam, camField.dataset.directorCamField, camField.value, camField);
+            return;
+        }
     });
+    wrap.addEventListener('change', e => {
+        if(!directorStage) return;
+        const target = e.target.closest('[data-director-cam-target]');
+        if(target){
+            const cam = directorSelectedCamera();
+            if(!cam) return;
+            if(target.value){
+                cam.targetMode = 'object';
+                cam.targetObjectId = target.value;
+                const obj = directorStage.data.objects.find(item => item.id === target.value);
+                const root = obj && directorStage.objectRoots.get(obj.id);
+                if(root) cam.target = [root.position.x, root.position.y + directorObjectHeight(obj) * 0.7, root.position.z];
+            }else{
+                cam.targetMode = 'manual';
+                cam.targetObjectId = '';
+            }
+            directorUpdateCameraMarker(cam);
+            directorRenderProps();
+            scheduleSave();
+        }
+    });
+}
+function directorSelectedObject(){
+    const st = directorStage;
+    if(!st) return null;
+    return st.data.objects.find(item => item.id === st.selectedId) || null;
+}
+function directorSelectedCamera(){
+    const st = directorStage;
+    if(!st) return null;
+    return st.data.cameras.find(item => item.id === st.selectedCameraId) || null;
+}
+function directorApplyObjectField(obj, key, value){
+    if(key === 'px') obj.position[0] = value;
+    else if(key === 'py') obj.position[1] = Math.max(0, value);
+    else if(key === 'pz') obj.position[2] = value;
+    else if(key === 'rx') obj.rotation[0] = value * Math.PI / 180;
+    else if(key === 'ry') obj.rotation[1] = value * Math.PI / 180;
+    else if(key === 'rz') obj.rotation[2] = value * Math.PI / 180;
+    else if(key === 'sx') obj.scale[0] = Math.max(0.05, value);
+    else if(key === 'sy') obj.scale[1] = Math.max(0.05, value);
+    else if(key === 'sz') obj.scale[2] = Math.max(0.05, value);
+    else if(key === 's') obj.scale = [Math.max(0.05, value), Math.max(0.05, value), Math.max(0.05, value)];
+    directorApplyObjectTransform(obj);
+    scheduleSave();
+}
+function directorApplyCameraField(cam, key, raw, input){
+    if(key === 'fov'){
+        cam.fov = Math.min(90, Math.max(10, Number(raw) || 40));
+        const badge = directorStageEl.querySelector('[data-director-cam-fov]');
+        if(badge) badge.textContent = `${Math.round(cam.fov)}°`;
+        const value = input?.closest('.director-slider-row')?.querySelector('b');
+        if(value) value.textContent = `${Math.round(cam.fov)}°`;
+        scheduleSave();
+        return;
+    }
+    if(key === 'name'){
+        cam.name = String(raw).slice(0, 20) || '机位';
+        const title = directorStageEl.querySelector('.director-prop-title b');
+        if(title) title.textContent = cam.name;
+        directorUpdateCameraMarker(cam);
+        directorRenderRail();
+        scheduleSave();
+        return;
+    }
+    const value = Number(raw);
+    if(!Number.isFinite(value)) return;
+    if(key === 'px') cam.position[0] = value;
+    else if(key === 'py') cam.position[1] = Math.max(0.12, value);
+    else if(key === 'pz') cam.position[2] = value;
+    else if(key === 'tx'){ cam.target[0] = value; cam.targetMode = 'manual'; }
+    else if(key === 'ty'){ cam.target[1] = value; cam.targetMode = 'manual'; }
+    else if(key === 'tz'){ cam.target[2] = value; cam.targetMode = 'manual'; }
+    directorUpdateCameraMarker(cam);
+    scheduleSave();
 }
 function directorSyncChrome(){
     const st = directorStage;
@@ -20044,60 +20270,151 @@ function directorSyncChrome(){
     if(frame) frame.classList.toggle('hide-grid', !data.grid);
     const label = wrap.querySelector('[data-director-frame-label]');
     if(label) label.textContent = data.ratio;
+    wrap.querySelectorAll('[data-director-rail-tab]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.directorRailTab === (st.railTab || 'person')));
     directorRenderRail();
     directorRenderProps();
     directorRenderShots();
+    directorRenderLabels();
     refreshIcons();
 }
 function directorRenderRail(){
     const wrap = directorStageEl;
     if(!wrap || !directorStage) return;
-    const list = wrap.querySelector('[data-director-rail]');
-    if(!list) return;
-    const assets = assetAllNodes();
-    if(!assets.length){
-        list.innerHTML = `<div class="director-rail-empty">画布里还没有资产<br>在分镜表「资产」里准备角色 / 场景 / 道具后再回来</div>`;
+    const host = wrap.querySelector('[data-director-rail]');
+    if(!host) return;
+    const tab = directorStage.railTab || 'person';
+    if(tab === 'camera'){
+        host.innerHTML = `<div class="director-rail-head">预设机位</div>
+            <div class="director-preset-grid">
+                ${DIRECTOR_PRESETS.map(item => `<button type="button" class="director-preset" data-director-preset="${item.id}">${item.label}</button>`).join('')}
+            </div>
+            <div class="director-rail-hint">选中角色再加机位，机位会自动看向角色；没选就是场景中心。加完直接进机位视角。</div>`;
         return;
     }
-    list.innerHTML = assets.map(node => {
-        const url = assetImageUrl(node);
-        const kind = assetKindMeta(node.assetMeta?.kind).label;
-        return `<button type="button" class="director-rail-item${url ? '' : ' is-empty'}" data-director-asset="${escapeAttr(node.id)}" title="${escapeAttr(url ? `${assetDisplayName(node)} · 加入场景` : '这个资产还没有设定图')}">
-            ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<i data-lucide="image-off"></i>`}
-            <span><b>${escapeHtml(assetDisplayName(node))}</b><em>${escapeHtml(kind)}</em></span>
-        </button>`;
-    }).join('');
+    if(tab === 'prop'){
+        const assets = assetAllNodes();
+        const assetHtml = assets.length
+            ? assets.map(node => {
+                const url = assetImageUrl(node);
+                const kind = assetKindMeta(node.assetMeta?.kind).label;
+                return `<button type="button" class="director-rail-item${url ? '' : ' is-empty'}" data-director-asset="${escapeAttr(node.id)}" title="${escapeAttr(url ? `${assetDisplayName(node)} · 加入场景` : '这个资产还没有设定图')}">
+                    ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<i data-lucide="image-off"></i>`}
+                    <span><b>${escapeHtml(assetDisplayName(node))}</b><em>${escapeHtml(kind)}</em></span>
+                </button>`;
+            }).join('')
+            : `<div class="director-rail-empty">画布里还没有资产。分镜表「资产」里准备角色 / 场景后再回来。</div>`;
+        host.innerHTML = `<div class="director-rail-head">画布资产</div>
+            <div class="director-rail-list">${assetHtml}</div>
+            <div class="director-rail-head">基础形体</div>
+            <div class="director-prims">${DIRECTOR_PRIMITIVES.map(item => `<button type="button" class="director-prim" data-director-prim="${item.kind}"><i data-lucide="${item.kind === 'sphere' ? 'circle' : item.kind === 'cylinder' ? 'cylinder' : item.kind === 'slab' ? 'square' : 'box'}"></i><span>${item.label}</span></button>`).join('')}</div>`;
+        return;
+    }
+    host.innerHTML = `<div class="director-rail-head">人偶</div>
+        <div class="director-build-list">
+            ${DIRECTOR_BUILDS.map(item => `<button type="button" class="director-build" data-director-build="${item.id}" title="加入场景：${item.label}">
+                <span class="director-build-figure" style="--build-h:${Math.round(item.height / 1.86 * 100)}%"><i></i></span>
+                <span class="director-build-text"><b>${item.label}</b><em>${item.height.toFixed(2)}m</em></span>
+            </button>`).join('')}
+        </div>
+        <div class="director-rail-hint">点一下就站到场景焦点旁边。选中后可改体型之外的一切：位置、朝向、缩放、颜色、姿势。</div>`;
+}
+function directorNumberField(label, key, value, step, scope){
+    const attr = scope === 'cam' ? `data-director-cam-field="${key}"` : `data-director-prop="${key}"`;
+    return `<label class="director-field"><span>${label}</span><input type="number" step="${step}" ${attr} value="${value}"></label>`;
+}
+function directorObjectPropsHtml(obj){
+    const box = () => `<div class="director-field-row">
+        ${directorNumberField('X', 'px', (obj.position[0] || 0).toFixed(2), 0.1)}
+        ${directorNumberField('Y', 'py', (obj.position[1] || 0).toFixed(2), 0.1)}
+        ${directorNumberField('Z', 'pz', (obj.position[2] || 0).toFixed(2), 0.1)}
+    </div>`;
+    const rot = () => `<div class="director-field-row">
+        ${directorNumberField('X', 'rx', Math.round((obj.rotation?.[0] || 0) * 180 / Math.PI), 5)}
+        ${directorNumberField('Y', 'ry', Math.round((obj.rotation?.[1] || 0) * 180 / Math.PI), 5)}
+        ${directorNumberField('Z', 'rz', Math.round((obj.rotation?.[2] || 0) * 180 / Math.PI), 5)}
+    </div>`;
+    const scl = `<div class="director-field-row">
+        ${directorNumberField('X', 'sx', (obj.scale?.[0] || 1).toFixed(2), 0.05)}
+        ${directorNumberField('Y', 'sy', (obj.scale?.[1] || 1).toFixed(2), 0.05)}
+        ${directorNumberField('Z', 'sz', (obj.scale?.[2] || 1).toFixed(2), 0.05)}
+    </div>`;
+    const kindLabel = obj.kind === 'person'
+        ? directorBuildMeta(obj.build).label
+        : (obj.kind === 'asset' ? (assetKindMeta(nodes.find(n => n.id === obj.assetId)?.assetMeta?.kind).label) : (DIRECTOR_PRIMITIVES.find(item => item.kind === obj.kind)?.label || '物体'));
+    const uniform = (obj.scale?.[0] || 1).toFixed(2);
+    const colors = DIRECTOR_COLORS.map(color => `<button type="button" class="director-swatch${obj.color === color ? ' is-active' : ''}" data-director-color="${color}" data-director-color-swatch="${color}" style="--swatch:${color}" aria-label="${color}"></button>`).join('');
+    const poses = obj.kind === 'person'
+        ? `<div class="director-field-label">姿势</div>
+           <div class="director-pose-row">${DIRECTOR_POSES.map(item => `<button type="button" class="director-pose${(obj.poseId || 'stand') === item.id ? ' is-active' : ''}" data-director-pose="${item.id}">${item.label}</button>`).join('')}</div>`
+        : '';
+    return `<div class="director-prop-title"><b>${escapeHtml(obj.name || '未命名物体')}</b><em>${escapeHtml(kindLabel)}</em></div>
+        <label class="director-row"><span>名称</span><input data-director-name value="${escapeAttr(obj.name || '')}" maxlength="24"></label>
+        <div class="director-field-label">位置</div>${box()}
+        <div class="director-field-label">旋转</div>${rot()}
+        <div class="director-field-label">缩放</div>${scl}
+        <div class="director-field-label">统一缩放</div>
+        <div class="director-slider-row">
+            <input type="range" min="0.3" max="2.4" step="0.01" data-director-prop="s" value="${uniform}">
+            <b data-director-scale-value>${uniform}</b>
+        </div>
+        <div class="director-field-label">颜色</div>
+        <div class="director-colors">${colors}<input type="color" class="director-color-input" data-director-color value="${escapeAttr(obj.color || DIRECTOR_COLORS[0])}" aria-label="自定义颜色"></div>
+        ${poses}
+        <button type="button" class="director-obj-del" data-director-obj-del>从场景移除</button>`;
+}
+function directorCameraPropsHtml(cam){
+    const fov = Math.round(cam.fov || 40);
+    const targets = directorStage.data.objects.filter(obj => obj.kind === 'person' || obj.kind === 'asset');
+    const trackValue = cam.targetMode === 'object' ? (cam.targetObjectId || '') : '';
+    return `<div class="director-prop-title"><b>${escapeHtml(cam.name)}</b><em>${cam.presetId ? (DIRECTOR_PRESETS.find(item => item.id === cam.presetId)?.label || '机位') : (cam.id === directorStage.data.activeCameraId ? '当前机位' : '机位')}</em></div>
+        <div class="director-preview"><canvas data-director-preview width="320" height="180"></canvas><span class="director-preview-tag">FOV <b data-director-cam-fov>${fov}°</b></span></div>
+        <label class="director-row"><span>名称</span><input data-director-cam-field="name" value="${escapeAttr(cam.name)}" maxlength="20"></label>
+        <div class="director-field-label">位置</div>
+        <div class="director-field-row">
+            ${directorNumberField('X', 'px', (cam.position[0] || 0).toFixed(2), 0.1, 'cam')}
+            ${directorNumberField('Y', 'py', (cam.position[1] || 1.6).toFixed(2), 0.1, 'cam')}
+            ${directorNumberField('Z', 'pz', (cam.position[2] || 0).toFixed(2), 0.1, 'cam')}
+        </div>
+        <div class="director-field-label">注视目标</div>
+        <select class="director-select" data-director-cam-target>
+            <option value=""${trackValue ? '' : ' selected'}>手动坐标</option>
+            ${targets.map(obj => `<option value="${escapeAttr(obj.id)}"${trackValue === obj.id ? ' selected' : ''}>${escapeHtml(obj.name || '物体')}</option>`).join('')}
+        </select>
+        <div class="director-field-row">
+            ${directorNumberField('X', 'tx', (cam.target?.[0] || 0).toFixed(2), 0.1, 'cam')}
+            ${directorNumberField('Y', 'ty', (cam.target?.[1] || 1).toFixed(2), 0.1, 'cam')}
+            ${directorNumberField('Z', 'tz', (cam.target?.[2] || 0).toFixed(2), 0.1, 'cam')}
+        </div>
+        <div class="director-field-label">视角角度（FOV）</div>
+        <div class="director-slider-row">
+            <input type="range" min="10" max="90" step="1" data-director-cam-field="fov" value="${fov}">
+            <b>${fov}°</b>
+        </div>
+        <div class="director-cam-actions">
+            <button type="button" class="director-ghost is-small" data-director-cam-use="${escapeAttr(cam.id)}">切到此机位</button>
+            <button type="button" class="director-obj-del is-small" data-director-cam-del="${escapeAttr(cam.id)}">删除机位</button>
+        </div>`;
 }
 function directorPropsHtml(){
     const st = directorStage;
     if(!st) return '';
     const data = st.data;
-    const cams = data.cameras.map(cam => `<div class="director-cam${cam.id === data.activeCameraId ? ' is-active' : ''}">
-        <button type="button" class="director-cam-name" data-director-cam-use="${escapeAttr(cam.id)}"><i data-lucide="video"></i><span>${escapeHtml(cam.name)}</span></button>
-        <button type="button" class="director-cam-del" data-director-cam-del="${escapeAttr(cam.id)}" aria-label="删除机位">&times;</button>
-    </div>`).join('');
-    const obj = data.objects.find(item => item.id === st.selectedId);
-    const props = obj ? `<div class="director-prop-name">${escapeHtml(obj.name || '未命名物体')}</div>
-        <div class="director-field-row">
-            <label class="director-field"><span>X</span><input type="number" step="0.1" data-director-prop="px" value="${(obj.position[0] || 0).toFixed(2)}"></label>
-            <label class="director-field"><span>Z</span><input type="number" step="0.1" data-director-prop="pz" value="${(obj.position[2] || 0).toFixed(2)}"></label>
-        </div>
-        <div class="director-field-row">
-            <label class="director-field"><span>朝向</span><input type="number" step="5" data-director-prop="ry" value="${Math.round((obj.rotation?.[1] || 0) * 180 / Math.PI)}"></label>
-            <label class="director-field"><span>缩放</span><input type="number" step="0.05" min="0.1" data-director-prop="s" value="${(obj.scale?.[0] || 1).toFixed(2)}"></label>
-        </div>
-        <button type="button" class="director-obj-del" data-director-obj-del>从场景移除</button>`
-        : `<div class="director-empty-note">选中场景里的角色或物体，可以在这里精确调位置和朝向</div>`;
-    return `<div class="director-panel-head"><span>机位</span><button type="button" data-director-add-cam>+ 添加</button></div>
-        <div class="director-cams">${cams || `<div class="director-empty-note">还没有机位。调好导演视角后点「添加」，把当前视角存成机位</div>`}</div>
-        <div class="director-panel-head"><span>属性</span></div>
-        <div class="director-props-body">${props}</div>`;
+    const obj = directorSelectedObject();
+    const cam = directorSelectedCamera();
+    const camList = data.cameras.map(item => `<button type="button" class="director-cam${item.id === data.activeCameraId ? ' is-active' : ''}${item.id === st.selectedCameraId ? ' is-selected' : ''}" data-director-cam-select="${escapeAttr(item.id)}">
+        <i data-lucide="video"></i><span>${escapeHtml(item.name)}</span><em>${Math.round(item.fov || 40)}°</em>
+    </button>`).join('');
+    const body = cam ? directorCameraPropsHtml(cam) : (obj ? directorObjectPropsHtml(obj) : `<div class="director-empty-note">选中场景里的角色、物体或机位，可以在这里精确调参数。</div>`);
+    return `<div class="director-props-body">${body}</div>
+        <div class="director-panel-head"><span>机位</span><button type="button" data-director-add-cam>+ 当前视角</button></div>
+        <div class="director-cams">${camList || `<div class="director-empty-note">还没有机位。左栏「机位」里有 14 个预设，一键就能加。</div>`}</div>`;
 }
 function directorRenderProps(){
     const wrap = directorStageEl;
-    if(!wrap) return;
+    if(!wrap || !directorStage) return;
     const host = wrap.querySelector('[data-director-props]');
-    if(host) host.innerHTML = directorPropsHtml();
+    if(!host) return;
+    host.innerHTML = directorPropsHtml();
     refreshIcons();
 }
 function directorRenderShots(){
@@ -20139,6 +20456,8 @@ async function openDirectorStage(nodeId){
         data,
         THREE,
         selectedId: data.objects[0]?.id || '',
+        selectedCameraId: '',
+        railTab: 'person',
         view: null,
         lightboxIndex: -1
     };
@@ -20192,12 +20511,30 @@ function directorBuildScene(){
     st.renderer = renderer;
     st.canvas = canvas;
     st.viewportEl = viewport;
+    // 机位预览用的离屏渲染器：右侧面板里的 canvas 直接 drawImage 过来，
+    // 免得每次重渲染属性面板都新建一个 WebGLRenderer（上下文很快会被耗光）
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = 320;
+    previewCanvas.height = 180;
+    st.previewRenderer = new THREE.WebGLRenderer({canvas:previewCanvas, antialias:true, alpha:false});
+    st.previewRenderer.setPixelRatio(1);
+    st.previewRenderer.setSize(320, 180, false);
+    st.previewRenderer.setClearColor(0x0b0d10, 1);
+    st.previewCamera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 220);
     st.camera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 220);
     st.raycaster = new THREE.Raycaster();
     st.pointer = new THREE.Vector2();
-    st.view = {theta:0.66, phi:1.02, radius:8.8, target:new THREE.Vector3(0, 0.85, 0)};
+    // 导演视角的机位记在节点里，下次打开还站在原地，不用重新找角度
+    const saved = st.data.view;
+    st.view = {
+        theta: saved?.theta ?? DIRECTOR_DEFAULT_VIEW.theta,
+        phi: saved?.phi ?? DIRECTOR_DEFAULT_VIEW.phi,
+        radius: saved?.radius ?? DIRECTOR_DEFAULT_VIEW.radius,
+        target: new THREE.Vector3(...(Array.isArray(saved?.target) ? saved.target : DIRECTOR_DEFAULT_VIEW.target))
+    };
     st.objectRoots = new Map();
     st.camRoots = new Map();
+    st.gizmo = directorBuildGizmo();
     st.data.objects.forEach(obj => directorAddMesh(obj));
     st.data.cameras.forEach(cam => directorAddCameraMarker(cam));
     if(!st.data.cameras.some(cam => cam.id === st.data.activeCameraId)){
@@ -20212,8 +20549,29 @@ function directorBuildScene(){
     st.ro = new ResizeObserver(() => directorResize());
     st.ro.observe(viewport);
 }
+function directorSetPointer(clientX, clientY){
+    const st = directorStage;
+    if(!st) return;
+    const f = directorFrameRect();
+    const rect = st.canvas.getBoundingClientRect();
+    st.pointer.set(
+        ((clientX - rect.left - f.x) / f.w) * 2 - 1,
+        -(((clientY - rect.top - f.y) / f.h) * 2 - 1)
+    );
+    st.raycaster.setFromCamera(st.pointer, st.camera);
+}
+function directorRayPlane(clientX, clientY, plane){
+    const st = directorStage;
+    directorSetPointer(clientX, clientY);
+    const point = new st.THREE.Vector3();
+    const hit = st.raycaster.ray.intersectPlane(plane, point);
+    return hit ? point : null;
+}
 function directorBindCanvas(canvas){
     const st = directorStage;
+    // 面板 DOM 是复用的，重复打开不能再挂一遍监听（否则轨道旋转会翻倍）
+    if(canvas.dataset.directorBound === '1') return;
+    canvas.dataset.directorBound = '1';
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     // 视口里的拖动不能冒到节点上（否则会连带拖动画布节点 / 触发选中）
     ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'dblclick', 'mousedown'].forEach(type => {
@@ -20228,6 +20586,25 @@ function directorBindCanvas(canvas){
             s.drag.kind = 'none';
             return;
         }
+        // 先让轴手柄吃掉点击，否则点在箭头上会变成「拖角色」
+        const axis = e.button === 0 ? directorPickAxis(e.clientX, e.clientY) : '';
+        if(axis){
+            const obj = directorSelectedObject();
+            const root = obj && s.objectRoots.get(obj.id);
+            if(obj && root){
+                const dir = new s.THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+                // 拖动平面必须「包含这条轴、并且尽量正对相机」；
+                // 法线取轴本身的话射线永远落在同一个坐标上，怎么拖都不动
+                const viewDir = s.camera.position.clone().sub(root.position).normalize();
+                const normal = viewDir.clone().addScaledVector(dir, -viewDir.dot(dir));
+                if(normal.lengthSq() < 1e-4) normal.copy(axis === 'y' ? new s.THREE.Vector3(1, 0, 0) : new s.THREE.Vector3(0, 1, 0));
+                normal.normalize();
+                const plane = new s.THREE.Plane().setFromNormalAndCoplanarPoint(normal, root.position.clone());
+                const startPoint = directorRayPlane(e.clientX, e.clientY, plane);
+                s.drag = {kind:'axis', axis, dir, x:e.clientX, y:e.clientY, moved:false, objId:obj.id, plane, startPoint, startPos:[...obj.position]};
+                return;
+            }
+        }
         const hitId = directorPick(e.clientX, e.clientY);
         if(hitId && e.button === 0){
             directorSelectObject(hitId);
@@ -20240,11 +20617,27 @@ function directorBindCanvas(canvas){
                 ? {x: root.position.x - point.x, z: root.position.z - point.z}
                 : {x:0, z:0};
             if(obj) s.drag.start = {pos:[...obj.position], rot:[...(obj.rotation || [0,0,0])]};
-        }else if(e.button === 2 || e.shiftKey){
+            return;
+        }
+        const camId = e.button === 0 ? directorPickCamera(e.clientX, e.clientY) : '';
+        if(camId){
+            s.drag.kind = 'none';
+            s.selectedCameraId = camId;
+            s.selectedId = '';
+            directorApplyObjectSelection();
+            directorRenderProps();
+            return;
+        }
+        if(e.button === 2 || e.shiftKey){
             s.drag.kind = 'pan';
         }else{
             s.drag.kind = 'orbit';
-            if(!hitId) directorSelectObject('');
+            if(!hitId){
+                s.selectedId = '';
+                s.selectedCameraId = '';
+                directorApplyObjectSelection();
+                directorRenderProps();
+            }
         }
     });
     canvas.addEventListener('pointermove', e => {
@@ -20268,6 +20661,17 @@ function directorBindCanvas(canvas){
                 obj.position[2] = Math.round((point.z + s.drag.offset.z) * 100) / 100;
                 root.position.set(obj.position[0], obj.position[1] || 0, obj.position[2]);
             }
+        }else if(s.drag.kind === 'axis'){
+            const obj = s.data.objects.find(item => item.id === s.drag.objId);
+            const root = s.objectRoots.get(s.drag.objId);
+            const point = directorRayPlane(e.clientX, e.clientY, s.drag.plane);
+            if(obj && root && point && s.drag.startPoint){
+                const index = s.drag.axis === 'x' ? 0 : (s.drag.axis === 'y' ? 1 : 2);
+                const delta = point.clone().sub(s.drag.startPoint).dot(s.drag.dir);
+                const next = Math.round((s.drag.startPos[index] + delta) * 100) / 100;
+                obj.position[index] = index === 1 ? Math.max(0, next) : next;
+                root.position.set(obj.position[0], obj.position[1] || 0, obj.position[2]);
+            }
         }
         s.drag.x = e.clientX;
         s.drag.y = e.clientY;
@@ -20275,7 +20679,7 @@ function directorBindCanvas(canvas){
     const endDrag = () => {
         const s = directorStage;
         if(!s || !s.drag) return;
-        if(s.drag.moved && s.drag.kind === 'object'){
+        if(s.drag.moved && (s.drag.kind === 'object' || s.drag.kind === 'axis')){
             directorRenderProps();
             scheduleSave();
         }
@@ -20290,6 +20694,18 @@ function directorBindCanvas(canvas){
         s.view.radius = Math.min(34, Math.max(2.4, s.view.radius * Math.exp(e.deltaY * 0.0012)));
         directorApplyOrbit();
     }, {passive:false});
+}
+function directorResetView(){
+    const st = directorStage;
+    if(!st) return;
+    st.view.theta = DIRECTOR_DEFAULT_VIEW.theta;
+    st.view.phi = DIRECTOR_DEFAULT_VIEW.phi;
+    st.view.radius = DIRECTOR_DEFAULT_VIEW.radius;
+    st.view.target.set(...DIRECTOR_DEFAULT_VIEW.target);
+    if(st.data.mode === 'camera') st.data.mode = 'director';
+    directorApplyOrbit();
+    directorSyncChrome();
+    scheduleSave();
 }
 function directorApplyOrbit(){
     const st = directorStage;
@@ -20315,26 +20731,12 @@ function directorPanByPixels(dx, dy){
 }
 function directorGroundPoint(clientX, clientY){
     const st = directorStage;
-    const THREE = st.THREE;
-    const f = directorFrameRect();
-    const rect = st.canvas.getBoundingClientRect();
-    const nx = ((clientX - rect.left - f.x) / f.w) * 2 - 1;
-    const ny = -(((clientY - rect.top - f.y) / f.h) * 2 - 1);
-    st.pointer.set(nx, ny);
-    st.raycaster.setFromCamera(st.pointer, st.camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const point = new THREE.Vector3();
-    const hit = st.raycaster.ray.intersectPlane(plane, point);
-    return hit ? point : null;
+    const plane = new st.THREE.Plane(new st.THREE.Vector3(0, 1, 0), 0);
+    return directorRayPlane(clientX, clientY, plane);
 }
 function directorPick(clientX, clientY){
     const st = directorStage;
-    const f = directorFrameRect();
-    const rect = st.canvas.getBoundingClientRect();
-    const nx = ((clientX - rect.left - f.x) / f.w) * 2 - 1;
-    const ny = -(((clientY - rect.top - f.y) / f.h) * 2 - 1);
-    st.pointer.set(nx, ny);
-    st.raycaster.setFromCamera(st.pointer, st.camera);
+    directorSetPointer(clientX, clientY);
     const roots = [...st.objectRoots.values()];
     if(!roots.length) return '';
     const hits = st.raycaster.intersectObjects(roots, true);
@@ -20343,6 +20745,28 @@ function directorPick(clientX, clientY){
     while(cursor && !cursor.userData.directorObjectId) cursor = cursor.parent;
     return cursor?.userData.directorObjectId || '';
 }
+function directorPickAxis(clientX, clientY){
+    const st = directorStage;
+    if(!st?.gizmo || !st.gizmo.visible) return '';
+    directorSetPointer(clientX, clientY);
+    const hits = st.raycaster.intersectObjects(st.gizmo.children, true);
+    if(!hits.length) return '';
+    let cursor = hits[0].object;
+    while(cursor && !cursor.userData.directorAxis) cursor = cursor.parent;
+    return cursor?.userData.directorAxis || '';
+}
+function directorPickCamera(clientX, clientY){
+    const st = directorStage;
+    const roots = [...st.camRoots.values()];
+    if(!roots.length) return '';
+    directorSetPointer(clientX, clientY);
+    const hits = st.raycaster.intersectObjects(roots, true);
+    if(!hits.length) return '';
+    let cursor = hits[0].object;
+    while(cursor && !cursor.userData.directorCameraId) cursor = cursor.parent;
+    return cursor?.userData.directorCameraId || '';
+}
+
 // 贴地的一团柔和暗影：比 shadowMap 稳（不挑灯、不炸面），摆位时能看出「站在地上」
 function directorContactShadowTexture(){
     const st = directorStage;
@@ -20364,6 +20788,126 @@ function directorContactShadowTexture(){
     st.contactShadowTexture = texture;
     return texture;
 }
+/* 程序化人偶：髋 → 胸 → 颈/头，胸 → 肩 → 上臂 → 肘 → 前臂，髋 → 大腿 → 膝 → 小腿。
+   关节存成 Group，换姿势只改 rotation，几何一次搭完不再重建。 */
+function directorBuildMannequin(obj){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const build = directorBuildMeta(obj.build);
+    const H = build.height;
+    const mat = new THREE.MeshStandardMaterial({color:new THREE.Color(obj.color || '#B9C2CF'), roughness:0.66, metalness:0.04});
+    const figure = new THREE.Group();
+    figure.userData.skinMaterial = mat;
+    const joints = {};
+    const capsule = (radius, length) => new THREE.Mesh(
+        new THREE.CapsuleGeometry(Math.max(0.01, radius), Math.max(0.02, length - radius * 2), 5, 12),
+        mat
+    );
+
+    const hipY = H * 0.50;
+    const torsoLen = H * 0.285;
+    const headR = build.head / 2;
+    const legLen = hipY - H * 0.052;
+    const thighLen = legLen * 0.52;
+    const shinLen = legLen - thighLen;
+
+    const chest = new THREE.Group();
+    chest.position.y = hipY;
+    chest.userData.rest = [build.lean || 0, 0, 0];
+    figure.add(chest);
+    joints.chest = chest;
+
+    const torso = capsule(build.shoulder * 0.36, torsoLen * 1.02);
+    torso.position.y = torsoLen * 0.5;
+    torso.scale.set(1, 1, build.depth);
+    chest.add(torso);
+
+    const pelvis = new THREE.Mesh(new THREE.SphereGeometry(H * 0.074, 16, 12), mat);
+    pelvis.scale.set(1.18, 0.76, build.depth * 0.95);
+    pelvis.position.y = H * 0.01;
+    chest.add(pelvis);
+
+    [-1, 1].forEach(side => {
+        const hip = new THREE.Group();
+        hip.position.set(side * build.hip * 0.38, -H * 0.01, 0);
+        hip.userData.rest = [0, 0, 0];
+        chest.add(hip);
+        joints[side < 0 ? 'legL' : 'legR'] = hip;
+
+        const thigh = capsule(build.leg, thighLen);
+        thigh.position.y = -thighLen / 2;
+        hip.add(thigh);
+
+        const knee = new THREE.Group();
+        knee.position.y = -thighLen;
+        knee.userData.rest = [0, 0, 0];
+        hip.add(knee);
+        joints[side < 0 ? 'kneeL' : 'kneeR'] = knee;
+
+        const shin = capsule(build.leg * 0.86, shinLen);
+        shin.position.y = -shinLen / 2;
+        knee.add(shin);
+
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(build.leg * 2.4, H * 0.05, build.leg * 5.6), mat);
+        foot.position.set(0, -shinLen - H * 0.016, build.leg * 1.5);
+        knee.add(foot);
+
+        const shoulder = new THREE.Group();
+        shoulder.position.set(side * build.shoulder * 0.5, torsoLen * 0.88, 0);
+        shoulder.userData.rest = [0, 0, side * -0.04];
+        chest.add(shoulder);
+        joints[side < 0 ? 'armL' : 'armR'] = shoulder;
+
+        const upper = capsule(build.arm, H * 0.19);
+        upper.position.y = -H * 0.095;
+        shoulder.add(upper);
+
+        const elbow = new THREE.Group();
+        elbow.position.y = -H * 0.19;
+        elbow.userData.rest = [0, 0, 0];
+        shoulder.add(elbow);
+        joints[side < 0 ? 'elbowL' : 'elbowR'] = elbow;
+
+        const fore = capsule(build.arm * 0.86, H * 0.18);
+        fore.position.y = -H * 0.09;
+        elbow.add(fore);
+
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(build.arm * 1.15, 10, 8), mat);
+        hand.position.y = -H * 0.18;
+        elbow.add(hand);
+    });
+
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(build.arm * 0.9, build.arm * 1.1, H * 0.045, 12), mat);
+    neck.position.y = torsoLen + H * 0.012;
+    chest.add(neck);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 22, 16), mat);
+    head.position.y = torsoLen + H * 0.05 + headR;
+    head.scale.set(0.92, 1.06, 0.98);
+    chest.add(head);
+    joints.head = head;
+
+    // 搭出来的总高和标称身高差一点点，整体缩一下，脚底正好落在 y=0
+    const rawHeight = hipY + torsoLen + H * 0.05 + headR * 2;
+    figure.scale.setScalar(H / rawHeight);
+    figure.userData.joints = joints;
+    return figure;
+}
+function directorApplyPose(root, poseId){
+    const joints = root?.userData.joints;
+    if(!joints) return;
+    const table = DIRECTOR_POSE_TABLE[poseId] || {};
+    Object.entries(joints).forEach(([name, joint]) => {
+        const rest = joint.userData?.rest || [0, 0, 0];
+        const pose = table[name] || [0, 0, 0];
+        joint.rotation.set(rest[0] + pose[0], rest[1] + pose[1], rest[2] + pose[2]);
+    });
+}
+function directorApplyObjectColor(obj){
+    const root = directorStage?.objectRoots.get(obj.id);
+    const mat = root?.userData.skinMaterial;
+    if(mat) mat.color.set(obj.color || '#99a2ac');
+}
 function directorAddMesh(obj){
     const st = directorStage;
     const THREE = st.THREE;
@@ -20374,15 +20918,22 @@ function directorAddMesh(obj){
     const scale = obj.scale || [1, 1, 1];
     group.scale.set(scale[0], scale[1], scale[2]);
     let mesh = null;
-    if(obj.kind === 'asset'){
+    if(obj.kind === 'person'){
+        mesh = directorBuildMannequin(obj);
+        group.add(mesh);
+        group.userData.joints = mesh.userData.joints;
+        group.userData.skinMaterial = mesh.userData.skinMaterial;
+        directorApplyPose(group, obj.poseId || 'stand');
+    }else if(obj.kind === 'asset'){
         const height = 1.8;
-        // 角色按「立牌」处理：底边贴地，宽高比随贴图走，摆位时一眼能看出谁站哪儿
+        // 场景里的参考图仍按「立牌」处理：底边贴地，宽高比随贴图走
         const mat = new THREE.MeshBasicMaterial({color:0x77808c, side:THREE.DoubleSide, transparent:true});
         mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
         mesh.position.y = height / 2;
         mesh.scale.set(height, height, 1);
         mesh.castShadow = true;
         group.add(mesh);
+        group.userData.skinMaterial = mat;
         const loader = new THREE.TextureLoader();
         loader.setCrossOrigin('anonymous');
         loader.load(obj.url, tex => {
@@ -20409,6 +20960,7 @@ function directorAddMesh(obj){
         mesh.receiveShadow = true;
         mesh.position.y = obj.kind === 'slab' ? 0.04 : 0.5;
         group.add(mesh);
+        group.userData.skinMaterial = mat;
     }
     const shadow = new THREE.Mesh(
         new THREE.PlaneGeometry(1, 1),
@@ -20416,13 +20968,25 @@ function directorAddMesh(obj){
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.004;
-    shadow.scale.set(obj.kind === 'asset' ? 1.7 : (obj.kind === 'slab' ? 3.4 : 1.5), obj.kind === 'asset' ? 1.0 : 1.5, 1);
+    const shadowSize = obj.kind === 'asset' ? 1.7 : (obj.kind === 'slab' ? 3.4 : (obj.kind === 'person' ? 1.25 : 1.5));
+    shadow.scale.set(shadowSize, obj.kind === 'slab' ? 1.5 : 1.2, 1);
     shadow.renderOrder = 1;
     group.add(shadow);
     group.userData.mainMesh = mesh;
     st.scene.add(group);
     st.objectRoots.set(obj.id, group);
     return group;
+}
+function directorCameraPoint(cam){
+    const st = directorStage;
+    const obj = cam.targetMode === 'object' ? st.data.objects.find(item => item.id === cam.targetObjectId) : null;
+    if(obj){
+        const root = st.objectRoots.get(obj.id);
+        const base = root ? root.position : {x:obj.position[0], y:obj.position[1] || 0, z:obj.position[2]};
+        return {x:base.x, y:base.y + directorObjectHeight(obj) * (cam.targetHeight || 0.72), z:base.z};
+    }
+    const target = cam.target || [0, 1, 0];
+    return {x:target[0] || 0, y:target[1] || 0, z:target[2] || 0};
 }
 function directorAddCameraMarker(cam){
     const st = directorStage;
@@ -20439,9 +21003,28 @@ function directorAddCameraMarker(cam){
     lens.rotation.x = Math.PI / 2;
     lens.position.z = 0.3;
     group.add(body, lens);
-    group.lookAt(new THREE.Vector3(cam.target?.[0] || 0, cam.target?.[1] || 1, cam.target?.[2] || 0));
+    const point = directorCameraPoint(cam);
+    group.lookAt(new THREE.Vector3(point.x, point.y, point.z));
     st.markerGroup.add(group);
     st.camRoots.set(cam.id, group);
+}
+function directorUpdateCameraMarker(cam){
+    const st = directorStage;
+    const group = st?.camRoots.get(cam.id);
+    if(!group) return;
+    group.position.set(cam.position?.[0] || 0, cam.position?.[1] || 1.6, cam.position?.[2] || 0);
+    const point = directorCameraPoint(cam);
+    group.lookAt(new st.THREE.Vector3(point.x, point.y, point.z));
+}
+function directorDeleteCamera(id){
+    const st = directorStage;
+    if(!st || !id) return;
+    st.data.cameras = st.data.cameras.filter(cam => cam.id !== id);
+    if(st.data.activeCameraId === id) st.data.activeCameraId = st.data.cameras[0]?.id || '';
+    if(st.selectedCameraId === id) st.selectedCameraId = '';
+    directorRemoveCameraMarker(id);
+    directorSyncChrome();
+    scheduleSave();
 }
 function directorRemoveCameraMarker(id){
     const st = directorStage;
@@ -20452,10 +21035,46 @@ function directorRemoveCameraMarker(id){
         st.camRoots.delete(id);
     }
 }
+function directorBuildGizmo(){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const group = new THREE.Group();
+    group.visible = false;
+    const axes = [
+        ['x', 0xE24B4A, new THREE.Vector3(1, 0, 0)],
+        ['y', 0x639922, new THREE.Vector3(0, 1, 0)],
+        ['z', 0x378ADD, new THREE.Vector3(0, 0, 1)]
+    ];
+    axes.forEach(([axis, color, dir]) => {
+        const mat = new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.96, depthTest:false});
+        const holder = new THREE.Group();
+        holder.userData.directorAxis = axis;
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.56, 8), mat);
+        shaft.position.copy(dir).multiplyScalar(0.28);
+        shaft.quaternion.copy(quat);
+        const head = new THREE.Mesh(new THREE.ConeGeometry(0.056, 0.17, 10), mat);
+        head.position.copy(dir).multiplyScalar(0.64);
+        head.quaternion.copy(quat);
+        holder.add(shaft, head);
+        group.add(holder);
+    });
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.4, 0.44, 48),
+        new THREE.MeshBasicMaterial({color:0x7fd4ff, transparent:true, opacity:0.75, side:THREE.DoubleSide, depthTest:false})
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    st.selectionRing = ring;
+    st.scene.add(ring);
+    st.scene.add(group);
+    return group;
+}
 function directorSelectObject(id){
     const st = directorStage;
     if(!st) return;
     st.selectedId = id || '';
+    if(id) st.selectedCameraId = '';
     directorApplyObjectSelection();
     directorRenderProps();
 }
@@ -20469,7 +21088,12 @@ function directorApplyObjectSelection(){
         st.selectionBox = null;
     }
     const root = st.objectRoots.get(st.selectedId);
-    if(!root) return;
+    if(!root){
+        if(st.gizmo) st.gizmo.visible = false;
+        if(st.selectionRing) st.selectionRing.visible = false;
+        directorSyncLabelSelection();
+        return;
+    }
     // 贴地阴影比物体本身大一圈，包进去会让选中框看起来歪掉
     const box = new st.THREE.BoxHelper(root.userData.mainMesh || root, 0x7fd4ff);
     box.material.depthTest = false;
@@ -20477,11 +21101,115 @@ function directorApplyObjectSelection(){
     box.material.opacity = 0.9;
     st.scene.add(box);
     st.selectionBox = box;
+    const obj = directorSelectedObject();
+    if(st.selectionRing){
+        st.selectionRing.visible = true;
+        st.selectionRing.position.set(root.position.x, root.position.y + 0.006, root.position.z);
+        const s = obj ? Math.max(0.5, obj.scale[0]) : 1;
+        st.selectionRing.scale.set(s, s, s);
+    }
+    // 选中后立刻把轴手柄搬过去，不然这一帧里它还停在上一个物体上，点不到
+    directorUpdateGizmo();
+    directorSyncLabelSelection();
+}
+function directorUpdateGizmo(){
+    const st = directorStage;
+    if(!st?.gizmo) return;
+    const root = st.objectRoots.get(st.selectedId);
+    if(!root || st.data.mode === 'camera'){
+        st.gizmo.visible = false;
+        return;
+    }
+    st.gizmo.visible = true;
+    st.gizmo.position.copy(root.position);
+    const dist = st.camera.position.distanceTo(root.position);
+    // 轴手柄按相机距离缩，远处也点得中；太大又会盖住人
+    st.gizmo.scale.setScalar(Math.max(0.5, dist * 0.105));
+    if(st.selectionRing){
+        st.selectionRing.position.set(root.position.x, root.position.y + 0.006, root.position.z);
+    }
 }
 function directorRefreshSelectionBox(){
     const st = directorStage;
     if(!st?.selectionBox) return;
     directorApplyObjectSelection();
+}
+// 只切选中态，不重建 DOM：重建会把正在双击改名的那个标签一起干掉
+function directorSyncLabelSelection(){
+    const st = directorStage;
+    const host = directorStageEl?.querySelector('[data-director-labels]');
+    if(!st || !host) return;
+    host.querySelectorAll('[data-director-label]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.directorLabel === st.selectedId);
+    });
+}
+function directorRenderLabels(){
+    const st = directorStage;
+    const host = directorStageEl?.querySelector('[data-director-labels]');
+    if(!st || !host) return;
+    const items = st.data.objects.filter(obj => obj.name && obj.kind !== 'slab');
+    host.innerHTML = items.map(obj => `<button type="button" class="director-label${obj.id === st.selectedId ? ' is-active' : ''}" data-director-label="${escapeAttr(obj.id)}">${escapeHtml(obj.name)}</button>`).join('');
+}
+function directorUpdateLabel(id){
+    const st = directorStage;
+    const obj = st?.data.objects.find(item => item.id === id);
+    const btn = directorStageEl?.querySelector(`[data-director-label="${id}"]`);
+    if(!obj || !btn) return;
+    if(btn.classList.contains('is-editing')) return;
+    btn.textContent = obj.name;
+}
+function directorStartLabelRename(id){
+    const st = directorStage;
+    const obj = st?.data.objects.find(item => item.id === id);
+    const btn = directorStageEl?.querySelector(`[data-director-label="${id}"]`);
+    if(!obj || !btn) return;
+    btn.classList.add('is-editing');
+    btn.innerHTML = `<input class="director-label-input" value="${escapeAttr(obj.name || '')}" maxlength="24">`;
+    const input = btn.querySelector('input');
+    input.focus();
+    input.select();
+    let done = false;
+    const commit = () => {
+        if(done) return;
+        done = true;
+        obj.name = input.value.trim().slice(0, 24) || obj.name || '未命名';
+        btn.classList.remove('is-editing');
+        directorRenderLabels();
+        directorRenderProps();
+        scheduleSave();
+    };
+    input.addEventListener('blur', commit, {once:true});
+    input.addEventListener('keydown', e => {
+        if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+        if(e.key === 'Escape'){ e.preventDefault(); done = true; btn.classList.remove('is-editing'); directorRenderLabels(); }
+    });
+}
+function directorUpdateLabels(){
+    const st = directorStage;
+    const host = directorStageEl?.querySelector('[data-director-labels]');
+    if(!st || !host || host.hidden) return;
+    const rect = st.canvas.getBoundingClientRect();
+    const viewRect = st.viewportEl.getBoundingClientRect();
+    const offsetX = rect.left - viewRect.left;
+    const offsetY = rect.top - viewRect.top;
+    const frame = directorFrameRect();
+    const vec = new st.THREE.Vector3();
+    st.data.objects.forEach(obj => {
+        const btn = host.querySelector(`[data-director-label="${obj.id}"]`);
+        if(!btn) return;
+        const root = st.objectRoots.get(obj.id);
+        if(!root){ btn.hidden = true; return; }
+        vec.set(root.position.x, root.position.y + directorObjectHeight(obj) * (obj.scale?.[1] || 1) + 0.16, root.position.z);
+        vec.project(st.camera);
+        if(vec.z > 1 || vec.z < -1){ btn.hidden = true; return; }
+        const x = frame.x + (vec.x * 0.5 + 0.5) * frame.w + offsetX;
+        const y = frame.y + (-vec.y * 0.5 + 0.5) * frame.h + offsetY;
+        const inside = x > frame.x - 4 && x < frame.x + frame.w + 4 && y > frame.y - 4 && y < frame.y + frame.h + 30;
+        btn.hidden = !inside;
+        if(!inside) return;
+        btn.style.left = `${Math.round(x)}px`;
+        btn.style.top = `${Math.round(y)}px`;
+    });
 }
 
 /* 画布节点上的入口：按钮 / 双击都打开导演台 */
@@ -20512,6 +21240,100 @@ function directorApplyObjectTransform(obj){
     const scale = obj.scale || [1, 1, 1];
     root.scale.set(scale[0], scale[1], scale[2]);
     directorRefreshSelectionBox();
+}
+function directorAddPerson(buildId){
+    const st = directorStage;
+    if(!st) return;
+    const data = st.data;
+    const n = data.objects.filter(obj => obj.kind === 'person').length;
+    const slots = [[-1.15, 0, 0.35], [1.15, 0, 0.35], [0, 0, -1.25], [-2.1, 0, -1.2], [2.1, 0, -1.2], [0, 0, 2.0]];
+    const slot = slots[n % slots.length];
+    const obj = {
+        id: uid('obj'),
+        kind: 'person',
+        build: buildId,
+        name: `角色${String.fromCharCode(65 + (n % 26))}`,
+        poseId: 'stand',
+        color: DIRECTOR_COLORS[n % DIRECTOR_COLORS.length],
+        position: [...slot],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1]
+    };
+    data.objects.push(obj);
+    directorAddMesh(obj);
+    st.selectedId = obj.id;
+    st.selectedCameraId = '';
+    directorApplyObjectSelection();
+    directorSyncChrome();
+    scheduleSave();
+}
+function directorAddPresetCamera(presetId){
+    const st = directorStage;
+    if(!st) return;
+    const preset = DIRECTOR_PRESETS.find(item => item.id === presetId);
+    if(!preset) return;
+    const THREE = st.THREE;
+    let cam = null;
+    if(presetId === 'current'){
+        const pos = st.camera.position;
+        const target = st.view.target;
+        cam = {
+            id: uid('cam'),
+            name: `机位${String(st.data.cameras.length + 1).padStart(2, '0')}`,
+            position: [Number(pos.x.toFixed(2)), Number(pos.y.toFixed(2)), Number(pos.z.toFixed(2))],
+            target: [Number(target.x.toFixed(2)), Number(target.y.toFixed(2)), Number(target.z.toFixed(2))],
+            targetMode: 'manual',
+            targetHeight: 0.72,
+            fov: 40,
+            presetId: 'current'
+        };
+    }else{
+        const focus = directorSelectedObject()
+            || (st.lastFocusId ? st.data.objects.find(item => item.id === st.lastFocusId) : null)
+            || st.data.objects.find(item => item.kind === 'person')
+            || st.data.objects[0]
+            || null;
+        if(focus) st.lastFocusId = focus.id;
+        const H = focus ? directorObjectHeight(focus) : 1.8;
+        const base = focus ? new THREE.Vector3(focus.position[0], focus.position[1] || 0, focus.position[2]) : new THREE.Vector3(0, 0, 0);
+        const targetY = base.y + H * (preset.target || 0.68);
+        const fov = 40;
+        // 取景高度 → 距离：距离 = 取景高度 / (2·tan(FOV/2))
+        const distance = preset.frame / (2 * Math.tan(fov * Math.PI / 360));
+        const az = preset.az * Math.PI / 180;
+        const el = preset.el * Math.PI / 180;
+        const pos = new THREE.Vector3(
+            base.x + Math.sin(az) * Math.cos(el) * distance,
+            Math.max(0.28, targetY + Math.sin(el) * distance),
+            base.z + Math.cos(az) * Math.cos(el) * distance
+        );
+        if(preset.shoulder){
+            // 过肩镜头从主角肩膀外侧看过去，机位横向让一点
+            pos.x += Math.cos(az) * preset.shoulder;
+            pos.z -= Math.sin(az) * preset.shoulder;
+        }
+        cam = {
+            id: uid('cam'),
+            name: `机位${String(st.data.cameras.length + 1).padStart(2, '0')}`,
+            position: [Number(pos.x.toFixed(2)), Number(pos.y.toFixed(2)), Number(pos.z.toFixed(2))],
+            target: [Number(base.x.toFixed(2)), Number(targetY.toFixed(2)), Number(base.z.toFixed(2))],
+            targetMode: focus && focus.kind === 'person' ? 'object' : 'manual',
+            targetObjectId: focus && focus.kind === 'person' ? focus.id : '',
+            targetHeight: preset.target || 0.68,
+            fov,
+            presetId
+        };
+    }
+    st.data.cameras.push(cam);
+    st.data.activeCameraId = cam.id;
+    st.data.mode = 'camera';
+    st.selectedCameraId = cam.id;
+    st.selectedId = '';
+    directorAddCameraMarker(cam);
+    directorApplyObjectSelection();
+    directorSyncChrome();
+    scheduleSave();
+    toast(`已添加「${preset.label}」机位`);
 }
 function directorAddAssetObject(assetId){
     const st = directorStage;
@@ -20573,7 +21395,6 @@ function directorDeleteSelected(){
 function directorAddCamera(){
     const st = directorStage;
     if(!st) return;
-    const THREE = st.THREE;
     const pos = st.camera.position.clone();
     const target = st.view.target.clone();
     const cam = {
@@ -20581,11 +21402,17 @@ function directorAddCamera(){
         name: `机位${String(st.data.cameras.length + 1).padStart(2, '0')}`,
         position: [Math.round(pos.x * 100) / 100, Math.round(pos.y * 100) / 100, Math.round(pos.z * 100) / 100],
         target: [Math.round(target.x * 100) / 100, Math.round(target.y * 100) / 100, Math.round(target.z * 100) / 100],
-        fov: 40
+        targetMode: 'manual',
+        targetHeight: 0.72,
+        fov: 40,
+        presetId: 'current'
     };
     st.data.cameras.push(cam);
     st.data.activeCameraId = cam.id;
+    st.selectedCameraId = cam.id;
+    st.selectedId = '';
     directorAddCameraMarker(cam);
+    directorApplyObjectSelection();
     directorSyncChrome();
     scheduleSave();
     toast(`已添加 ${cam.name}`);
@@ -20653,9 +21480,10 @@ function directorRenderFrame(){
     if(st.data.mode === 'camera'){
         const cam = st.data.cameras.find(item => item.id === st.data.activeCameraId);
         if(cam){
+            const point = directorCameraPoint(cam);
             camera.fov = cam.fov || 40;
             camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
-            camera.lookAt(new THREE.Vector3(cam.target[0], cam.target[1], cam.target[2]));
+            camera.lookAt(point.x, point.y, point.z);
         }
     }else{
         camera.fov = 45;
@@ -20680,6 +21508,43 @@ function directorRenderFrame(){
     renderer.setScissor(rect.x, glY, rect.w, rect.h);
     renderer.render(st.scene, camera);
     if(st.selectionBox) st.selectionBox.update();
+    directorUpdateGizmo();
+    directorUpdateLabels();
+    directorUpdateCompass();
+    directorRenderPreview();
+}
+function directorRenderPreview(){
+    const st = directorStage;
+    const cam = directorSelectedCamera();
+    const canvas = directorStageEl?.querySelector('[data-director-preview]');
+    if(!st?.previewRenderer || !cam || !canvas) return;
+    const p = st.previewCamera;
+    p.aspect = 16 / 9;
+    p.fov = cam.fov || 40;
+    const point = directorCameraPoint(cam);
+    p.position.set(cam.position[0], cam.position[1], cam.position[2]);
+    p.lookAt(point.x, point.y, point.z);
+    p.updateProjectionMatrix();
+    const helpers = [st.grid, st.markerGroup, st.selectionBox, st.gizmo, st.selectionRing].filter(Boolean);
+    const visibility = helpers.map(item => item.visible);
+    helpers.forEach(item => { item.visible = false; });
+    st.previewRenderer.render(st.scene, p);
+    helpers.forEach((item, index) => { item.visible = visibility[index]; });
+    const ctx = canvas.getContext('2d');
+    if(ctx) ctx.drawImage(st.previewRenderer.domElement, 0, 0, canvas.width, canvas.height);
+}
+function directorUpdateCompass(){
+    const st = directorStage;
+    const host = directorStageEl?.querySelector('[data-director-compass]');
+    if(!st || !host || !st.camera) return;
+    const THREE = st.THREE;
+    const inverse = new THREE.Matrix4().copy(st.camera.matrixWorld).invert();
+    const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    host.querySelectorAll('[data-compass-axis]').forEach((line, index) => {
+        const vec = new THREE.Vector3(...axes[index]).transformDirection(inverse);
+        line.setAttribute('x2', (vec.x * 15).toFixed(1));
+        line.setAttribute('y2', (-vec.y * 15).toFixed(1));
+    });
 }
 function directorShoot(){
     const st = directorStage;
@@ -20693,16 +21558,17 @@ function directorShoot(){
     const THREE = st.THREE;
     const shotCamera = new THREE.PerspectiveCamera(cam?.fov || 40, ratio, 0.1, 220);
     if(cam && st.data.mode === 'camera'){
+        const point = directorCameraPoint(cam);
         shotCamera.position.set(cam.position[0], cam.position[1], cam.position[2]);
-        shotCamera.lookAt(new THREE.Vector3(cam.target[0], cam.target[1], cam.target[2]));
+        shotCamera.lookAt(point.x, point.y, point.z);
     }else{
         shotCamera.position.copy(st.camera.position);
         shotCamera.lookAt(st.view.target);
     }
     shotCamera.updateProjectionMatrix();
     const renderer = st.renderer;
-    // 截图是给分镜用的，辅助线 / 机位线框 / 选中框不要进画面
-    const helpers = [st.grid, st.markerGroup, st.selectionBox].filter(Boolean);
+    // 截图是给分镜用的，辅助线 / 机位线框 / 选中框 / 轴手柄都不要进画面
+    const helpers = [st.grid, st.markerGroup, st.selectionBox, st.gizmo, st.selectionRing].filter(Boolean);
     const visibility = helpers.map(item => item.visible);
     helpers.forEach(item => { item.visible = false; });
     const prevRatio = renderer.getPixelRatio();
@@ -20807,6 +21673,7 @@ function directorDisposeStage(){
     if(st.ro) st.ro.disconnect();
     try{
         st.renderer?.dispose();
+        st.previewRenderer?.dispose();
         st.scene?.traverse(obj => {
             obj.geometry?.dispose?.();
             if(Array.isArray(obj.material)) obj.material.forEach(mat => mat.dispose());
@@ -20816,6 +21683,16 @@ function directorDisposeStage(){
     directorStage = null;
 }
 function closeDirectorStage(){
+    // 导演视角停在哪，写回节点，下次打开还是这个角度
+    if(directorStage?.view && directorStage.data){
+        const view = directorStage.view;
+        directorStage.data.view = {
+            theta: Number(view.theta.toFixed(3)),
+            phi: Number(view.phi.toFixed(3)),
+            radius: Number(view.radius.toFixed(2)),
+            target: [Number(view.target.x.toFixed(2)), Number(view.target.y.toFixed(2)), Number(view.target.z.toFixed(2))]
+        };
+    }
     directorCloseLightbox();
     if(directorStageEl) directorStageEl.hidden = true;
     directorDisposeStage();
