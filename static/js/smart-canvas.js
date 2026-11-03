@@ -6987,6 +6987,17 @@ function smartGroupImageGridLayout(node){
     return {cols, rows, visibleRows, width, height, thumb:baseThumb};
 }
 function imageLayout(images, scale=1, node=null){
+    // 2026-11-03：资产卡是固定尺寸的卡片，不跟图片比例走（内部图片用 object-fit 裁切）
+    if(node?.assetMeta){
+        return {
+            cols:1,
+            rows:1,
+            width:Math.round(Math.max(180, Number(node.w) || 240)),
+            height:Math.round(Math.max(200, Number(node.h) || 296)),
+            thumb:96,
+            single:true
+        };
+    }
     if(node?.type === 'workflow-group'){
         const raw = nodeRectRaw(node);
         return {cols:1, rows:1, width:raw.width, height:raw.height, thumb:96, single:true};
@@ -18990,6 +19001,7 @@ function shotTableNodeBodyHtml(node){
         <div class="shot-foot">
             <button class="shot-foot-btn" type="button" data-shot-add-row="1">+ 添加一行</button>
             <button class="shot-foot-btn shot-foot-ai" type="button" data-shot-ai="1" title="从剧本或画布上的分镜脚本拆镜">AI 拆镜</button>
+            <button class="shot-foot-btn shot-foot-assets" type="button" data-shot-assets="1" title="准备角色 / 场景 / 道具，全片复用">资产</button>
             <button class="shot-foot-btn shot-foot-compose" type="button" data-shot-compose="1" title="给每一镜合成一条视频提示词">合成提示词</button>
             <span class="shot-foot-meta">${shotTableFootMetaHtml(node)}</span>
             <button class="shot-foot-btn shot-foot-allprompts" type="button" data-shot-all-prompts="1" title="每一镜各建一个提示词节点">转提示词节点</button>
@@ -19303,6 +19315,13 @@ function bindShotTableNodeControls(el, node){
             e.preventDefault();
             e.stopPropagation();
             shotTableCreateAllPrompts(node);
+            return;
+        }
+        const assetBtn = e.target.closest?.('[data-shot-assets]');
+        if(assetBtn){
+            e.preventDefault();
+            e.stopPropagation();
+            openAssetStudio(node.id);
             return;
         }
         const composeBtn = e.target.closest?.('[data-shot-compose]');
@@ -19808,6 +19827,9 @@ function shotComposeAssembleLocal(node, row){
     const style = shotTableStyleGuide(node);
     if(style) parts.push(style);
     if(String(row.visual || '').trim()) parts.push(String(row.visual).trim().replace(/[。；;，,]$/, ''));
+    // 画面里点名的角色，把资产设定直接带进来（同一角色在多个镜头里只维护一份）
+    assetPromptLinesForText(`${row.visual || ''} ${row.voiceover || ''} ${row.onScreenText || ''}`)
+        .forEach(line => parts.push(line));
     if(String(row.shotSize || '').trim()) parts.push(`景别与运镜：${String(row.shotSize).trim()}`);
     if(String(row.motion || '').trim()) parts.push(`动作与运动：${String(row.motion).trim()}`);
     if(String(row.sound || '').trim()) parts.push(`声音氛围：${String(row.sound).trim()}`);
@@ -20066,7 +20088,8 @@ async function shotComposeSmartOne(node, row){
         `动作 / 运动：${String(row.motion || '').trim() || '无'}`,
         `音效参考：${String(row.sound || '').trim() || '无'}`,
         `屏幕文案：${String(row.onScreenText || '').trim() || '无'}`,
-        `旁白：${String(row.voiceover || '').trim() || '无'}`
+        `旁白：${String(row.voiceover || '').trim() || '无'}`,
+        `角色设定：${assetPromptLinesForText(`${row.visual || ''} ${row.voiceover || ''} ${row.onScreenText || ''}`).join('；') || '无'}`
     ];
     const result = await fetch('/api/llm/canvas', {
         method:'POST',
@@ -20144,6 +20167,838 @@ async function shotComposeRun(){
         scheduleSave();
         toast(`已停下，完成 ${done} 镜`);
     }
+}
+
+/* ===== 2026-11-03 分镜表 · 资产层（二期）=====
+   参考截图那条流水线：① 确认镜头 → ② 准备资产 → ③ 合成图片提示词。
+   资产卡就是画布上的图片节点（type 仍是 smart-image，靠 node.assetMeta 识别），
+   所以不需要给 /api/canvases 加新字段，资产也能直接连到提示词节点当参考图。
+   工作台只是同一批数据的看板，不是另一个数据源。 */
+const ASSET_CARD_WIDTH = 240;
+const ASSET_CARD_HEIGHT = 296;
+const ASSET_KINDS = [
+    {key:'character', label:'角色', unit:'个角色', empty:'生成或上传角色照', promptHint:'单人全身立绘，正面，中性灰背景，完整入画'},
+    {key:'scene', label:'场景', unit:'个场景', empty:'生成或上传场景图', promptHint:'场景全景空镜，无人物，透视自然'},
+    {key:'prop', label:'道具', unit:'个道具', empty:'生成或上传道具图', promptHint:'道具静物特写，中性背景，材质细节清晰'}
+];
+const ASSET_DEFAULT_SPEC = '画面比例 2:1，均匀柔光，35mm 胶片质感，高清电影级';
+const ASSET_DEFAULT_NEGATIVE = '多人同框、夸张表情、文字水印、额外配饰、透视畸变、低分辨率';
+let assetStudioState = null;
+let assetStudioEl = null;
+let assetEditorState = null;
+let assetEditorEl = null;
+let assetAddEl = null;
+let assetAddState = null;
+
+function assetKindMeta(kind){
+    return ASSET_KINDS.find(item => item.key === kind) || ASSET_KINDS[0];
+}
+function isAssetNode(node){
+    return Boolean(node && node.assetMeta && node.type === 'smart-image');
+}
+function assetAllNodes(kind){
+    return nodes.filter(node => isAssetNode(node) && (!kind || node.assetMeta.kind === kind));
+}
+function assetImageUrl(node){
+    const first = (node?.images || [])[0];
+    return first?.url || '';
+}
+function assetDisplayName(node){
+    return String(node?.assetMeta?.name || '').trim() || `未命名${assetKindMeta(node?.assetMeta?.kind).label}`;
+}
+function assetEnsureMeta(node, kind){
+    if(!node.assetMeta){
+        node.assetMeta = {
+            kind: kind || 'character',
+            name:'',
+            desc:'',
+            costume:'',
+            traits:'',
+            spec:ASSET_DEFAULT_SPEC,
+            negative:ASSET_DEFAULT_NEGATIVE,
+            style:'',
+            status:'empty'
+        };
+    }
+    return node.assetMeta;
+}
+// 生成用的正向提示词：风格句 → 设定 → 服装 → 特征 → 通用构图 → 镜头规范
+function assetPromptForNode(node){
+    const meta = node?.assetMeta || {};
+    const kind = assetKindMeta(meta.kind);
+    const parts = [];
+    [meta.style, meta.desc, meta.costume && `服装：${meta.costume}`, meta.traits && `特征：${meta.traits}`]
+        .map(item => String(item || '').trim())
+        .filter(Boolean)
+        .forEach(item => parts.push(item.replace(/[。；;，,]$/, '')));
+    parts.push(kind.promptHint);
+    if(String(meta.spec || '').trim()) parts.push(String(meta.spec).trim());
+    const negative = String(meta.negative || '').trim();
+    return parts.join('，') + (negative ? `。避免：${negative}` : '');
+}
+function assetReadyCount(kind){
+    return assetAllNodes(kind).filter(node => Boolean(assetImageUrl(node))).length;
+}
+// 资产卡落点：放在分镜表下方，按类别错开一行，避免叠在一起
+function assetDropPoint(kind, index = 0){
+    const table = nodes.find(node => node.type === 'smart-shot-table') || null;
+    const originX = table ? table.x : (viewportCenter().x - 400);
+    const originY = table ? table.y + (Number(table.h) || 280) + 80 : viewportCenter().y;
+    const row = Math.max(0, ASSET_KINDS.findIndex(item => item.key === kind));
+    const sameKindCount = assetAllNodes(kind).length;
+    return {
+        x: Math.round(originX + (sameKindCount + index) * (ASSET_CARD_WIDTH + 28)),
+        y: Math.round(originY + row * (ASSET_CARD_HEIGHT + 56))
+    };
+}
+function createAssetNode(kind, options = {}){
+    // 撤销快照必须在节点入画之前压，否则撤销只会回到"节点已在画布上"的状态
+    if(options.skipUndo !== true) pushUndo();
+    const point = options.point || assetDropPoint(kind);
+    const node = createNode(point.x, point.y, options.images || [], {skipUndo:true, skipRender:true, skipSave:true, select:false});
+    node.type = 'smart-image';
+    node.w = ASSET_CARD_WIDTH;
+    node.h = ASSET_CARD_HEIGHT;
+    node.assetMeta = {
+        kind,
+        name:String(options.name || ''),
+        desc:String(options.desc || ''),
+        costume:'',
+        traits:'',
+        spec:ASSET_DEFAULT_SPEC,
+        negative:ASSET_DEFAULT_NEGATIVE,
+        style:String(options.style || ''),
+        status:(options.images || []).length ? 'ready' : 'empty'
+    };
+    node.title = assetDisplayName(node);
+    if(options.select !== false) selectedId = node.id;
+    if(!options.skipRender) render();
+    if(!options.skipSave) scheduleSave();
+    return node;
+}
+function assetRenameFromMeta(node){
+    if(!node?.assetMeta) return;
+    node.title = assetDisplayName(node);
+}
+/* ---------- 资产卡（画布上的渲染） ---------- */
+function assetNodeBodyHtml(node){
+    const meta = node.assetMeta || {};
+    const kind = assetKindMeta(meta.kind);
+    const url = assetImageUrl(node);
+    const generating = meta.status === 'generating';
+    const desc = String(meta.desc || '').replace(/\s+/g, ' ').trim();
+    const media = url
+        ? `<img class="asset-card-img" src="${escapeAttr(url)}" alt="" draggable="false">`
+        : `<div class="asset-card-empty"><button class="asset-card-plus" type="button" data-asset-action="add" title="${escapeAttr(kind.empty)}"><i data-lucide="plus"></i></button><span>${escapeHtml(kind.empty)}</span></div>`;
+    return `<div class="asset-card${url ? ' has-image' : ' is-empty'}${generating ? ' is-generating' : ''}" data-asset-id="${escapeAttr(node.id)}">
+        <div class="asset-card-media" data-asset-action="edit">${media}${generating ? '<div class="asset-card-loading"><i data-lucide="loader-2"></i><span>生成中…</span></div>' : ''}</div>
+        <div class="asset-card-foot" data-asset-action="edit">
+            <b>${escapeHtml(assetDisplayName(node))}</b>
+            <span>${escapeHtml(desc || '还没有设定，点开补充')}</span>
+        </div>
+        <button class="asset-card-menu" type="button" data-asset-action="menu" title="编辑"><i data-lucide="ellipsis"></i></button>
+    </div>`;
+}
+/* ---------- 工作台 ---------- */
+function assetStudioProgress(shotNode){
+    const rows = shotNode && shotNode.type === 'smart-shot-table' ? shotTableRows(shotNode) : [];
+    const assets = assetAllNodes();
+    const ready = assets.filter(node => Boolean(assetImageUrl(node))).length;
+    const prompts = shotNode ? shotTablePromptReadyCount(shotNode) : 0;
+    return {
+        shots:{done:rows.length, total:rows.length},
+        assets:{done:ready, total:assets.length},
+        prompts:{done:prompts, total:rows.length}
+    };
+}
+function assetStudioStepHtml(index, label, progress, detail, done){
+    return `<div class="asset-step${done ? ' is-done' : ''}">
+        <i>${done ? '<b data-lucide="check"></b>' : index}</i>
+        <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></div>
+    </div>`;
+}
+function assetStudioDetail(progress){
+    const shots = progress.shots.total ? `${progress.shots.total} 个镜头已就绪` : '还没有镜头';
+    const assetGap = progress.assets.total - progress.assets.done;
+    const assets = progress.assets.total
+        ? `${progress.assets.done}/${progress.assets.total} 已生成${assetGap > 0 ? `，还差 ${assetGap} 个` : ''}`
+        : '还没有资产';
+    const prompts = progress.prompts.total
+        ? `${progress.prompts.done}/${progress.prompts.total} 已生成`
+        : '还没有镜头';
+    return {shots, assets, prompts};
+}
+function assetStudioCardHtml(node, kind){
+    const meta = node.assetMeta || {};
+    const url = assetImageUrl(node);
+    const generating = meta.status === 'generating';
+    const desc = String(meta.desc || '').replace(/\s+/g, ' ').trim();
+    return `<button class="asset-tile${url ? ' has-image' : ' is-empty'}${generating ? ' is-generating' : ''}" type="button" data-asset-open="${escapeAttr(node.id)}">
+        <span class="asset-tile-media">
+            ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<i data-lucide="plus"></i><em>${escapeHtml(kind.empty)}</em>`}
+            ${generating ? '<span class="asset-tile-loading"><i data-lucide="loader-2"></i></span>' : ''}
+        </span>
+        <span class="asset-tile-name">${escapeHtml(assetDisplayName(node))}</span>
+        ${desc ? `<span class="asset-tile-desc">${escapeHtml(desc)}</span>` : ''}
+    </button>`;
+}
+function assetStudioBodyHtml(){
+    const state = assetStudioState || {};
+    const shotNode = nodes.find(node => node.id === state.shotNodeId) || null;
+    const progress = assetStudioProgress(shotNode);
+    const detail = assetStudioDetail(progress);
+    const sections = ASSET_KINDS.map(kind => {
+        const list = assetAllNodes(kind.key);
+        return `<section class="asset-section" data-asset-section="${kind.key}">
+            <header><strong>${escapeHtml(kind.label)}</strong><em>${list.length}</em></header>
+            <div class="asset-row">
+                ${list.map(node => assetStudioCardHtml(node, kind)).join('')}
+                <button class="asset-add-tile" type="button" data-asset-add="${kind.key}"><i data-lucide="plus"></i><span>添加</span></button>
+            </div>
+        </section>`;
+    }).join('');
+    const style = shotNode ? shotTableStyleGuide(shotNode) : '';
+    return `<div class="asset-steps">
+            ${assetStudioStepHtml(1, '确认镜头', progress.shots, detail.shots, progress.shots.total > 0)}
+            ${assetStudioStepHtml(2, '准备资产', progress.assets, detail.assets, progress.assets.total > 0 && progress.assets.done >= progress.assets.total)}
+            ${assetStudioStepHtml(3, '合成图片提示词', progress.prompts, detail.prompts, progress.prompts.total > 0 && progress.prompts.done >= progress.prompts.total)}
+        </div>
+        <div class="asset-style-bar">
+            <label>全局风格</label>
+            <input type="text" class="asset-style-input" spellcheck="false" placeholder="例：盛唐古风，电影级写实真人，暖金与朱红主色调，高对比度，伦勃朗光" value="${escapeAttr(style)}">
+        </div>
+        <div class="asset-sections">${sections}</div>`;
+}
+function assetStudioNoteText(){
+    const missing = assetAllNodes().filter(node => !assetImageUrl(node));
+    if(!missing.length) return assetAllNodes().length ? '所有资产都有设定图了，可以继续合成提示词。' : '还没有资产，先加角色、场景或道具。';
+    const counts = ASSET_KINDS.map(kind => {
+        const count = missing.filter(node => node.assetMeta.kind === kind.key).length;
+        return count ? `${count} ${kind.unit}` : '';
+    }).filter(Boolean);
+    return `检测到有 ${counts.join('、')} 没有设定图，您可以手动上传或 AI 批量生成`;
+}
+let assetGlobalKeysBound = false;
+// 浮层里的输入框拿不到 Escape（监听在各自容器上），这里统一收口：
+// Escape 关最上层，Delete/Backspace 不要在浮层打开时删掉背后的节点。
+function assetBindGlobalKeys(){
+    if(assetGlobalKeysBound) return;
+    assetGlobalKeysBound = true;
+    document.addEventListener('keydown', e => {
+        const editorOpen = assetEditorEl && !assetEditorEl.hidden;
+        const addOpen = assetAddEl && !assetAddEl.hidden;
+        const studioOpen = assetStudioEl && !assetStudioEl.hidden;
+        if(!editorOpen && !addOpen && !studioOpen) return;
+        if(e.key === 'Escape'){
+            if(addOpen){ closeAssetAddPanel(); e.stopPropagation(); e.preventDefault(); return; }
+            if(editorOpen){ closeAssetEditor(); e.stopPropagation(); e.preventDefault(); return; }
+            if(studioOpen){ closeAssetStudio(); e.stopPropagation(); e.preventDefault(); }
+            return;
+        }
+        const tag = String(e.target?.tagName || '').toLowerCase();
+        const typing = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable;
+        if(!typing && (e.key === 'Delete' || e.key === 'Backspace')){
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, true);
+}
+function assetStudioEnsureDom(){
+    if(assetStudioEl && document.body.contains(assetStudioEl)) return assetStudioEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'asset-studio-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<section class="asset-studio" role="dialog" aria-modal="true" aria-label="准备资产">
+        <header class="asset-studio-head">
+            <div class="asset-studio-title"><strong>准备资产</strong><span>角色 / 场景 / 道具，只写一次，全片复用</span></div>
+            <button class="asset-studio-close" type="button" title="关闭" aria-label="关闭" data-asset-studio-close="1">&times;</button>
+        </header>
+        <div class="asset-studio-body"></div>
+        <footer class="asset-studio-foot">
+            <span class="asset-studio-note"></span>
+            <button class="asset-studio-batch" type="button" data-asset-gen-all="1">一键生成所有资产</button>
+        </footer>
+    </section>`;
+    document.body.appendChild(wrap);
+    assetStudioEl = wrap;
+    wrap.addEventListener('mousedown', e => {
+        if(e.target === wrap || e.target.closest('[data-asset-studio-close]')) closeAssetStudio();
+    });
+    wrap.addEventListener('click', e => {
+        const open = e.target.closest('[data-asset-open]');
+        if(open){ openAssetEditor(open.dataset.assetOpen); return; }
+        const add = e.target.closest('[data-asset-add]');
+        if(add){ openAssetAddPanel(add.dataset.assetAdd); return; }
+        if(e.target.closest('[data-asset-gen-all]')){ assetGenerateAllMissing(); return; }
+    });
+    wrap.addEventListener('input', e => {
+        if(!e.target.classList.contains('asset-style-input')) return;
+        const shotNode = nodes.find(node => node.id === assetStudioState?.shotNodeId);
+        if(!shotNode) return;
+        shotNode.styleGuide = String(e.target.value || '');
+        scheduleSave();
+    });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape' && !assetEditorEl?.hidden){ closeAssetEditor(); } });
+    return wrap;
+}
+function assetStudioRefresh(){
+    if(!assetStudioEl || assetStudioEl.hidden) return;
+    const body = assetStudioEl.querySelector('.asset-studio-body');
+    if(body) body.innerHTML = assetStudioBodyHtml();
+    const note = assetStudioEl.querySelector('.asset-studio-note');
+    if(note) note.textContent = assetStudioNoteText();
+    const batch = assetStudioEl.querySelector('.asset-studio-batch');
+    if(batch){
+        const missing = assetAllNodes().filter(node => !assetImageUrl(node)).length;
+        batch.disabled = !missing || Boolean(assetStudioState?.batchRunning);
+        // 批量生成时按钮文字由 setLabel() 逐帧改成「生成中 3/5」，这里不能覆盖回去
+        if(!assetStudioState?.batchRunning) batch.textContent = '一键生成所有资产';
+        else if(!/生成中/.test(batch.textContent || '')) batch.textContent = '生成中…';
+    }
+    refreshIcons();
+}
+function openAssetStudio(shotNodeId){
+    assetBindGlobalKeys();
+    const el = assetStudioEnsureDom();
+    assetStudioState = {shotNodeId:shotNodeId || nodes.find(node => node.type === 'smart-shot-table')?.id || '', batchRunning:false};
+    el.hidden = false;
+    document.body.classList.add('asset-studio-open');
+    assetStudioRefresh();
+}
+function closeAssetStudio(){
+    if(assetStudioEl) assetStudioEl.hidden = true;
+    document.body.classList.remove('asset-studio-open');
+    if(assetStudioState) assetStudioState.batchRunning = false;
+    assetStudioState = null;
+}
+// 画布重绘时，若工作台开着就同步刷新（资产可能刚生成完）
+function assetRefreshSurfaces(){
+    if(assetStudioEl && !assetStudioEl.hidden) assetStudioRefresh();
+    if(assetEditorEl && !assetEditorEl.hidden) assetEditorRefresh();
+}
+
+/* ---------- 资产编辑面板（右侧抽屉） ---------- */
+const ASSET_EDITOR_FIELDS = [
+    {key:'desc', label:'概述', type:'textarea', rows:3, placeholder:'年龄、身份、气质，一句话说清这个角色是什么样的'},
+    {key:'costume', label:'服装', type:'textarea', rows:2, placeholder:'材质、颜色、版型、配饰'},
+    {key:'traits', label:'特征', type:'textarea', rows:2, placeholder:'发型、妆容、体型、标志性细节'},
+    {key:'spec', label:'镜头规范', type:'textarea', rows:4, placeholder:'构图、光线、比例、禁止项'},
+    {key:'negative', label:'负面提示词', type:'textarea', rows:2, placeholder:'不要出现的东西，用顿号分隔'}
+];
+function assetEditorBodyHtml(node){
+    const meta = node.assetMeta || {};
+    const kind = assetKindMeta(meta.kind);
+    const url = assetImageUrl(node);
+    const fields = ASSET_EDITOR_FIELDS.map(field => `<label class="asset-field">
+        <span>${escapeHtml(field.label)}</span>
+        <textarea data-asset-field="${field.key}" rows="${field.rows}" spellcheck="false" placeholder="${escapeAttr(field.placeholder || '')}">${escapeHtml(String(meta[field.key] || ''))}</textarea>
+    </label>`).join('');
+    return `<div class="asset-editor-block">
+            <span class="asset-editor-label">${escapeHtml(kind.label)}形象</span>
+            <div class="asset-editor-photo${url ? ' has-image' : ''}">
+                ${url
+                    ? `<img src="${escapeAttr(url)}" alt="" draggable="false"><div class="asset-editor-photo-actions"><button type="button" data-asset-regen="1">重新生成</button><button type="button" data-asset-upload="1">替换</button></div>`
+                    : `<div class="asset-editor-photo-empty"><i data-lucide="plus"></i><span>生成或上传${escapeHtml(kind.label)}照</span></div><div class="asset-editor-photo-actions"><button type="button" data-asset-regen="1">AI 生成</button><button type="button" data-asset-upload="1">本地上传</button></div>`}
+            </div>
+            <label class="asset-field">
+                <span>${escapeHtml(kind.label)}名称</span>
+                <input type="text" data-asset-field="name" value="${escapeAttr(String(meta.name || ''))}" placeholder="例：唐代沈砚朗" spellcheck="false">
+            </label>
+        </div>
+        <div class="asset-editor-block">
+            <span class="asset-editor-label">${escapeHtml(kind.label)}描述</span>
+            ${fields}
+        </div>
+        <div class="asset-editor-block">
+            <span class="asset-editor-label">其他项目风格</span>
+            <label class="asset-field">
+                <span>全片风格，注入生成提示词</span>
+                <textarea data-asset-field="style" rows="2" spellcheck="false" placeholder="留空则沿用画布上的全局风格">${escapeHtml(String(meta.style || ''))}</textarea>
+            </label>
+        </div>
+        <div class="asset-editor-tip">这里的设定会写进每一镜的生成提示词；同一角色在多个镜头里只维护这一份。</div>`;
+}
+function assetEditorEnsureDom(){
+    if(assetEditorEl && document.body.contains(assetEditorEl)) return assetEditorEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'asset-editor-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<aside class="asset-editor" role="dialog" aria-modal="true" aria-label="编辑资产">
+        <header class="asset-editor-head">
+            <strong class="asset-editor-title">编辑资产</strong>
+            <button class="asset-editor-close" type="button" title="关闭" aria-label="关闭" data-asset-editor-close="1">&times;</button>
+        </header>
+        <div class="asset-editor-body"></div>
+        <footer class="asset-editor-foot">
+            <button class="asset-editor-delete" type="button" data-asset-delete="1">删除</button>
+            <button class="asset-editor-done" type="button" data-asset-editor-done="1">完成</button>
+        </footer>
+    </aside>`;
+    document.body.appendChild(wrap);
+    assetEditorEl = wrap;
+    wrap.addEventListener('mousedown', e => { if(e.target === wrap) closeAssetEditor(); });
+    wrap.addEventListener('click', e => {
+        if(e.target.closest('[data-asset-editor-close]') || e.target.closest('[data-asset-editor-done]')){ closeAssetEditor(); return; }
+        if(e.target.closest('[data-asset-regen]')){
+            const node = nodes.find(item => item.id === assetEditorState?.nodeId);
+            if(node) assetGenerateNode(node);
+            return;
+        }
+        if(e.target.closest('[data-asset-upload]')){
+            const node = nodes.find(item => item.id === assetEditorState?.nodeId);
+            if(node) assetPickUploadForNode(node);
+            return;
+        }
+        if(e.target.closest('[data-asset-delete]')){
+            const state = assetEditorState;
+            const node = nodes.find(item => item.id === state?.nodeId);
+            if(!node){ closeAssetEditor(); return; }
+            pushUndo();
+            nodes = nodes.filter(item => item.id !== node.id);
+            if(selectedId === node.id) selectedId = null;
+            closeAssetEditor();
+            render();
+            scheduleSave();
+            assetRefreshSurfaces();
+            return;
+        }
+    });
+    wrap.addEventListener('input', e => {
+        const field = e.target?.dataset?.assetField;
+        const node = nodes.find(item => item.id === assetEditorState?.nodeId);
+        if(!field || !node) return;
+        assetEnsureMeta(node, node.assetMeta?.kind);
+        node.assetMeta[field] = String(e.target.value || '');
+        if(field === 'name') assetRenameFromMeta(node);
+        if(field === 'style' && assetStudioState?.shotNodeId){
+            // 资产自己的风格优先；留空时全局风格仍由分镜表提供
+        }
+        scheduleSave();
+        if(field === 'name'){
+            const titleEl = assetEditorEl.querySelector('.asset-editor-title');
+            if(titleEl) titleEl.textContent = `编辑${assetKindMeta(node.assetMeta.kind).label} · ${assetDisplayName(node)}`;
+        }
+        if(field === 'desc'){
+            const descEl = document.querySelector(`[data-asset-id="${node.id}"] .asset-card-foot span`);
+            if(descEl) descEl.textContent = String(e.target.value || '').trim() || '还没有设定，点开补充';
+        }
+        if(field === 'name'){
+            const nameEl = document.querySelector(`[data-asset-id="${node.id}"] .asset-card-foot b`);
+            if(nameEl) nameEl.textContent = assetDisplayName(node);
+            if(assetStudioEl && !assetStudioEl.hidden){
+                const tileName = assetStudioEl.querySelector(`[data-asset-open="${node.id}"] .asset-tile-name`);
+                if(tileName) tileName.textContent = assetDisplayName(node);
+            }
+        }
+    });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); closeAssetEditor(); } });
+    return wrap;
+}
+function assetEditorRefresh(){
+    const el = assetEditorEl;
+    const node = nodes.find(item => item.id === assetEditorState?.nodeId);
+    if(!el || el.hidden || !node) return;
+    const body = el.querySelector('.asset-editor-body');
+    if(body) body.innerHTML = assetEditorBodyHtml(node);
+    const title = el.querySelector('.asset-editor-title');
+    if(title) title.textContent = `编辑${assetKindMeta(node.assetMeta?.kind).label} · ${assetDisplayName(node)}`;
+    refreshIcons();
+}
+function openAssetEditor(nodeId){
+    assetBindGlobalKeys();
+    const node = nodes.find(item => item.id === nodeId && isAssetNode(item));
+    if(!node) return;
+    const el = assetEditorEnsureDom();
+    assetEditorState = {nodeId};
+    el.querySelector('.asset-editor-body').innerHTML = assetEditorBodyHtml(node);
+    el.hidden = false;
+    document.body.classList.add('asset-editor-open');
+    const title = el.querySelector('.asset-editor-title');
+    if(title) title.textContent = `编辑${assetKindMeta(node.assetMeta.kind).label} · ${assetDisplayName(node)}`;
+    refreshIcons();
+}
+function closeAssetEditor(){
+    if(assetEditorEl) assetEditorEl.hidden = true;
+    document.body.classList.remove('asset-editor-open');
+    assetEditorState = null;
+}
+/* ---------- 上传 ---------- */
+function assetPickUploadForNode(node){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = false;
+    input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        if(!file) return;
+        try{
+            const form = new FormData();
+            form.append('files', file, file.name || 'asset.png');
+            const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
+                if(!r.ok) throw new Error(await r.text());
+                return r.json();
+            });
+            const url = data.files?.[0]?.url;
+            if(!url) throw new Error('上传没有返回地址');
+            assetApplyImage(node, url);
+        }catch(err){
+            toast(`上传失败：${String(err.message || err).slice(0, 120)}`);
+        }
+    });
+    input.click();
+}
+function assetApplyImage(node, url){
+    if(!node || !url) return;
+    pushUndo();
+    node.images = [{url, name:`${assetDisplayName(node)}.png`}];
+    assetEnsureMeta(node, node.assetMeta?.kind);
+    node.assetMeta.status = 'ready';
+    delete node.assetMeta.error;
+    render();
+    scheduleSave();
+    assetRefreshSurfaces();
+}
+/* ---------- 新增资产（四个来源） ---------- */
+const ASSET_ADD_TABS = [
+    {key:'ai', label:'AI 生成'},
+    {key:'canvas', label:'从当前画布选择'},
+    {key:'upload', label:'本地上传'},
+    {key:'library', label:'个人资产库'}
+];
+function assetAddPanelBodyHtml(){
+    const state = assetAddState || {};
+    const kind = assetKindMeta(state.kind);
+    const tab = state.tab || 'ai';
+    let inner = '';
+    if(tab === 'ai'){
+        inner = `<div class="asset-add-ai">
+            <textarea class="asset-add-prompt" spellcheck="false" placeholder="开始你的设计。例：${escapeAttr(kind.promptHint)}，盛唐古风写实"></textarea>
+            <div class="asset-add-ai-foot">
+                <label class="asset-add-ratio">比例
+                    <select class="asset-add-ratio-select">
+                        <option value="16:9"${state.ratio === '16:9' ? ' selected' : ''}>16:9</option>
+                        <option value="4:3"${state.ratio === '4:3' ? ' selected' : ''}>4:3</option>
+                        <option value="1:1"${state.ratio === '1:1' ? ' selected' : ''}>1:1</option>
+                        <option value="3:4"${state.ratio === '3:4' ? ' selected' : ''}>3:4</option>
+                        <option value="9:16"${state.ratio === '9:16' ? ' selected' : ''}>9:16</option>
+                    </select>
+                </label>
+                <span class="asset-add-model">${escapeHtml(assetAddModelLabel())}</span>
+                <button class="asset-add-go" type="button" data-asset-add-go="1">确认生成</button>
+            </div>
+        </div>`;
+    } else if(tab === 'canvas'){
+        const source = nodes.filter(node => !isAssetNode(node) && (node.images || []).length && node.type !== 'smart-shot-table' && node.type !== 'smart-storyboard');
+        inner = source.length
+            ? `<div class="asset-pick-grid">${source.map(node => {
+                const img = (node.images || [])[0];
+                return `<button class="asset-pick-tile" type="button" data-asset-pick-canvas="${escapeAttr(node.id)}">
+                    <img src="${escapeAttr(img.url)}" alt="" draggable="false">
+                    <span>${escapeHtml(node.title || '图片节点')}</span>
+                </button>`;
+            }).join('')}</div>`
+            : `<div class="asset-pick-empty">画布上还没有带图的节点</div>`;
+    } else if(tab === 'upload'){
+        inner = `<div class="asset-drop" data-asset-drop="1">
+            <i data-lucide="upload-cloud"></i>
+            <strong>点击上传 或 拖拽本地图片至此上传</strong>
+            <span>上传后可以直接为它补充设定，参与后续的镜头生成</span>
+            <input type="file" accept="image/*" multiple hidden class="asset-drop-input">
+        </div>`;
+    } else {
+        inner = `<div class="asset-lib">
+            <div class="asset-lib-search"><input type="text" class="asset-lib-input" placeholder="搜索个人资产" spellcheck="false"><span class="asset-lib-hint">${state.libraryLoading ? '读取中…' : ''}</span></div>
+            <div class="asset-lib-grid">${assetLibraryTilesHtml(state)}</div>
+        </div>`;
+    }
+    return `<div class="asset-add-tabs">${ASSET_ADD_TABS.map(item => `<button type="button" data-asset-add-tab="${item.key}" class="${item.key === tab ? 'is-on' : ''}">${item.label}</button>`).join('')}</div>
+        <div class="asset-add-body">${inner}</div>`;
+}
+function assetAddModelLabel(){
+    const provider = resolveChatProviderId(smartAgentProvider());
+    const model = resolveChatModel(smartAgentModel(provider), provider);
+    return model ? String(model) : '未配置模型';
+}
+function assetLibraryItems(){
+    return (assetAddState?.libraryItems || []).slice();
+}
+function assetLibraryTilesHtml(state){
+    if(state?.libraryLoading) return '';
+    const items = assetLibraryItems();
+    if(!items.length) return `<div class="asset-pick-empty">资产库里还没有图片，先在「资产库」里上传</div>`;
+    return items.map(item => `<button class="asset-pick-tile" type="button" data-asset-pick-lib="${escapeAttr(item.url)}" data-asset-pick-lib-name="${escapeAttr(item.name || '')}">
+        <img src="${escapeAttr(item.url)}" alt="" draggable="false">
+        <span>${escapeHtml(item.name || '资产')}</span>
+    </button>`).join('');
+}
+async function assetLoadLibrary(){
+    if(!assetAddState) return;
+    assetAddState.libraryLoading = true;
+    assetAddPanelRefresh();
+    try{
+        const data = await fetch('/api/asset-library').then(r => r.json());
+        const items = [];
+        (data?.library?.libraries || []).forEach(lib => {
+            (lib.categories || []).forEach(cat => {
+                if((cat.type || 'image') !== 'image') return;
+                (cat.items || []).forEach(item => {
+                    if(item?.url && String(item.kind || 'image') === 'image') items.push({url:item.url, name:item.name || cat.name || '资产'});
+                });
+            });
+        });
+        assetAddState.libraryItems = items.slice(0, 120);
+    }catch(e){
+        assetAddState.libraryItems = [];
+    }finally{
+        assetAddState.libraryLoading = false;
+        assetAddPanelRefresh();
+    }
+}
+function assetAddEnsureDom(){
+    if(assetAddEl && document.body.contains(assetAddEl)) return assetAddEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'asset-add-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<div class="asset-add-panel" role="dialog" aria-modal="true" aria-label="新增资产">
+        <header class="asset-add-head">
+            <strong class="asset-add-title">新增资产</strong>
+            <button class="asset-add-close" type="button" title="关闭" aria-label="关闭" data-asset-add-close="1">&times;</button>
+        </header>
+        <div class="asset-add-content"></div>
+    </div>`;
+    document.body.appendChild(wrap);
+    assetAddEl = wrap;
+    wrap.addEventListener('mousedown', e => { if(e.target === wrap || e.target.closest('[data-asset-add-close]')) closeAssetAddPanel(); });
+    wrap.addEventListener('click', async e => {
+        const tab = e.target.closest('[data-asset-add-tab]');
+        if(tab){
+            assetAddState.tab = tab.dataset.assetAddTab;
+            assetAddPanelRefresh();
+            if(assetAddState.tab === 'library' && !assetAddState.libraryItems) assetLoadLibrary();
+            return;
+        }
+        const pickCanvas = e.target.closest('[data-asset-pick-canvas]');
+        if(pickCanvas){
+            const source = nodes.find(node => node.id === pickCanvas.dataset.assetPickCanvas);
+            const image = source?.images?.[0];
+            if(!image) return;
+            assetCreateFromExisting(source, image);
+            return;
+        }
+        const pickLib = e.target.closest('[data-asset-pick-lib]');
+        if(pickLib){
+            const node = createAssetNode(assetAddState.kind, {name:pickLib.dataset.assetPickLibName || '', images:[{url:pickLib.dataset.assetPickLib, name:pickLib.dataset.assetPickLibName || 'asset.png'}]});
+            closeAssetAddPanel();
+            render();
+            scheduleSave();
+            assetRefreshSurfaces();
+            openAssetEditor(node.id);
+            return;
+        }
+        if(e.target.closest('[data-asset-add-go]')){
+            assetAddGenerate();
+            return;
+        }
+        if(e.target.closest('[data-asset-drop]')){
+            wrap.querySelector('.asset-drop-input')?.click();
+        }
+    });
+    wrap.addEventListener('change', async e => {
+        if(!e.target.classList?.contains('asset-drop-input')) return;
+        const files = [...(e.target.files || [])];
+        if(!files.length) return;
+        const kind = assetAddState?.kind || 'character';
+        for(const file of files){
+            try{
+                const form = new FormData();
+                form.append('files', file, file.name || 'asset.png');
+                const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
+                    if(!r.ok) throw new Error(await r.text());
+                    return r.json();
+                });
+                const url = data.files?.[0]?.url;
+                if(!url) continue;
+                createAssetNode(kind, {name:file.name.replace(/\.[^.]+$/, ''), images:[{url, name:file.name}]});
+            }catch(err){
+                toast(`上传失败：${String(err.message || err).slice(0, 100)}`);
+            }
+        }
+        closeAssetAddPanel();
+        render();
+        scheduleSave();
+        assetRefreshSurfaces();
+    });
+    wrap.addEventListener('dragenter', e => { if(e.target.closest?.('[data-asset-drop]')) e.preventDefault(); });
+    wrap.addEventListener('dragover', e => { if(e.target.closest?.('[data-asset-drop]')) e.preventDefault(); });
+    wrap.addEventListener('drop', async e => {
+        if(!e.target.closest?.('[data-asset-drop]')) return;
+        e.preventDefault();
+        const files = [...(e.dataTransfer?.files || [])].filter(file => file.type.startsWith('image/'));
+        if(!files.length) return;
+        const kind = assetAddState?.kind || 'character';
+        for(const file of files){
+            try{
+                const form = new FormData();
+                form.append('files', file, file.name || 'asset.png');
+                const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
+                    if(!r.ok) throw new Error(await r.text());
+                    return r.json();
+                });
+                const url = data.files?.[0]?.url;
+                if(url) createAssetNode(kind, {name:file.name.replace(/\.[^.]+$/, ''), images:[{url, name:file.name}]});
+            }catch(err){}
+        }
+        closeAssetAddPanel();
+        render();
+        scheduleSave();
+        assetRefreshSurfaces();
+    });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); closeAssetAddPanel(); } });
+    return wrap;
+}
+function assetAddPanelRefresh(){
+    const el = assetAddEl;
+    if(!el || el.hidden) return;
+    const content = el.querySelector('.asset-add-content');
+    if(content) content.innerHTML = assetAddPanelBodyHtml();
+    const title = el.querySelector('.asset-add-title');
+    if(title) title.textContent = `新增${assetKindMeta(assetAddState?.kind).label}`;
+    refreshIcons();
+}
+function openAssetAddPanel(kind){
+    assetBindGlobalKeys();
+    const el = assetAddEnsureDom();
+    assetAddState = {kind:kind || 'character', tab:'ai', ratio:'16:9', libraryItems:null, libraryLoading:false};
+    el.hidden = false;
+    document.body.classList.add('asset-add-open');
+    assetAddPanelRefresh();
+}
+function closeAssetAddPanel(){
+    if(assetAddEl) assetAddEl.hidden = true;
+    document.body.classList.remove('asset-add-open');
+    assetAddState = null;
+}
+function assetCreateFromExisting(sourceNode, image){
+    const kind = assetAddState?.kind || 'character';
+    const rawName = String(sourceNode.title || '').trim();
+    const name = /^(image|图片|上传节点|group)$/i.test(rawName) ? '' : rawName;
+    const node = createAssetNode(kind, {name, images:[image]});
+    node.assetMeta.desc = String(sourceNode.prompt || sourceNode.text || '').slice(0, 400);
+    closeAssetAddPanel();
+    render();
+    scheduleSave();
+    assetRefreshSurfaces();
+    openAssetEditor(node.id);
+}
+async function assetAddGenerate(){
+    const state = assetAddState;
+    const panel = assetAddEl;
+    if(!state || !panel) return;
+    const promptEl = panel.querySelector('.asset-add-prompt');
+    const prompt = String(promptEl?.value || '').trim();
+    if(!prompt){ toast('先描述一下要生成什么'); promptEl?.focus(); return; }
+    const ratioEl = panel.querySelector('.asset-add-ratio-select');
+    const node = createAssetNode(state.kind, {name:'', prompt:''});
+    node.assetMeta.desc = prompt;
+    node.assetMeta.style = '';
+    closeAssetAddPanel();
+    render();
+    scheduleSave();
+    assetGenerateNode(node, {prompt, ratio:ratioEl?.value || '16:9'});
+    openAssetEditor(node.id);
+}
+/* ---------- 生成 ---------- */
+function assetRunSettingsForNode(node, ratio){
+    const base = smartPanelSettingsForKind('image', node);
+    const next = {...base, count:1};
+    const map = {'16:9':'landscape', '4:3':'landscape', '1:1':'square', '3:4':'portrait', '9:16':'portrait'};
+    if(ratio && map[ratio]) next.ratio = map[ratio];
+    // 角色形象默认竖版（参考产品也是竖构图的角色照），场景/道具跟随所选比例
+    if(node?.assetMeta?.kind === 'character') next.ratio = ratio ? (map[ratio] || 'portrait') : 'portrait';
+    return next;
+}
+async function assetGenerateNode(node, options = {}){
+    if(!node || !isAssetNode(node)) return false;
+    const meta = assetEnsureMeta(node, node.assetMeta?.kind);
+    if(meta.status === 'generating') return false;
+    const prompt = String(options.prompt || '').trim() || assetPromptForNode(node);
+    if(!prompt){ toast('先写点描述再生成'); return false; }
+    meta.status = 'generating';
+    delete meta.error;
+    meta.lastPrompt = prompt;
+    render();
+    assetRefreshSurfaces();
+    try{
+        const runSettings = assetRunSettingsForNode(node, options.ratio);
+        if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
+        const task = await runApiGeneration(prompt, [], runSettings);
+        const result = await pollSmartCanvasTask(task.taskIds[0], null, 1);
+        const urls = resultMediaUrls(result.image_items?.length ? result.image_items : (result.images?.length ? result.images : (result.urls || result)));
+        if(!urls.length) throw new Error('生成结果为空');
+        const first = urls[0];
+        pushUndo();
+        node.images = [typeof first === 'string' ? {url:first, name:`${assetDisplayName(node)}.png`} : first];
+        meta.status = 'ready';
+        meta.generatedAt = Date.now();
+        if(!String(meta.name || '').trim() && options.name) meta.name = options.name;
+        render();
+        scheduleSave();
+        assetRefreshSurfaces();
+        if(!options.silent) toast(`已生成${assetKindMeta(meta.kind).label}形象`);
+        return true;
+    }catch(err){
+        meta.status = assetImageUrl(node) ? 'ready' : 'failed';
+        meta.error = String(err?.message || err).slice(0, 140);
+        render();
+        assetRefreshSurfaces();
+        if(!options.silent) toast(`生成失败：${meta.error.slice(0, 110)}`);
+        return false;
+    }
+}
+async function assetGenerateAllMissing(){
+    const missing = assetAllNodes().filter(node => !assetImageUrl(node));
+    if(!missing.length){ toast('所有资产都有设定图了'); return; }
+    if(assetStudioState) assetStudioState.batchRunning = true;
+    const queue = missing.slice();
+    let done = 0;
+    const setLabel = () => {
+        const batch = assetStudioEl?.querySelector('.asset-studio-batch');
+        if(batch) batch.textContent = `生成中 ${done}/${missing.length}`;
+    };
+    setLabel();
+    assetStudioRefresh();
+    const worker = async () => {
+        while(queue.length){
+            const node = queue.shift();
+            await assetGenerateNode(node, {silent:true});
+            done++;
+            setLabel();
+        }
+    };
+    await Promise.all(Array.from({length:Math.min(2, missing.length)}, worker));
+    if(assetStudioState) assetStudioState.batchRunning = false;
+    assetStudioRefresh();
+    toast(`批量生成完成，成功 ${missing.filter(node => Boolean(assetImageUrl(node))).length}/${missing.length}`);
+}
+/* ---------- 与分镜表联动：角色设定注入提示词 ---------- */
+function assetRefsForText(text){
+    const value = String(text || '');
+    if(!value.trim()) return [];
+    return assetAllNodes().filter(node => {
+        const name = String(node.assetMeta?.name || '').trim();
+        return name.length >= 2 && value.includes(name);
+    });
+}
+function assetPromptLinesForText(text){
+    return assetRefsForText(text).map(node => {
+        const meta = node.assetMeta || {};
+        const detail = [
+            String(meta.desc || '').trim(),
+            String(meta.costume || '').trim() && `服装：${String(meta.costume).trim()}`,
+            String(meta.traits || '').trim() && `特征：${String(meta.traits).trim()}`
+        ].filter(Boolean).join('；');
+        return `角色「${assetDisplayName(node)}」：${detail || '按画面描述设计'}`;
+    });
 }
 
 function storyboardScriptNodePreviewHtml(node){
@@ -21508,6 +22363,7 @@ function minimaxH3NodeSettingFieldHtml(field, node){
     return '';
 }
 function nodeBodyHtml(node, layout){
+    if(isAssetNode(node)) return assetNodeBodyHtml(node);
     if(node.type === 'workflow-group') return workflowGroupBodyHtml(node);
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
@@ -24766,7 +25622,7 @@ function render(){
         const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
             ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
             : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
-        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
+        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
             ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -24941,6 +25797,8 @@ function render(){
 }
 function syncSingleImageNodeNaturalLayout(node, image){
     if(!node || isSmartGroupNode(node) || (node.images || []).length !== 1 || !image) return false;
+    // 资产卡是固定版式的卡片，不跟图片最短边吸附（否则 240×296 会被拉成 280×280）
+    if(node.assetMeta) return false;
     if(resizeState?.id === node.id) return false;
     // 2026-10-10（用户要求：等待态 / 尺寸按 3000 版）——生成中不做单图自然尺寸吸附：
     // 否则会把 3000 的占位框（已有图 + 占位格的宫格）压回单图尺寸，等待动画与结果尺寸都会跳。
@@ -27408,6 +28266,39 @@ el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventLis
             port.addEventListener('click', e => { e.stopPropagation(); });
             port.addEventListener('dblclick', e => { e.stopPropagation(); });
         });
+        if(isAssetNode(nodeForControls)){
+            // 2026-11-03：资产卡既能拖、也能点开编辑。
+            // 不能拦 mousedown（拦了卡片就拖不动），改成"按下到抬起位移超过 5px 就当拖动"。
+            // 卡片主体留给拖动（拖不动的卡片在画布上没法用），
+            // 明确的动作区（空态「+」和右上角 ⋯）不参与拖拽，按下就拦住。
+            el.addEventListener('mousedown', e => {
+                if(e.target.closest('[data-asset-action="add"], [data-asset-action="menu"]')) e.stopPropagation();
+            }, true);
+            el.addEventListener('click', e => {
+                const action = e.target.closest('[data-asset-action]');
+                if(!action) return;
+                // edit 区（图片/文字）只响应双击，单击留给选中和拖动
+                if(action.dataset.assetAction === 'edit'){
+                    if(e.detail >= 2){
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openAssetEditor(nodeForControls.id);
+                    }
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                if(action.dataset.assetAction === 'add') openAssetAddPanel(nodeForControls.assetMeta?.kind || 'character');
+                else openAssetEditor(nodeForControls.id);
+            });
+            el.addEventListener('dblclick', e => {
+                // 加号/⋯ 自己有动作，双击它们不重复开编辑器
+                if(e.target.closest('[data-asset-action="add"], [data-asset-action="menu"]')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                openAssetEditor(nodeForControls.id);
+            });
+        }
         el.onmousedown = beginNodeDrag;
         // 2026-11-01（用户报「AI助手关闭后，按 ctrl 键不能引用」）：Ctrl+点击卡片本体
         // （标题栏 / 图片区之外的空白）原来什么都不做 —— 引用只有图片区那条 click 链路，
