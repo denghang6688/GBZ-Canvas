@@ -5491,16 +5491,25 @@ body.theme-dark .workflow-group-title {
     border:1px solid rgba(154,154,154,.22) !important;
     box-shadow:0 -10px 24px rgba(0,0,0,.18) !important;
 }
+/* 2026-11-03（用户要求·方案 A）：提示词/文本节点缩放角标极简化。
+   只留右下角、常显不依赖悬停：去掉底色块和边框，只画两条 45° 细线（SVG 在 JS 里）。
+   18×18 仍是命中区，视觉线只有 10px 居中；颜色 20% → 卡内悬停 58% → 拖动中 85%。 */
 .image-node.prompt-smart-node:not(.smart-group-member-node) .node-resize-handle {
-    right:5px !important;
-    bottom:5px !important;
+    right:2px !important;
+    bottom:2px !important;
     width:18px !important;
     height:18px !important;
-    border-radius:6px !important;
+    border-radius:4px !important;
     z-index:20 !important;
-    background:rgba(16,16,16,.72) !important;
-    border-color:rgba(154,154,154,.28) !important;
-    color:rgba(230,230,230,.66) !important;
+    background:transparent !important;
+    border:none !important;
+    box-shadow:none !important;
+    color:rgba(255,255,255,.20) !important;
+    opacity:1 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    transition:color .16s ease !important;
 }
 
 .smart-quickbar {
@@ -21035,40 +21044,25 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 .world.smart-lod-low .image-node:not(.node-pending):not(.group-node) { cursor: zoom-in; }
 
 
-/* 2026-11-03（用户要求）：提示词/文本节点四角自由拉伸（任意形状）。
-   原来只有一个右下角手柄，且只改 w/h、x/y 不动，左上方向拉不长。
-   现在四个角各一个手柄，拖哪角固定对角；最小尺寸放开到 120×80（见 JS 常量）。 */
-.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle {
-    width:14px !important;
-    height:14px !important;
-    border-radius:5px !important;
-    z-index:21 !important;
-    background:rgba(16,16,16,.78) !important;
-    border:1px solid rgba(154,154,154,.34) !important;
-    color:rgba(232,232,232,.72) !important;
+/* 2026-11-03（用户要求·方案 A）：提示词/文本节点只保留右下角缩放角标（极简两斜线）。
+   常显、不依赖悬停：静态 20% 白几乎融入边框；卡内悬停 58%、直接悬停角标 72%、拖动中 85%。
+   斜线由 JS 内联 SVG 绘制（stroke=currentColor），这里只管隐藏基础角标记和配色。
+   最小尺寸仍为 120×80（见 JS 常量）。 */
+.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle::before { content:none !important; }
+.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle svg {
+    width:10px; height:10px; display:block; pointer-events:none;
 }
-.image-node.prompt-smart-node .prompt-corner-handle::before {
-    width:6px; height:6px;
+.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle svg path {
+    stroke:currentColor; fill:none; stroke-width:1.25; stroke-linecap:round;
 }
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="nw"] {
-    left:4px !important; top:4px !important; right:auto !important; bottom:auto !important;
-    cursor:nwse-resize !important;
-}
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="ne"] {
-    right:4px !important; top:4px !important; left:auto !important; bottom:auto !important;
-    cursor:nesw-resize !important;
-}
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="sw"] {
-    left:4px !important; bottom:4px !important; right:auto !important; top:auto !important;
-    cursor:nesw-resize !important;
-}
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="se"] {
-    right:4px !important; bottom:4px !important; left:auto !important; top:auto !important;
-    cursor:nwse-resize !important;
-}
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="nw"]::before { transform:rotate(180deg); }
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="ne"]::before { transform:rotate(-90deg); }
-.image-node.prompt-smart-node .prompt-corner-handle[data-resize-dir="sw"]::before { transform:rotate(90deg); }
+.image-node.prompt-smart-node:hover .node-resize-handle.prompt-corner-handle { color:rgba(255,255,255,.58) !important; }
+.image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle:hover { color:rgba(255,255,255,.72) !important; }
+body.smart-node-resize .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(255,255,255,.85) !important; }
+/* 亮色主题下换深色斜线，同样三档 */
+.theme-light .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.22) !important; }
+.theme-light .image-node.prompt-smart-node:hover .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.55) !important; }
+.theme-light .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle:hover { color:rgba(0,0,0,.72) !important; }
+body.theme-light.smart-node-resize .image-node.prompt-smart-node .node-resize-handle.prompt-corner-handle { color:rgba(0,0,0,.85) !important; }
 /* 拉到 120×80 这种小尺寸时，文字区必须能收缩并内部滚动，不能顶出卡片 */
 .image-node.prompt-smart-node .node-body { overflow:hidden; }
 .image-node.prompt-smart-node .prompt-node-text { min-height:0 !important; }
