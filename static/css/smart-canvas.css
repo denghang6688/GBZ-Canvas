@@ -21061,3 +21061,37 @@ html body .prompt-llm-composer .prompt-llm-composer-actions {
 /* 拉到 120×80 这种小尺寸时，文字区必须能收缩并内部滚动，不能顶出卡片 */
 .image-node.prompt-smart-node .node-body { overflow:hidden; }
 .image-node.prompt-smart-node .prompt-node-text { min-height:0 !important; }
+
+/* ===== 2026-11-03 分镜表 · 拆镜面板（从剧本 / 分镜脚本生成六列表）=====
+   轻量浮层，不动 storyboard-script-modal（那是 12 字段的完整编辑器）。
+   主题全走 var(--card)/--text/--muted/--line/--soft，亮暗共用一套。 */
+.shot-gen-mask { position:fixed; inset:0; z-index:92; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(5,5,5,.42); backdrop-filter:blur(6px); }
+.shot-gen-mask[hidden] { display:none; }
+.shot-gen-panel { width:min(580px, calc(100vw - 32px)); display:flex; flex-direction:column; border-radius:16px; border:1px solid var(--line); background:var(--card); color:var(--text); box-shadow:0 24px 80px rgba(0,0,0,.28); overflow:hidden; }
+.shot-gen-head { display:flex; align-items:center; gap:10px; padding:14px 14px 12px; border-bottom:1px solid var(--line); }
+.shot-gen-head strong { font-size:14px; font-weight:900; letter-spacing:.2px; }
+.shot-gen-head span { font-size:11px; color:var(--muted); }
+.shot-gen-close { margin-left:auto; width:26px; height:26px; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:17px; line-height:1; cursor:pointer; }
+.shot-gen-close:hover { background:var(--soft); color:var(--text); }
+.shot-gen-body { display:flex; flex-direction:column; gap:12px; padding:14px; }
+.shot-gen-field { display:flex; flex-direction:column; gap:6px; }
+.shot-gen-field[hidden] { display:none; }
+.shot-gen-field > span { font-size:11px; font-weight:800; color:var(--muted); }
+.shot-gen-field select,
+.shot-gen-field textarea { width:100%; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text); font-size:13px; font-family:inherit; outline:0; box-sizing:border-box; }
+.shot-gen-field select { height:34px; padding:0 10px; }
+.shot-gen-field textarea { min-height:132px; max-height:34vh; padding:10px 12px; line-height:1.7; resize:vertical; }
+.shot-gen-field select:focus,
+.shot-gen-field textarea:focus { border-color:var(--muted); }
+.shot-gen-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.shot-gen-chips button { height:26px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); font-size:11.5px; font-weight:800; cursor:pointer; transition:background .13s ease, color .13s ease; }
+.shot-gen-chips button:hover { color:var(--text); }
+.shot-gen-chips button.is-on { background:var(--soft); color:var(--text); border-color:var(--muted); }
+.shot-gen-tip { font-size:11px; line-height:1.65; color:var(--muted); }
+.shot-gen-foot { display:flex; align-items:center; gap:8px; padding:12px 14px; border-top:1px solid var(--line); }
+.shot-gen-foot button { height:32px; padding:0 14px; border-radius:10px; border:1px solid transparent; font-size:12px; font-weight:800; cursor:pointer; }
+.shot-gen-cancel { background:transparent; color:var(--muted); }
+.shot-gen-cancel:hover { background:var(--soft); color:var(--text); }
+.shot-gen-go { margin-left:auto; background:var(--text); color:var(--card); }
+.shot-gen-go:hover { opacity:.86; }
+.shot-gen-go[disabled] { opacity:.5; cursor:default; }

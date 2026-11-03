@@ -18938,9 +18938,19 @@ function shotTableRows(node){
 function shotTableRenumber(node){
     shotTableRows(node).forEach((row, index) => { row.no = String(index + 1); });
 }
-// 时间列形如 "0-3s" / "3s" / "0:03"：取最后一个数字当这一镜的时长，加总给脚注。
+// 时间列形如 "0-3s" / "3-5.5s"（区间，时间轴连续）或 "3s" / "0:03"（单镜时长）。
+// 全是区间时整条时间轴首尾相接，总时长应取最大的结束值；混进纯时长才逐行相加。
 function shotTableTotalSeconds(node){
-    return shotTableRows(node).reduce((sum, row) => {
+    const rows = shotTableRows(node);
+    const filled = rows.filter(row => String(row?.time || '').trim());
+    const ranges = filled.map(row => {
+        const matched = String(row.time).match(/(\d+(?:\.\d+)?)\s*[-–~至]\s*(\d+(?:\.\d+)?)/);
+        return matched ? [Number(matched[1]), Number(matched[2])] : null;
+    });
+    if(filled.length && ranges.every(Boolean)){
+        return Math.max(...ranges.map(range => range[1]));
+    }
+    return rows.reduce((sum, row) => {
         const nums = String(row?.time || '').match(/\d+(?:\.\d+)?/g);
         if(!nums || !nums.length) return sum;
         const tail = Number(nums[nums.length - 1]);
@@ -18980,6 +18990,7 @@ function shotTableNodeBodyHtml(node){
         </div>
         <div class="shot-foot">
             <button class="shot-foot-btn" type="button" data-shot-add-row="1">+ 添加一行</button>
+            <button class="shot-foot-btn shot-foot-ai" type="button" data-shot-ai="1" title="从剧本或画布上的分镜脚本拆镜">AI 拆镜</button>
             <span class="shot-foot-meta">${rows.length} 镜${secs ? ` · 约 ${secs}s` : ''}</span>
             <button class="shot-foot-btn" type="button" data-shot-all-prompts="1" title="每一镜各建一个提示词节点">全部转提示词</button>
         </div>
@@ -18988,7 +18999,10 @@ function shotTableNodeBodyHtml(node){
 function shotRowPromptText(row){
     if(!row) return '';
     const parts = [];
-    if(String(row.shotSize || '').trim()) parts.push(`景别 / 运镜：${String(row.shotSize).trim()}`);
+    // 从分镜脚本转过来的行，原始分镜提示词更完整（含角色、情绪、光影），优先用它当底
+    const metaPrompt = String(row._meta?.storyboardPrompt || '').trim();
+    if(metaPrompt) parts.push(metaPrompt);
+    else if(String(row.shotSize || '').trim()) parts.push(`景别 / 运镜：${String(row.shotSize).trim()}`);
     if(String(row.visual || '').trim()) parts.push(`画面：${String(row.visual).trim()}`);
     if(String(row.onScreenText || '').trim()) parts.push(`屏幕文案：${String(row.onScreenText).trim()}`);
     if(String(row.voiceover || '').trim()) parts.push(`旁白：${String(row.voiceover).trim()}`);
@@ -19279,6 +19293,14 @@ function bindShotTableNodeControls(el, node){
             shotTableCreateAllPrompts(node);
             return;
         }
+        // 2026-11-03：从剧本 / 分镜脚本拆镜，入口放在脚注条上（用户选的方案 A）
+        const aiBtn = e.target.closest?.('[data-shot-ai]');
+        if(aiBtn){
+            e.preventDefault();
+            e.stopPropagation();
+            openShotTableGenPanel(node.id);
+            return;
+        }
         const rowEl = e.target.closest?.('.shot-row[data-shot-row-index]');
         if(rowEl && el.contains(rowEl)){
             el.querySelectorAll('.shot-row.is-active').forEach(item => item.classList.remove('is-active'));
@@ -19319,6 +19341,404 @@ function shotTableFromRows(rows){
         };
     });
     return {rows:out, cols:Object.keys(map).length};
+}
+/* ===== 2026-11-03 分镜表 · 按剧本 / 脚本拆镜 =====
+   用户要求：能从剧本（纯文本）和脚本（smart-storyboard 的 12 字段）生成这张六列表。
+   两条路的成本完全不同，不能混成一条：
+   - 脚本 → 表：纯本地降维，不调模型、瞬时完成。脚本有 12 个字段、表只有 6 列，
+     角色/场景/情绪/光影/音效/分镜提示词/运动提示词存进 row._meta，不外显但不丢，
+     点「全部转提示词」时优先用原始分镜提示词当底。
+   - 剧本 → 表：调 /api/llm/canvas 拆镜。长剧本按段落分批串行，最后只 pushUndo 一次。
+   ============================================= */
+const SHOT_GEN_MAX_ROWS = 24;
+const SHOT_GEN_BLOCK_CHARS = 900;
+const SHOT_GEN_COUNTS = ['auto', '6', '8', '12', '16'];
+const SHOT_SIZE_WORDS = ['大特写','特写','近中景','中近景','近景','中景','中全景','全景','远景','大远景','航拍','俯拍','仰拍','平视','过肩','主观视角','推近','推远','拉远','摇镜','横移','跟拍','环绕','手持','固定机位'];
+let shotGenState = null;
+let shotGenEl = null;
+function shotSizeFromShotText(text){
+    const value = String(text || '').trim();
+    if(!value) return '';
+    // 长词优先并遮掉命中段：「中近景」不会再被「中景」二次命中，避免出现「中近景 · 中景」
+    let masked = value;
+    const hits = [];
+    [...SHOT_SIZE_WORDS].sort((a, b) => b.length - a.length).forEach(word => {
+        let index = masked.indexOf(word);
+        while(index >= 0){
+            hits.push(word);
+            masked = `${masked.slice(0, index)}${'□'.repeat(word.length)}${masked.slice(index + word.length)}`;
+            index = masked.indexOf(word);
+        }
+    });
+    return [...new Set(hits)].slice(0, 3).join(' · ');
+}
+// 台词进哪一列：≤20 字当屏幕字幕，更长的当旁白；带「旁白：「字幕：」前缀的直接归位。
+function shotTableSplitDialogue(text){
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if(!value) return {onScreenText:'', voiceover:''};
+    const vo = value.match(/^(旁白|解说|画外音|VO|V\.O\.|OS)\s*[:：]\s*/i);
+    if(vo) return {onScreenText:'', voiceover:value.slice(vo[0].length).trim()};
+    const cap = value.match(/^(字幕|字卡|屏幕文案|标题|花字)\s*[:：]\s*/i);
+    if(cap) return {onScreenText:value.slice(cap[0].length).trim(), voiceover:''};
+    if(value.length <= 20) return {onScreenText:value, voiceover:''};
+    const sentences = value.split(/(?<=[。！？!?])/).map(part => part.trim()).filter(Boolean);
+    if(sentences.length > 1 && sentences[0].length <= 20){
+        return {onScreenText:sentences[0], voiceover:sentences.slice(1).join('')};
+    }
+    return {onScreenText:'', voiceover:value};
+}
+function shotTableHasContent(node){
+    return shotTableRows(node).some(row => SHOT_TABLE_FIELDS.some(field => field !== 'no' && String(row?.[field] ?? '').trim()));
+}
+// 模型/脚本给的零散行 → 六列标准行：镜号重排、时间重算成「起-止s」、景别缺了从画面里抽
+function shotTableNormalizeGeneratedRows(rows = [], startNo = 1, startTime = 0){
+    const out = [];
+    // 剧本长到要分批时，后一批的时间轴必须接着前一批往下排，不能每批都从 0 开始
+    let cursor = Number(startTime) || 0;
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+        const visual = String(row?.visual ?? row?.画面 ?? row?.description ?? '').replace(/\s+/g, ' ').trim();
+        if(!visual) return;
+        let shotSize = String(row?.shotSize ?? row?.shot_size ?? row?.景别 ?? '').trim();
+        if(!shotSize) shotSize = shotSizeFromShotText(visual);
+        let onScreenText = String(row?.onScreenText ?? row?.on_screen_text ?? row?.字幕 ?? '').trim();
+        let voiceover = String(row?.voiceover ?? row?.旁白 ?? '').trim();
+        if(!onScreenText && !voiceover){
+            const split = shotTableSplitDialogue(row?.dialogue ?? row?.台词 ?? '');
+            onScreenText = split.onScreenText;
+            voiceover = split.voiceover;
+        }
+        const nums = String(row?.time ?? row?.duration ?? '').match(/\d+(?:\.\d+)?/g) || [];
+        let duration = nums.length > 1 ? Number(nums[nums.length - 1]) - Number(nums[0]) : (nums.length ? Number(nums[0]) : 0);
+        if(!(duration > 0)) duration = 3;
+        duration = Math.min(12, Math.max(1, duration));
+        const start = cursor;
+        cursor += duration;
+        out.push(Object.assign({
+            no:String(startNo + out.length),
+            time:`${+start.toFixed(1)}-${+cursor.toFixed(1)}s`,
+            shotSize,
+            visual,
+            onScreenText,
+            voiceover
+        }, row?._meta ? {_meta:row._meta} : {}));
+    });
+    return out;
+}
+// 分镜脚本 → 表：纯映射。「景别 / 运镜」在脚本里没有独立字段，取 scene（多半是 shotScale 循环值），
+// 取不到再从画面描述首句里抽；抽不到就留空，不硬编一个假的景别。
+function shotTableRowsFromStoryboard(scriptNode){
+    const list = storyboardRowsForNode(scriptNode);
+    const mapped = [];
+    list.forEach(row => {
+        const visual = String(row?.visual || '').replace(/\s+/g, ' ').trim();
+        const dialogue = String(row?.dialogue || '').trim();
+        if(!visual && !dialogue) return;
+        const split = shotTableSplitDialogue(dialogue);
+        const scene = String(row?.scene || '').trim();
+        const nums = String(row?.duration || '').match(/\d+(?:\.\d+)?/g) || [];
+        const duration = nums.length ? Math.min(12, Math.max(1, Number(nums[nums.length - 1]) || 3)) : 3;
+        mapped.push({
+            time:String(duration),
+            shotSize:shotSizeFromShotText(scene) || shotSizeFromShotText(visual),
+            visual,
+            onScreenText:split.onScreenText,
+            voiceover:split.voiceover,
+            _meta:{
+                role1:row.role1 || '',
+                role1Desc:row.role1Desc || '',
+                scene,
+                emotion:row.emotion || '',
+                lighting:row.lighting || '',
+                sound:row.sound || '',
+                dialogue,
+                storyboardPrompt:row.storyboardPrompt || '',
+                motionPrompt:row.motionPrompt || ''
+            }
+        });
+    });
+    return shotTableNormalizeGeneratedRows(mapped, 1);
+}
+function shotTableShiftTimeText(text, offset){
+    const value = String(text || '').trim();
+    if(!(offset > 0) || !value) return value;
+    const range = value.match(/^(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)\s*s?$/);
+    if(range) return `${+(Number(range[1]) + offset).toFixed(1)}-${+(Number(range[2]) + offset).toFixed(1)}s`;
+    const single = value.match(/^(\d+(?:\.\d+)?)\s*s?$/);
+    if(single) return `${+(Number(single[1]) + offset).toFixed(1)}s`;
+    return value;
+}
+function shotTableApplyGeneratedRows(node, rows, mode = 'replace'){
+    if(!node || !Array.isArray(rows) || !rows.length) return 0;
+    const append = mode === 'append' && shotTableHasContent(node);
+    const startNo = append ? shotTableRows(node).length + 1 : 1;
+    const prepared = rows.map((row, index) => Object.assign({
+        no:String(startNo + index),
+        time:String(row?.time || ''),
+        shotSize:String(row?.shotSize || ''),
+        visual:String(row?.visual || ''),
+        onScreenText:String(row?.onScreenText || ''),
+        voiceover:String(row?.voiceover || '')
+    }, row?._meta ? {_meta:row._meta} : {}));
+    // 追加时时间轴要接在已有内容后面，不能又从 0 开始
+    if(append){
+        const offset = shotTableTotalSeconds(node);
+        prepared.forEach(row => { row.time = shotTableShiftTimeText(row.time, offset); });
+    }
+    pushUndo();
+    node.shotRows = append ? shotTableRows(node).concat(prepared) : prepared;
+    shotTableRenumber(node);
+    // 行数变多时把卡片撑高，别让新行全埋在滚动区里；已经有更高高度就不缩回去
+    const needed = 112 + node.shotRows.length * 44;
+    node.h = Math.round(Math.max(Number(node.h) || SHOT_TABLE_MIN_HEIGHT, Math.min(640, needed)));
+    render();
+    scheduleSave();
+    return prepared.length;
+}
+function shotGenBlockText(text, size = SHOT_GEN_BLOCK_CHARS){
+    const raw = String(text || '').trim();
+    if(raw.length <= size) return raw ? [raw] : [];
+    const blocks = [];
+    let buffer = '';
+    raw.split(/\n+/).map(part => part.trim()).filter(Boolean).forEach(para => {
+        const pieces = para.length > size
+            ? (para.match(new RegExp(`[^。！？!?]{1,${size}}[。！？!?]?`, 'g')) || [para])
+            : [para];
+        pieces.forEach(piece => {
+            if(buffer && (buffer + piece).length > size){ blocks.push(buffer); buffer = ''; }
+            buffer += piece;
+        });
+    });
+    if(buffer.trim()) blocks.push(buffer.trim());
+    return blocks;
+}
+function shotGenPromptForBlock({text, count, startNo, startTime = 0, blockIndex, blockTotal}){
+    return [
+        '你是专业视频分镜师。把下面的剧本拆成分镜，只输出严格 JSON，不要解释、不要代码块、不要多余字符。',
+        'JSON 结构：{"rows":[{"no":"1","time":"0-3s","shotSize":"中景 · 缓慢推进","visual":"","onScreenText":"","voiceover":""}]}',
+        '要求：',
+        `1. 一共 ${count} 条，镜号从 ${startNo} 开始连续编号。`,
+        `2. time 写成「起-止s」，从 ${startTime}s 开始排，每镜 2-5 秒，镜头之间首尾相接。`,
+        '3. shotSize 是景别加运镜，例如「特写 · 固定」「全景 · 横移」「近景 · 手持跟拍」。',
+        '4. visual 写清主体、动作、构图和画面重点，一句话 30-60 字，不要空泛形容词。',
+        '5. onScreenText 只放确实会出现在画面上的短字幕，不超过 20 字；没有就留空字符串。',
+        '6. voiceover 放画外旁白或解说，不超过 60 字；没有就留空字符串。',
+        '7. 字幕和旁白不要写同一句话，也不要互相复述。',
+        blockTotal > 1 ? `8. 这是第 ${blockIndex + 1}/${blockTotal} 段，只拆这一段的情节，不要提前使用后面的内容。` : '',
+        '',
+        '剧本：',
+        text
+    ].filter(Boolean).join('\n');
+}
+async function shotGenRequestBlock(payload){
+    const provider = resolveChatProviderId(smartAgentProvider());
+    const model = resolveChatModel(smartAgentModel(provider), provider);
+    if(!provider || !model) throw new Error(tr('smart.errNoApiModel'));
+    const result = await fetch('/api/llm/canvas', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            message:shotGenPromptForBlock(payload),
+            messages:[],
+            images:[],
+            videos:[],
+            files:[],
+            model,
+            provider,
+            ms_model:provider === 'modelscope' ? model : '',
+            system_prompt:'你是专业的视频分镜师。你必须只输出 JSON，不要输出任何解释、前后缀或代码块。'
+        })
+    }).then(async response => {
+        if(!response.ok) throw new Error((await response.text()).slice(0, 160));
+        return response.json();
+    });
+    const parsed = extractStoryboardJsonFromText(result.text || '');
+    const list = Array.isArray(parsed) ? parsed
+        : (Array.isArray(parsed?.rows) ? parsed.rows : (Array.isArray(parsed?.shots) ? parsed.shots : []));
+    return shotTableNormalizeGeneratedRows(list, payload.startNo, payload.startTime);
+}
+async function shotTableGenerateFromSynopsis(text, countMode = 'auto'){
+    const blocks = shotGenBlockText(text);
+    if(!blocks.length) return [];
+    const target = countMode === 'auto'
+        ? Math.min(SHOT_GEN_MAX_ROWS, Math.max(4, blocks.length * 6))
+        : Math.min(SHOT_GEN_MAX_ROWS, Number(countMode) || 8);
+    const perBlock = Math.max(3, Math.ceil(target / blocks.length));
+    const all = [];
+    let cursorSec = 0;
+    for(let index = 0; index < blocks.length; index++){
+        if(all.length >= SHOT_GEN_MAX_ROWS) break;
+        shotGenSetLoading(true, blocks.length > 1 ? `正在拆镜 ${index + 1}/${blocks.length}` : '正在拆镜');
+        const rows = await shotGenRequestBlock({
+            text:blocks[index],
+            count:perBlock,
+            startNo:all.length + 1,
+            startTime:cursorSec,
+            blockIndex:index,
+            blockTotal:blocks.length
+        });
+        if(!rows.length) continue;
+        all.push(...rows);
+        const endMatch = String(rows[rows.length - 1].time || '').match(/-\s*(\d+(?:\.\d+)?)s/);
+        cursorSec = endMatch ? Number(endMatch[1]) : cursorSec + rows.length * 3;
+    }
+    return all.slice(0, SHOT_GEN_MAX_ROWS);
+}
+function shotGenEnsureDom(){
+    if(shotGenEl && document.body.contains(shotGenEl)) return shotGenEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'shot-gen-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<div class="shot-gen-panel" role="dialog" aria-modal="true" aria-label="拆镜">
+        <div class="shot-gen-head">
+            <strong>拆镜</strong>
+            <span>剧本走模型 · 脚本直传</span>
+            <button class="shot-gen-close" type="button" title="关闭" aria-label="关闭">&times;</button>
+        </div>
+        <div class="shot-gen-body">
+            <label class="shot-gen-field">
+                <span>来源</span>
+                <select class="shot-gen-source"></select>
+            </label>
+            <label class="shot-gen-field shot-gen-text-wrap">
+                <span>剧本 / 故事</span>
+                <textarea class="shot-gen-text" spellcheck="false" placeholder="贴一段剧本、故事梗概或产品脚本，模型会拆成镜头"></textarea>
+            </label>
+            <div class="shot-gen-field shot-gen-count-wrap">
+                <span>镜头数</span>
+                <div class="shot-gen-chips">${SHOT_GEN_COUNTS.map(value => `<button type="button" data-shot-gen-count="${value}" class="${value === 'auto' ? 'is-on' : ''}">${value === 'auto' ? '自动' : `${value} 镜`}</button>`).join('')}</div>
+            </div>
+            <div class="shot-gen-field shot-gen-mode-wrap" hidden>
+                <span>表里已有内容</span>
+                <div class="shot-gen-chips">
+                    <button type="button" data-shot-gen-mode="replace" class="is-on">替换</button>
+                    <button type="button" data-shot-gen-mode="append">追加到末尾</button>
+                </div>
+            </div>
+            <div class="shot-gen-tip"></div>
+        </div>
+        <div class="shot-gen-foot">
+            <button class="shot-gen-cancel" type="button">取消</button>
+            <button class="shot-gen-go" type="button">生成分镜表</button>
+        </div>
+    </div>`;
+    document.body.appendChild(wrap);
+    shotGenEl = wrap;
+    wrap.addEventListener('click', e => { if(e.target === wrap) closeShotTableGenPanel(); });
+    wrap.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); closeShotTableGenPanel(); } });
+    // 面板开着时焦点可能落在遮罩上，此时按 Delete 不该把背后的分镜表节点删掉
+    document.addEventListener('keydown', e => {
+        if(!shotGenEl || shotGenEl.hidden || shotGenEl.contains(e.target)) return;
+        if(e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); e.stopPropagation(); }
+    }, true);
+    wrap.querySelector('.shot-gen-close').addEventListener('click', closeShotTableGenPanel);
+    wrap.querySelector('.shot-gen-cancel').addEventListener('click', closeShotTableGenPanel);
+    wrap.querySelector('.shot-gen-go').addEventListener('click', shotGenSubmit);
+    wrap.querySelector('.shot-gen-source').addEventListener('change', e => {
+        if(!shotGenState) return;
+        shotGenState.sourceId = e.target.value;
+        shotGenSyncForm();
+    });
+    wrap.querySelector('.shot-gen-body').addEventListener('click', e => {
+        if(!shotGenState) return;
+        const count = e.target.closest?.('[data-shot-gen-count]');
+        if(count){
+            shotGenState.count = count.dataset.shotGenCount || 'auto';
+            wrap.querySelectorAll('[data-shot-gen-count]').forEach(btn => btn.classList.toggle('is-on', btn === count));
+            return;
+        }
+        const mode = e.target.closest?.('[data-shot-gen-mode]');
+        if(mode){
+            shotGenState.mode = mode.dataset.shotGenMode || 'replace';
+            wrap.querySelectorAll('[data-shot-gen-mode]').forEach(btn => btn.classList.toggle('is-on', btn === mode));
+        }
+    });
+    return wrap;
+}
+function shotGenSyncForm(){
+    const el = shotGenEl;
+    if(!el || !shotGenState) return;
+    const scriptNode = shotGenState.sourceId ? nodes.find(item => item.id === shotGenState.sourceId) : null;
+    const isScript = Boolean(scriptNode);
+    el.querySelector('.shot-gen-text-wrap').hidden = isScript;
+    el.querySelector('.shot-gen-count-wrap').hidden = isScript;
+    const go = el.querySelector('.shot-gen-go');
+    if(!shotGenState.loading) go.textContent = isScript ? '直接转成表格' : '生成分镜表';
+    el.querySelector('.shot-gen-tip').textContent = isScript
+        ? `不调用模型：把「${String(scriptNode.title || '分镜脚本').slice(0, 16)}」的 ${storyboardRowsForNode(scriptNode).length} 条分镜按字段映射进六列，角色 / 场景 / 光影 / 音效存进隐藏字段，「全部转提示词」时仍然用得上。`
+        : '剧本会按段落分批送模型，自动配景别运镜、时间、字幕与旁白。整批只压一次撤销。';
+}
+function shotGenSetLoading(loading, label = ''){
+    if(!shotGenState) return;
+    shotGenState.loading = Boolean(loading);
+    const el = shotGenEl;
+    if(!el) return;
+    const go = el.querySelector('.shot-gen-go');
+    go.disabled = Boolean(loading);
+    if(loading){
+        go.textContent = label || '正在拆镜';
+    } else {
+        const scriptNode = shotGenState.sourceId ? nodes.find(item => item.id === shotGenState.sourceId) : null;
+        go.textContent = scriptNode ? '直接转成表格' : '生成分镜表';
+    }
+}
+function openShotTableGenPanel(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'smart-shot-table');
+    if(!node) return;
+    const el = shotGenEnsureDom();
+    const scripts = nodes.filter(item => isStoryboardScriptNode(item));
+    const select = el.querySelector('.shot-gen-source');
+    select.innerHTML = `<option value="">直接写剧本</option>` + scripts.map(item => {
+        const count = storyboardRowsForNode(item).length;
+        const name = String(item.title || '分镜脚本').slice(0, 18);
+        return `<option value="${escapeAttr(item.id)}">分镜脚本 · ${escapeHtml(name)}（${count} 镜）</option>`;
+    }).join('');
+    select.value = '';
+    const text = el.querySelector('.shot-gen-text');
+    text.value = '';
+    el.querySelectorAll('[data-shot-gen-count]').forEach(btn => btn.classList.toggle('is-on', btn.dataset.shotGenCount === 'auto'));
+    el.querySelector('.shot-gen-mode-wrap').hidden = !shotTableHasContent(node);
+    el.querySelectorAll('[data-shot-gen-mode]').forEach(btn => btn.classList.toggle('is-on', btn.dataset.shotGenMode === 'replace'));
+    shotGenState = {nodeId, sourceId:'', count:'auto', mode:'replace', loading:false};
+    shotGenSetLoading(false);
+    shotGenSyncForm();
+    el.hidden = false;
+    document.body.classList.add('shot-gen-open');
+    setTimeout(() => text.focus(), 30);
+}
+function closeShotTableGenPanel(){
+    const el = shotGenEl;
+    if(el) el.hidden = true;
+    document.body.classList.remove('shot-gen-open');
+    shotGenState = null;
+}
+async function shotGenSubmit(){
+    const state = shotGenState;
+    const el = shotGenEl;
+    if(!state || !el || state.loading) return;
+    const node = nodes.find(item => item.id === state.nodeId && item.type === 'smart-shot-table');
+    if(!node){ closeShotTableGenPanel(); return; }
+    const scriptNode = state.sourceId ? nodes.find(item => item.id === state.sourceId) : null;
+    if(scriptNode){
+        const rows = shotTableRowsFromStoryboard(scriptNode);
+        if(!rows.length){ toast('这个脚本里还没有可用的分镜'); return; }
+        const written = shotTableApplyGeneratedRows(node, rows, state.mode);
+        closeShotTableGenPanel();
+        toast(`已从脚本转入 ${written} 镜 · 约 ${shotTableTotalSeconds(node)}s`);
+        return;
+    }
+    const text = String(el.querySelector('.shot-gen-text').value || '').trim();
+    if(text.length < 8){ toast('先贴一段剧本，或从画布上选一个分镜脚本'); return; }
+    shotGenSetLoading(true, '正在拆镜');
+    try {
+        const rows = await shotTableGenerateFromSynopsis(text, state.count);
+        if(!rows.length) throw new Error('没有解析出分镜，换个说法或手工补两行再试');
+        const written = shotTableApplyGeneratedRows(node, rows, state.mode);
+        closeShotTableGenPanel();
+        toast(`已拆 ${written} 镜 · 约 ${shotTableTotalSeconds(node)}s`);
+    } catch(e) {
+        shotGenSetLoading(false);
+        toast((e?.message || '拆镜失败').slice(0, 160));
+    }
 }
 function storyboardScriptNodePreviewHtml(node){
     if(node.storyboardChooser){ return `<div class="storyboard-chooser-card"><div class="storyboard-chooser-icon">☰</div><div class="storyboard-chooser-title">脚本生成器</div><div class="storyboard-chooser-sub">尝试：</div><button data-storyboard-choice="script">☷ 剧本生成分镜脚本</button><button data-storyboard-choice="character">♙ 角色生成分镜脚本</button><button data-storyboard-choice="manual">▤ 自己编写分镜脚本</button></div>`; }

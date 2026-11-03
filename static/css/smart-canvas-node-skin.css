@@ -2692,19 +2692,19 @@ html body .world .image-node.shot-table-smart-node .shot-table-scroll {
 html body .world .image-node.shot-table-smart-node .shot-row {
     position: relative;
     display: grid;
-    grid-template-columns: 44px 66px 130px minmax(200px, 1fr) 196px 180px;
+    grid-template-columns: 44px 76px 130px minmax(200px, 1fr) 196px 180px;
     padding-right: 26px;
     align-items: stretch;
 }
 html body .world .image-node.shot-table-smart-node.shot-w-mid .shot-row {
-    grid-template-columns: 44px 66px 130px minmax(200px, 1fr);
+    grid-template-columns: 44px 76px 130px minmax(200px, 1fr);
 }
 html body .world .image-node.shot-table-smart-node.shot-w-compact .shot-row {
-    grid-template-columns: 44px 66px 130px minmax(180px, 1fr);
+    grid-template-columns: 44px 76px 130px minmax(180px, 1fr);
 }
 /* 最窄档保留「镜号 + 时间 + 画面」三列：时间只有几个字符，砍掉反而是信息损失 */
 html body .world .image-node.shot-table-smart-node.shot-w-narrow .shot-row {
-    grid-template-columns: 44px 62px minmax(150px, 1fr);
+    grid-template-columns: 44px 70px minmax(150px, 1fr);
 }
 html body .world .image-node.shot-table-smart-node.shot-w-mid [data-col="onScreenText"],
 html body .world .image-node.shot-table-smart-node.shot-w-compact [data-col="onScreenText"],
@@ -2713,6 +2713,13 @@ html body .world .image-node.shot-table-smart-node.shot-w-compact [data-col="voi
 html body .world .image-node.shot-table-smart-node.shot-w-narrow [data-col="voiceover"],
 html body .world .image-node.shot-table-smart-node.shot-w-narrow [data-col="shotSize"] {
     display: none !important;
+}
+
+/* 时间列：区间写法（5.5-9.5s）不能被挤成两行 */
+html body .world .image-node.shot-table-smart-node [data-col="time"] {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* 表头吸顶 */
