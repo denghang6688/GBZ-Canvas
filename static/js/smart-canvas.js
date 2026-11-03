@@ -4171,6 +4171,7 @@ function nodeBarMetaHtml(node, imgs=[]){
     return `<span class="node-resolution" data-node-resolution="1">${escapeHtml(label)}</span>`;
 }
 function smartNodeTitleIcon(node, imgs=[]){
+    if(node?.type === 'smart-director-stage') return 'axis-3d';
     if(Array.isArray(imgs) && imgs.length === 1){
         return smartMaterialTitleIcon(mediaKindForItem(imageForDisplay(imgs[0])));
     }
@@ -4189,6 +4190,7 @@ function smartNodeTitle(node, imgs=[]){    if(node?.type === 'workflow-group') r
     if(node?.type === 'smart-loop') return 'Loop';
     if(node?.type === 'smart-storyboard') return node.title || '分镜脚本';
     if(node?.type === 'smart-shot-table') return node.title || '分镜表';
+    if(node?.type === 'smart-director-stage') return node.title || '导演台';
     // 2026-09-28 用户要求：上传节点标题统一显示「上传」
     if(node?.uploadEntry === true && !(Array.isArray(imgs) && imgs.length)) return '上传';
     if(Array.isArray(imgs) && imgs.some(i => i?.grid?.type === 'grid-split')){
@@ -7037,6 +7039,14 @@ function imageLayout(images, scale=1, node=null){
         rows:1,
         width:Math.round(Math.max(SHOT_TABLE_MIN_WIDTH, Number(node.w) || SHOT_TABLE_DEFAULT_WIDTH)),
         height:Math.round(Math.max(SHOT_TABLE_MIN_HEIGHT, Number(node.h) || SHOT_TABLE_DEFAULT_HEIGHT)),
+        thumb:96,
+        single:true
+    };
+    if(node?.type === 'smart-director-stage') return {
+        cols:1,
+        rows:1,
+        width:Math.round(Math.max(DIRECTOR_NODE_MIN_WIDTH, Number(node.w) || DIRECTOR_NODE_DEFAULT_WIDTH)),
+        height:Math.round(Math.max(DIRECTOR_NODE_MIN_HEIGHT, Number(node.h) || DIRECTOR_NODE_DEFAULT_HEIGHT)),
         thumb:96,
         single:true
     };
@@ -19785,6 +19795,1034 @@ async function shotGenSubmit(){
         toast((e?.message || '拆镜失败').slice(0, 160));
     }
 }
+/* ===== 2026-11-03 3D 导演台节点（smart-director-stage）=====
+   参考开源项目 StoryAI-3D-Director-Desk（github.com/jiguang132/storyai-3d-director-desk，MIT）的
+   功能取舍：导演视角 / 机位视角、比例框、九宫格、把场景对象摆进 3D 空间、机位拍摄 + 截图记录。
+   它本体是 React + R3F 的独立应用，直接 iframe 进来拿不到画布里的角色资产，所以这里用项目里已有的
+   three 0.160 原生实现一套更轻的：素材直接取画布上的资产节点（assetMeta），拍完的图直接落成画布图片节点。
+   ============================================================ */
+const DIRECTOR_NODE_DEFAULT_WIDTH = 560;
+const DIRECTOR_NODE_DEFAULT_HEIGHT = 470;
+const DIRECTOR_NODE_MIN_WIDTH = 380;
+const DIRECTOR_NODE_MIN_HEIGHT = 320;
+const DIRECTOR_RATIOS = [['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]];
+const DIRECTOR_PRIMITIVES = [
+    {kind:'box', label:'方块'},
+    {kind:'cylinder', label:'圆柱'},
+    {kind:'sphere', label:'球体'},
+    {kind:'slab', label:'地台'}
+];
+let directorThreePromise = null;
+let directorStageEl = null;
+let directorStage = null;
+
+function directorGizmoSvg(){
+    return `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true">
+        <path d="M32 31V11"/><path d="M32 31L17 46"/><path d="M32 31L47 46"/>
+        <circle cx="32" cy="9" r="3.4" fill="currentColor" stroke="none"/>
+        <circle cx="16" cy="47" r="3.4" fill="currentColor" stroke="none"/>
+        <circle cx="48" cy="47" r="3.4" fill="currentColor" stroke="none"/>
+    </svg>`;
+}
+function directorRatioValue(ratio){
+    const hit = DIRECTOR_RATIOS.find(item => item[0] === ratio);
+    return hit ? hit[1] : 16 / 9;
+}
+function directorStageData(node, create){
+    if(!node) return null;
+    if(!node.stage3d && create){
+        node.stage3d = {version:1, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[]};
+    }
+    const data = node.stage3d;
+    if(!data) return null;
+    if(!Array.isArray(data.objects)) data.objects = [];
+    if(!Array.isArray(data.cameras)) data.cameras = [];
+    if(!Array.isArray(data.shots)) data.shots = [];
+    if(!data.ratio) data.ratio = '16:9';
+    if(!data.mode) data.mode = 'director';
+    return data;
+}
+function directorShotCount(node){
+    return directorStageData(node)?.shots?.length || 0;
+}
+function directorNodeBodyHtml(node){
+    const data = directorStageData(node);
+    const shots = data?.shots || [];
+    if(!shots.length){
+        return `<div class="director-empty">
+            <span class="director-empty-icon">${directorGizmoSvg()}</span>
+            <p>在3D空间中搭建场景并进行多视角截图</p>
+            <button class="director-open-btn" type="button" data-director-open="${escapeAttr(node.id)}">打开导演台</button>
+        </div>`;
+    }
+    const thumbs = shots.slice(0, 4).map((shot, index) => {
+        const ratioCss = String(shot.ratio || data.ratio || '16:9').replace(':', ' / ');
+        return `<span class="director-thumb" style="aspect-ratio:${ratioCss}"><img src="${escapeAttr(shot.url)}" alt="" draggable="false"><em>${escapeHtml(shot.cameraName || `镜头 ${index + 1}`)}</em></span>`;
+    }).join('');
+    const galleryClass = shots.length === 1 ? ' is-single' : (shots.length === 2 ? ' is-double' : '');
+    return `<div class="director-card">
+        <div class="director-card-gallery${galleryClass}">
+            ${thumbs}
+            ${shots.length > 4 ? `<span class="director-thumb-more">+${shots.length - 4}</span>` : ''}
+        </div>
+        <div class="director-card-foot">
+            <span class="director-card-meta">${data.cameras.length} 个机位 · ${shots.length} 张镜头图 · ${escapeHtml(data.ratio)}</span>
+            <button class="director-open-btn is-small" type="button" data-director-open="${escapeAttr(node.id)}">打开导演台</button>
+        </div>
+    </div>`;
+}
+function createDirectorStageNode(x, y, options={}){
+    if(!options.skipUndo) pushUndo();
+    const node = {
+        id: uid('stage3d'),
+        type: 'smart-director-stage',
+        x,
+        y,
+        w: Number(options.width) || DIRECTOR_NODE_DEFAULT_WIDTH,
+        h: Number(options.height) || DIRECTOR_NODE_DEFAULT_HEIGHT,
+        title: options.title || '导演台',
+        stage3d: options.stage3d || {version:1, ratio:'16:9', grid:true, mode:'director', objects:[], cameras:[], activeCameraId:'', shots:[]},
+        created_at: Date.now()
+    };
+    nodes.push(node);
+    if(options.select !== false) selectedId = node.id;
+    if(!options.skipRender) render();
+    if(!options.skipSave) scheduleSave();
+    return node;
+}
+function directorEnsureThree(){
+    if(!directorThreePromise){
+        directorThreePromise = import('/static/vendor/js/three-0.160.0.module.js?v=canvas-ui-V10-05');
+    }
+    return directorThreePromise;
+}
+
+/* ---------- 面板 DOM ---------- */
+function directorEnsureDom(){
+    if(directorStageEl) return directorStageEl;
+    const wrap = document.createElement('div');
+    wrap.className = 'director-mask';
+    wrap.hidden = true;
+    wrap.innerHTML = `<section class="director-shell" role="dialog" aria-modal="true" aria-label="3D 导演台">
+        <header class="director-head">
+            <div class="director-brand"><span class="director-brand-icon">${directorGizmoSvg()}</span><strong>导演台</strong><span class="director-sub" data-director-sub></span></div>
+            <div class="director-head-mid">
+                <div class="director-seg">
+                    <button type="button" data-director-mode="director">导演视角</button>
+                    <button type="button" data-director-mode="camera">机位视角</button>
+                </div>
+                <div class="director-ratios">${DIRECTOR_RATIOS.map(([ratio]) => `<button type="button" data-director-ratio="${ratio}">${ratio}</button>`).join('')}</div>
+                <button class="director-toggle" type="button" data-director-grid>九宫格</button>
+            </div>
+            <div class="director-head-right">
+                <button class="director-shoot" type="button" data-director-shoot><i data-lucide="camera"></i><span>拍摄</span></button>
+                <button class="director-close" type="button" data-director-close aria-label="关闭">&times;</button>
+            </div>
+        </header>
+        <div class="director-main">
+            <aside class="director-rail">
+                <div class="director-rail-head">画布资产</div>
+                <div class="director-rail-list" data-director-rail></div>
+                <div class="director-rail-head">基础形体</div>
+                <div class="director-prims">${DIRECTOR_PRIMITIVES.map(item => `<button type="button" class="director-prim" data-director-prim="${item.kind}"><i data-lucide="${item.kind === 'sphere' ? 'circle' : item.kind === 'cylinder' ? 'cylinder' : item.kind === 'slab' ? 'square' : 'box'}"></i><span>${item.label}</span></button>`).join('')}</div>
+            </aside>
+            <div class="director-viewport" data-director-viewport>
+                <canvas class="director-canvas" data-director-canvas></canvas>
+                <div class="director-frame" data-director-frame>
+                    <i class="director-grid-v" style="left:33.333%"></i>
+                    <i class="director-grid-v" style="left:66.666%"></i>
+                    <i class="director-grid-h" style="top:33.333%"></i>
+                    <i class="director-grid-h" style="top:66.666%"></i>
+                    <span class="director-frame-label" data-director-frame-label></span>
+                </div>
+                <div class="director-tip">左键旋转 · 滚轮缩放 · 右键平移 · 拖动物体移动 · 点空白处取消选择</div>
+            </div>
+            <aside class="director-props" data-director-props></aside>
+        </div>
+        <footer class="director-foot">
+            <span class="director-foot-title">镜头记录</span>
+            <div class="director-shots" data-director-shots></div>
+        </footer>
+        <div class="director-lightbox" data-director-lightbox hidden>
+            <img alt="镜头预览">
+            <div class="director-lightbox-actions">
+                <button type="button" data-director-shot-insert>再插入一张</button>
+                <button type="button" data-director-lightbox-close>关闭</button>
+            </div>
+        </div>
+    </section>`;
+    document.body.appendChild(wrap);
+    directorStageEl = wrap;
+    directorBindDom(wrap);
+    return wrap;
+}
+function directorBindDom(wrap){
+    wrap.addEventListener('click', e => {
+        if(e.target === wrap){ closeDirectorStage(); return; }
+        if(e.target.closest('[data-director-close]')){ closeDirectorStage(); return; }
+        const mode = e.target.closest('[data-director-mode]');
+        if(mode){ directorStage.data.mode = mode.dataset.directorMode; directorSyncChrome(); scheduleSave(); return; }
+        const ratio = e.target.closest('[data-director-ratio]');
+        if(ratio){ directorStage.data.ratio = ratio.dataset.directorRatio; directorSyncChrome(); directorResize(); scheduleSave(); return; }
+        if(e.target.closest('[data-director-grid]')){
+            directorStage.data.grid = !directorStage.data.grid;
+            directorSyncChrome();
+            scheduleSave();
+            return;
+        }
+        if(e.target.closest('[data-director-shoot]')){ directorShoot(); return; }
+        if(e.target.closest('[data-director-add-cam]')){ directorAddCamera(); return; }
+        const camUse = e.target.closest('[data-director-cam-use]');
+        if(camUse){
+            directorStage.data.activeCameraId = camUse.dataset.directorCamUse;
+            directorStage.data.mode = 'camera';
+            directorSyncChrome();
+            scheduleSave();
+            return;
+        }
+        const camDel = e.target.closest('[data-director-cam-del]');
+        if(camDel){
+            const id = camDel.dataset.directorCamDel;
+            directorStage.data.cameras = directorStage.data.cameras.filter(cam => cam.id !== id);
+            if(directorStage.data.activeCameraId === id) directorStage.data.activeCameraId = directorStage.data.cameras[0]?.id || '';
+            directorRemoveCameraMarker(id);
+            directorSyncChrome();
+            scheduleSave();
+            return;
+        }
+        const asset = e.target.closest('[data-director-asset]');
+        if(asset){ directorAddAssetObject(asset.dataset.directorAsset); return; }
+        const prim = e.target.closest('[data-director-prim]');
+        if(prim){ directorAddPrimitive(prim.dataset.directorPrim); return; }
+        if(e.target.closest('[data-director-obj-del]')){
+            directorDeleteSelected();
+            return;
+        }
+        const shot = e.target.closest('[data-director-shot-view]');
+        if(shot){ directorOpenLightbox(Number(shot.dataset.directorShotView)); return; }
+        if(e.target.closest('[data-director-lightbox-close]')){ directorCloseLightbox(); return; }
+        if(e.target.closest('[data-director-shot-insert]')){
+            const index = Number(directorStage?.lightboxIndex);
+            directorCloseLightbox();
+            if(Number.isFinite(index)) directorInsertShot(index);
+        }
+    });
+    // 画布上有些浮层（视频截取、深度图等）在 window 捕获阶段就把 Escape 吞掉了，
+    // 这里同样挂在捕获阶段（同节点后注册的监听仍会执行），保证 Esc 一定能关导演台。
+    window.addEventListener('keydown', e => {
+        if(!directorStageEl || directorStageEl.hidden) return;
+        if(e.key === 'Escape'){ e.preventDefault(); closeDirectorStage(); }
+    }, true);
+    wrap.addEventListener('input', e => {
+        const input = e.target.closest('[data-director-prop]');
+        if(!input || !directorStage) return;
+        const obj = directorStage.data.objects.find(item => item.id === directorStage.selectedId);
+        if(!obj) return;
+        const value = Number(input.value);
+        if(!Number.isFinite(value)) return;
+        const key = input.dataset.directorProp;
+        if(key === 'px') obj.position[0] = value;
+        else if(key === 'pz') obj.position[2] = value;
+        else if(key === 'ry') obj.rotation[1] = value * Math.PI / 180;
+        else if(key === 's'){ obj.scale = [value, value, value]; }
+        directorApplyObjectTransform(obj);
+        scheduleSave();
+    });
+}
+function directorSyncChrome(){
+    const st = directorStage;
+    if(!st || !directorStageEl) return;
+    const data = st.data;
+    const wrap = directorStageEl;
+    const sub = wrap.querySelector('[data-director-sub]');
+    if(sub) sub.textContent = `${data.objects.length} 个物体 · ${data.cameras.length} 个机位 · ${data.shots.length} 张镜头图`;
+    wrap.querySelectorAll('[data-director-mode]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.directorMode === data.mode));
+    wrap.querySelectorAll('[data-director-ratio]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.directorRatio === data.ratio));
+    const gridBtn = wrap.querySelector('[data-director-grid]');
+    if(gridBtn) gridBtn.classList.toggle('is-active', Boolean(data.grid));
+    const frame = wrap.querySelector('[data-director-frame]');
+    if(frame) frame.classList.toggle('hide-grid', !data.grid);
+    const label = wrap.querySelector('[data-director-frame-label]');
+    if(label) label.textContent = data.ratio;
+    directorRenderRail();
+    directorRenderProps();
+    directorRenderShots();
+    refreshIcons();
+}
+function directorRenderRail(){
+    const wrap = directorStageEl;
+    if(!wrap || !directorStage) return;
+    const list = wrap.querySelector('[data-director-rail]');
+    if(!list) return;
+    const assets = assetAllNodes();
+    if(!assets.length){
+        list.innerHTML = `<div class="director-rail-empty">画布里还没有资产<br>在分镜表「资产」里准备角色 / 场景 / 道具后再回来</div>`;
+        return;
+    }
+    list.innerHTML = assets.map(node => {
+        const url = assetImageUrl(node);
+        const kind = assetKindMeta(node.assetMeta?.kind).label;
+        return `<button type="button" class="director-rail-item${url ? '' : ' is-empty'}" data-director-asset="${escapeAttr(node.id)}" title="${escapeAttr(url ? `${assetDisplayName(node)} · 加入场景` : '这个资产还没有设定图')}">
+            ${url ? `<img src="${escapeAttr(url)}" alt="" draggable="false">` : `<i data-lucide="image-off"></i>`}
+            <span><b>${escapeHtml(assetDisplayName(node))}</b><em>${escapeHtml(kind)}</em></span>
+        </button>`;
+    }).join('');
+}
+function directorPropsHtml(){
+    const st = directorStage;
+    if(!st) return '';
+    const data = st.data;
+    const cams = data.cameras.map(cam => `<div class="director-cam${cam.id === data.activeCameraId ? ' is-active' : ''}">
+        <button type="button" class="director-cam-name" data-director-cam-use="${escapeAttr(cam.id)}"><i data-lucide="video"></i><span>${escapeHtml(cam.name)}</span></button>
+        <button type="button" class="director-cam-del" data-director-cam-del="${escapeAttr(cam.id)}" aria-label="删除机位">&times;</button>
+    </div>`).join('');
+    const obj = data.objects.find(item => item.id === st.selectedId);
+    const props = obj ? `<div class="director-prop-name">${escapeHtml(obj.name || '未命名物体')}</div>
+        <div class="director-field-row">
+            <label class="director-field"><span>X</span><input type="number" step="0.1" data-director-prop="px" value="${(obj.position[0] || 0).toFixed(2)}"></label>
+            <label class="director-field"><span>Z</span><input type="number" step="0.1" data-director-prop="pz" value="${(obj.position[2] || 0).toFixed(2)}"></label>
+        </div>
+        <div class="director-field-row">
+            <label class="director-field"><span>朝向</span><input type="number" step="5" data-director-prop="ry" value="${Math.round((obj.rotation?.[1] || 0) * 180 / Math.PI)}"></label>
+            <label class="director-field"><span>缩放</span><input type="number" step="0.05" min="0.1" data-director-prop="s" value="${(obj.scale?.[0] || 1).toFixed(2)}"></label>
+        </div>
+        <button type="button" class="director-obj-del" data-director-obj-del>从场景移除</button>`
+        : `<div class="director-empty-note">选中场景里的角色或物体，可以在这里精确调位置和朝向</div>`;
+    return `<div class="director-panel-head"><span>机位</span><button type="button" data-director-add-cam>+ 添加</button></div>
+        <div class="director-cams">${cams || `<div class="director-empty-note">还没有机位。调好导演视角后点「添加」，把当前视角存成机位</div>`}</div>
+        <div class="director-panel-head"><span>属性</span></div>
+        <div class="director-props-body">${props}</div>`;
+}
+function directorRenderProps(){
+    const wrap = directorStageEl;
+    if(!wrap) return;
+    const host = wrap.querySelector('[data-director-props]');
+    if(host) host.innerHTML = directorPropsHtml();
+    refreshIcons();
+}
+function directorRenderShots(){
+    const wrap = directorStageEl;
+    if(!wrap || !directorStage) return;
+    const host = wrap.querySelector('[data-director-shots]');
+    if(!host) return;
+    const shots = directorStage.data.shots;
+    if(!shots.length){
+        host.innerHTML = `<div class="director-shots-empty">还没有镜头。摆好画面后点右上角「拍摄」，截图会自动落到画布上。</div>`;
+        return;
+    }
+    host.innerHTML = shots.map((shot, index) => `<button type="button" class="director-shot" data-director-shot-view="${index}" title="查看 / 再插入一张">
+        <img src="${escapeAttr(shot.url)}" alt="" draggable="false">
+        <em>${escapeHtml(shot.cameraName || `镜头 ${index + 1}`)}</em>
+    </button>`).join('');
+}
+
+/* ---------- Three 场景 ---------- */
+async function openDirectorStage(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'smart-director-stage');
+    if(!node) return;
+    const wrap = directorEnsureDom();
+    if(directorStage) directorDisposeStage();
+    wrap.hidden = false;
+    wrap.querySelector('[data-director-props]').innerHTML = '<div class="director-loading">正在装载 3D 场景…</div>';
+    let THREE;
+    try{
+        THREE = await directorEnsureThree();
+    }catch(err){
+        wrap.querySelector('[data-director-props]').innerHTML = `<div class="director-loading">3D 引擎加载失败：${escapeHtml(String(err?.message || err).slice(0, 120))}</div>`;
+        return;
+    }
+    if(wrap.hidden) return;
+    const data = directorStageData(node, true);
+    directorStage = {
+        nodeId: node.id,
+        node,
+        data,
+        THREE,
+        selectedId: data.objects[0]?.id || '',
+        view: null,
+        lightboxIndex: -1
+    };
+    directorBuildScene();
+    directorSyncChrome();
+    directorResize();
+    directorStartLoop();
+    setTimeout(() => directorResize(), 60);
+}
+function directorBuildScene(){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const wrap = directorStageEl;
+    const canvas = wrap.querySelector('[data-director-canvas]');
+    const viewport = wrap.querySelector('[data-director-viewport]');
+    const renderer = new THREE.WebGLRenderer({canvas, antialias:true, preserveDrawingBuffer:true, alpha:false});
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.shadowMap.enabled = false;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0d0f12);
+    scene.fog = new THREE.Fog(0x0d0f12, 32, 78);
+    const hemi = new THREE.HemisphereLight(0xe4ecff, 0x1a1c20, 1.05);
+    // 有一块真的地面，网格才不是浮在黑里；阴影也才有落点
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({color:0x20242a, roughness:0.92, metalness:0}));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.002;
+    floor.receiveShadow = true;
+    const key = new THREE.DirectionalLight(0xfff4e2, 2.2);
+    key.position.set(6.5, 10, 5.5);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left = -10;
+    key.shadow.camera.right = 10;
+    key.shadow.camera.top = 10;
+    key.shadow.camera.bottom = -10;
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far = 46;
+    key.shadow.bias = -0.0006;
+    key.shadow.camera.updateProjectionMatrix();
+    const rim = new THREE.DirectionalLight(0x9dc4ff, 0.9);
+    rim.position.set(-7, 6.5, -6.5);
+    const grid = new THREE.GridHelper(40, 40, 0xb4bec9, 0x59616d);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.72;
+    grid.position.y = 0.006;
+    const markerGroup = new THREE.Group();
+    scene.add(hemi, key, rim, floor, grid, markerGroup);
+    st.grid = grid;
+    st.markerGroup = markerGroup;
+    st.scene = scene;
+    st.renderer = renderer;
+    st.canvas = canvas;
+    st.viewportEl = viewport;
+    st.camera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 220);
+    st.raycaster = new THREE.Raycaster();
+    st.pointer = new THREE.Vector2();
+    st.view = {theta:0.66, phi:1.02, radius:8.8, target:new THREE.Vector3(0, 0.85, 0)};
+    st.objectRoots = new Map();
+    st.camRoots = new Map();
+    st.data.objects.forEach(obj => directorAddMesh(obj));
+    st.data.cameras.forEach(cam => directorAddCameraMarker(cam));
+    if(!st.data.cameras.some(cam => cam.id === st.data.activeCameraId)){
+        st.data.activeCameraId = st.data.cameras[0]?.id || '';
+    }
+    if(!st.selectedId && st.data.objects.length) st.selectedId = st.data.objects[0].id;
+    directorApplyObjectSelection();
+    directorBindCanvas(canvas);
+    if(st.ro){
+        st.ro.disconnect();
+    }
+    st.ro = new ResizeObserver(() => directorResize());
+    st.ro.observe(viewport);
+}
+function directorBindCanvas(canvas){
+    const st = directorStage;
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    // 视口里的拖动不能冒到节点上（否则会连带拖动画布节点 / 触发选中）
+    ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'dblclick', 'mousedown'].forEach(type => {
+        canvas.addEventListener(type, e => e.stopPropagation());
+    });
+    canvas.addEventListener('pointerdown', e => {
+        if(!directorStage) return;
+        canvas.setPointerCapture(e.pointerId);
+        const s = directorStage;
+        s.drag = {kind:'', x:e.clientX, y:e.clientY, moved:false};
+        if(s.data.mode === 'camera'){
+            s.drag.kind = 'none';
+            return;
+        }
+        const hitId = directorPick(e.clientX, e.clientY);
+        if(hitId && e.button === 0){
+            directorSelectObject(hitId);
+            const root = s.objectRoots.get(hitId);
+            const obj = s.data.objects.find(item => item.id === hitId);
+            const point = directorGroundPoint(e.clientX, e.clientY);
+            s.drag.kind = 'object';
+            s.drag.objId = hitId;
+            s.drag.offset = point && root
+                ? {x: root.position.x - point.x, z: root.position.z - point.z}
+                : {x:0, z:0};
+            if(obj) s.drag.start = {pos:[...obj.position], rot:[...(obj.rotation || [0,0,0])]};
+        }else if(e.button === 2 || e.shiftKey){
+            s.drag.kind = 'pan';
+        }else{
+            s.drag.kind = 'orbit';
+            if(!hitId) directorSelectObject('');
+        }
+    });
+    canvas.addEventListener('pointermove', e => {
+        const s = directorStage;
+        if(!s || !s.drag) return;
+        const dx = e.clientX - s.drag.x;
+        const dy = e.clientY - s.drag.y;
+        if(Math.abs(dx) + Math.abs(dy) > 2) s.drag.moved = true;
+        if(s.drag.kind === 'orbit'){
+            s.view.theta -= dx * 0.0072;
+            s.view.phi = Math.min(1.46, Math.max(0.16, s.view.phi - dy * 0.0055));
+            directorApplyOrbit();
+        }else if(s.drag.kind === 'pan'){
+            directorPanByPixels(dx, dy);
+        }else if(s.drag.kind === 'object'){
+            const point = directorGroundPoint(e.clientX, e.clientY);
+            const obj = s.data.objects.find(item => item.id === s.drag.objId);
+            const root = s.objectRoots.get(s.drag.objId);
+            if(point && obj && root){
+                obj.position[0] = Math.round((point.x + s.drag.offset.x) * 100) / 100;
+                obj.position[2] = Math.round((point.z + s.drag.offset.z) * 100) / 100;
+                root.position.set(obj.position[0], obj.position[1] || 0, obj.position[2]);
+            }
+        }
+        s.drag.x = e.clientX;
+        s.drag.y = e.clientY;
+    });
+    const endDrag = () => {
+        const s = directorStage;
+        if(!s || !s.drag) return;
+        if(s.drag.moved && s.drag.kind === 'object'){
+            directorRenderProps();
+            scheduleSave();
+        }
+        s.drag = null;
+    };
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('wheel', e => {
+        if(!directorStage) return;
+        e.preventDefault();
+        const s = directorStage;
+        s.view.radius = Math.min(34, Math.max(2.4, s.view.radius * Math.exp(e.deltaY * 0.0012)));
+        directorApplyOrbit();
+    }, {passive:false});
+}
+function directorApplyOrbit(){
+    const st = directorStage;
+    if(!st) return;
+    const {target, radius, theta, phi} = st.view;
+    st.camera.position.set(
+        target.x + radius * Math.sin(phi) * Math.sin(theta),
+        target.y + radius * Math.cos(phi),
+        target.z + radius * Math.sin(phi) * Math.cos(theta)
+    );
+    st.camera.lookAt(target);
+}
+function directorPanByPixels(dx, dy){
+    const st = directorStage;
+    const cam = st.camera;
+    const scale = st.view.radius * 0.0016;
+    const right = new st.THREE.Vector3();
+    const up = new st.THREE.Vector3();
+    cam.matrixWorld.extractBasis(right, up, new st.THREE.Vector3());
+    st.view.target.addScaledVector(right, -dx * scale);
+    st.view.target.addScaledVector(up, dy * scale);
+    directorApplyOrbit();
+}
+function directorGroundPoint(clientX, clientY){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const f = directorFrameRect();
+    const rect = st.canvas.getBoundingClientRect();
+    const nx = ((clientX - rect.left - f.x) / f.w) * 2 - 1;
+    const ny = -(((clientY - rect.top - f.y) / f.h) * 2 - 1);
+    st.pointer.set(nx, ny);
+    st.raycaster.setFromCamera(st.pointer, st.camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const point = new THREE.Vector3();
+    const hit = st.raycaster.ray.intersectPlane(plane, point);
+    return hit ? point : null;
+}
+function directorPick(clientX, clientY){
+    const st = directorStage;
+    const f = directorFrameRect();
+    const rect = st.canvas.getBoundingClientRect();
+    const nx = ((clientX - rect.left - f.x) / f.w) * 2 - 1;
+    const ny = -(((clientY - rect.top - f.y) / f.h) * 2 - 1);
+    st.pointer.set(nx, ny);
+    st.raycaster.setFromCamera(st.pointer, st.camera);
+    const roots = [...st.objectRoots.values()];
+    if(!roots.length) return '';
+    const hits = st.raycaster.intersectObjects(roots, true);
+    if(!hits.length) return '';
+    let cursor = hits[0].object;
+    while(cursor && !cursor.userData.directorObjectId) cursor = cursor.parent;
+    return cursor?.userData.directorObjectId || '';
+}
+// 贴地的一团柔和暗影：比 shadowMap 稳（不挑灯、不炸面），摆位时能看出「站在地上」
+function directorContactShadowTexture(){
+    const st = directorStage;
+    if(st.contactShadowTexture) return st.contactShadowTexture;
+    const THREE = st.THREE;
+    const size = 128;
+    const cv = document.createElement('canvas');
+    cv.width = size;
+    cv.height = size;
+    const ctx = cv.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(0,0,0,.62)');
+    gradient.addColorStop(0.5, 'rgba(0,0,0,.3)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(cv);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    st.contactShadowTexture = texture;
+    return texture;
+}
+function directorAddMesh(obj){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const group = new THREE.Group();
+    group.userData.directorObjectId = obj.id;
+    group.position.set(obj.position?.[0] || 0, obj.position?.[1] || 0, obj.position?.[2] || 0);
+    group.rotation.set(obj.rotation?.[0] || 0, obj.rotation?.[1] || 0, obj.rotation?.[2] || 0);
+    const scale = obj.scale || [1, 1, 1];
+    group.scale.set(scale[0], scale[1], scale[2]);
+    let mesh = null;
+    if(obj.kind === 'asset'){
+        const height = 1.8;
+        // 角色按「立牌」处理：底边贴地，宽高比随贴图走，摆位时一眼能看出谁站哪儿
+        const mat = new THREE.MeshBasicMaterial({color:0x77808c, side:THREE.DoubleSide, transparent:true});
+        mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+        mesh.position.y = height / 2;
+        mesh.scale.set(height, height, 1);
+        mesh.castShadow = true;
+        group.add(mesh);
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin('anonymous');
+        loader.load(obj.url, tex => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            mat.map = tex;
+            mat.color.set(0xffffff);
+            mat.needsUpdate = true;
+            const image = tex.image || {};
+            const aspect = (image.width || 1) / (image.height || 1);
+            mesh.scale.set(height * aspect, height, 1);
+            if(directorStage?.selectionBox?.object === group) directorRefreshSelectionBox();
+        }, undefined, () => {});
+    }else{
+        const geometry = obj.kind === 'sphere'
+            ? new THREE.SphereGeometry(0.5, 32, 20)
+            : obj.kind === 'cylinder'
+                ? new THREE.CylinderGeometry(0.5, 0.5, 1, 28)
+                : obj.kind === 'slab'
+                    ? new THREE.BoxGeometry(3, 0.08, 3)
+                    : new THREE.BoxGeometry(1, 1, 1);
+        const mat = new THREE.MeshStandardMaterial({color:obj.color || 0x99a2ac, roughness:0.74, metalness:0.06});
+        mesh = new THREE.Mesh(geometry, mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.position.y = obj.kind === 'slab' ? 0.04 : 0.5;
+        group.add(mesh);
+    }
+    const shadow = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({map:directorContactShadowTexture(), transparent:true, depthWrite:false})
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.004;
+    shadow.scale.set(obj.kind === 'asset' ? 1.7 : (obj.kind === 'slab' ? 3.4 : 1.5), obj.kind === 'asset' ? 1.0 : 1.5, 1);
+    shadow.renderOrder = 1;
+    group.add(shadow);
+    group.userData.mainMesh = mesh;
+    st.scene.add(group);
+    st.objectRoots.set(obj.id, group);
+    return group;
+}
+function directorAddCameraMarker(cam){
+    const st = directorStage;
+    const THREE = st.THREE;
+    const group = new THREE.Group();
+    group.position.set(cam.position?.[0] || 0, cam.position?.[1] || 1.6, cam.position?.[2] || 0);
+    group.userData.directorCameraId = cam.id;
+    // 只画线框：导演视角常常就站在机位这个点上，实体机身会把整个画面糊住
+    const body = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(0.3, 0.22, 0.36)),
+        new THREE.LineBasicMaterial({color:0x7fb0ff})
+    );
+    const lens = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.24, 4), new THREE.MeshBasicMaterial({color:0xa9ccff, wireframe:true}));
+    lens.rotation.x = Math.PI / 2;
+    lens.position.z = 0.3;
+    group.add(body, lens);
+    group.lookAt(new THREE.Vector3(cam.target?.[0] || 0, cam.target?.[1] || 1, cam.target?.[2] || 0));
+    st.markerGroup.add(group);
+    st.camRoots.set(cam.id, group);
+}
+function directorRemoveCameraMarker(id){
+    const st = directorStage;
+    if(!st) return;
+    const group = st.camRoots.get(id);
+    if(group){
+        (group.parent || st.scene).remove(group);
+        st.camRoots.delete(id);
+    }
+}
+function directorSelectObject(id){
+    const st = directorStage;
+    if(!st) return;
+    st.selectedId = id || '';
+    directorApplyObjectSelection();
+    directorRenderProps();
+}
+function directorApplyObjectSelection(){
+    const st = directorStage;
+    if(!st) return;
+    if(st.selectionBox){
+        st.scene.remove(st.selectionBox);
+        st.selectionBox.geometry.dispose();
+        st.selectionBox.material.dispose();
+        st.selectionBox = null;
+    }
+    const root = st.objectRoots.get(st.selectedId);
+    if(!root) return;
+    // 贴地阴影比物体本身大一圈，包进去会让选中框看起来歪掉
+    const box = new st.THREE.BoxHelper(root.userData.mainMesh || root, 0x7fd4ff);
+    box.material.depthTest = false;
+    box.material.transparent = true;
+    box.material.opacity = 0.9;
+    st.scene.add(box);
+    st.selectionBox = box;
+}
+function directorRefreshSelectionBox(){
+    const st = directorStage;
+    if(!st?.selectionBox) return;
+    directorApplyObjectSelection();
+}
+
+/* 画布节点上的入口：按钮 / 双击都打开导演台 */
+function bindDirectorStageNodeControls(el, node){
+    if(!el || el.dataset.directorBound === '1') return;
+    el.dataset.directorBound = '1';
+    el.addEventListener('click', e => {
+        const open = e.target.closest('[data-director-open]');
+        if(!open) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openDirectorStage(node.id);
+    });
+    el.addEventListener('dblclick', e => {
+        if(e.target.closest('[data-director-open]')) return;
+        if(e.target.closest('.node-title')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openDirectorStage(node.id);
+    });
+}
+function directorApplyObjectTransform(obj){
+    const st = directorStage;
+    const root = st?.objectRoots.get(obj.id);
+    if(!root) return;
+    root.position.set(obj.position[0], obj.position[1] || 0, obj.position[2]);
+    root.rotation.set(obj.rotation?.[0] || 0, obj.rotation?.[1] || 0, obj.rotation?.[2] || 0);
+    const scale = obj.scale || [1, 1, 1];
+    root.scale.set(scale[0], scale[1], scale[2]);
+    directorRefreshSelectionBox();
+}
+function directorAddAssetObject(assetId){
+    const st = directorStage;
+    const asset = nodes.find(node => node.id === assetId);
+    if(!st || !asset) return;
+    const url = assetImageUrl(asset);
+    if(!url){ toast('这个资产还没有设定图，先在资产面板里生成或上传'); return; }
+    const data = st.data;
+    const index = data.objects.filter(obj => obj.kind === 'asset').length;
+    const obj = {
+        id: uid('obj'),
+        kind: 'asset',
+        assetId,
+        url,
+        name: assetDisplayName(asset),
+        position: [Math.round(((index % 4) - 1.5) * 1.4 * 100) / 100, 0, Math.round((Math.floor(index / 4) * 1.3) * 100) / 100],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1]
+    };
+    data.objects.push(obj);
+    directorAddMesh(obj);
+    st.selectedId = obj.id;
+    directorApplyObjectSelection();
+    directorSyncChrome();
+    scheduleSave();
+}
+function directorAddPrimitive(kind){
+    const st = directorStage;
+    if(!st) return;
+    const data = st.data;
+    const index = data.objects.length;
+    const obj = {
+        id: uid('obj'),
+        kind,
+        name: (DIRECTOR_PRIMITIVES.find(item => item.kind === kind)?.label) || '物体',
+        position: [((index % 3) - 1) * 1.2, 0, Math.floor(index / 3) * 1.2],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1]
+    };
+    data.objects.push(obj);
+    directorAddMesh(obj);
+    st.selectedId = obj.id;
+    directorApplyObjectSelection();
+    directorSyncChrome();
+    scheduleSave();
+}
+function directorDeleteSelected(){
+    const st = directorStage;
+    if(!st || !st.selectedId) return;
+    const id = st.selectedId;
+    st.data.objects = st.data.objects.filter(obj => obj.id !== id);
+    const root = st.objectRoots.get(id);
+    if(root){ st.scene.remove(root); st.objectRoots.delete(id); }
+    st.selectedId = '';
+    directorApplyObjectSelection();
+    directorSyncChrome();
+    scheduleSave();
+}
+function directorAddCamera(){
+    const st = directorStage;
+    if(!st) return;
+    const THREE = st.THREE;
+    const pos = st.camera.position.clone();
+    const target = st.view.target.clone();
+    const cam = {
+        id: uid('cam'),
+        name: `机位${String(st.data.cameras.length + 1).padStart(2, '0')}`,
+        position: [Math.round(pos.x * 100) / 100, Math.round(pos.y * 100) / 100, Math.round(pos.z * 100) / 100],
+        target: [Math.round(target.x * 100) / 100, Math.round(target.y * 100) / 100, Math.round(target.z * 100) / 100],
+        fov: 40
+    };
+    st.data.cameras.push(cam);
+    st.data.activeCameraId = cam.id;
+    directorAddCameraMarker(cam);
+    directorSyncChrome();
+    scheduleSave();
+    toast(`已添加 ${cam.name}`);
+}
+function directorFrameRect(){
+    const st = directorStage;
+    const el = st?.viewportEl;
+    if(!el) return {x:0, y:0, w:16, h:9};
+    const width = el.clientWidth || 960;
+    const height = el.clientHeight || 540;
+    const ratio = directorRatioValue(st.data.ratio);
+    // 底部多留一截给操作提示，竖屏画幅时提示条不会压在画面上
+    const padX = 16;
+    const padTop = 22;
+    const padBottom = 44;
+    let fw = width - padX * 2;
+    let fh = fw / ratio;
+    if(fh > height - padTop - padBottom){
+        fh = height - padTop - padBottom;
+        fw = fh * ratio;
+    }
+    return {
+        x: Math.round((width - fw) / 2),
+        y: Math.round(padTop + (height - padTop - padBottom - fh) / 2),
+        w: Math.max(2, Math.round(fw)),
+        h: Math.max(2, Math.round(fh))
+    };
+}
+function directorResize(){
+    const st = directorStage;
+    if(!st || !st.renderer) return;
+    const width = st.viewportEl.clientWidth || 960;
+    const height = st.viewportEl.clientHeight || 540;
+    st.renderer.setSize(width, height, false);
+    const frame = directorStageEl.querySelector('[data-director-frame]');
+    const rect = directorFrameRect();
+    if(frame){
+        frame.style.left = `${rect.x}px`;
+        frame.style.top = `${rect.y}px`;
+        frame.style.width = `${rect.w}px`;
+        frame.style.height = `${rect.h}px`;
+    }
+}
+function directorStartLoop(){
+    const st = directorStage;
+    if(!st) return;
+    const step = () => {
+        if(!directorStage || directorStage !== st) return;
+        directorRenderFrame();
+        st.raf = requestAnimationFrame(step);
+    };
+    if(st.raf) cancelAnimationFrame(st.raf);
+    st.raf = requestAnimationFrame(step);
+}
+function directorRenderFrame(){
+    const st = directorStage;
+    if(!st || !st.renderer) return;
+    const THREE = st.THREE;
+    const renderer = st.renderer;
+    const width = st.viewportEl.clientWidth || 960;
+    const height = st.viewportEl.clientHeight || 540;
+    const rect = directorFrameRect();
+    const camera = st.camera;
+    camera.aspect = directorRatioValue(st.data.ratio);
+    if(st.data.mode === 'camera'){
+        const cam = st.data.cameras.find(item => item.id === st.data.activeCameraId);
+        if(cam){
+            camera.fov = cam.fov || 40;
+            camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
+            camera.lookAt(new THREE.Vector3(cam.target[0], cam.target[1], cam.target[2]));
+        }
+    }else{
+        camera.fov = 45;
+        directorApplyOrbit();
+    }
+    camera.updateProjectionMatrix();
+    if(st.markerGroup){
+        st.markerGroup.visible = st.data.mode !== 'camera';
+        // 导演视角常常就站在机位上，离眼睛太近的线框会变成套在脸上的大框子
+        if(st.markerGroup.visible){
+            st.camRoots.forEach(group => {
+                group.visible = group.position.distanceTo(camera.position) > 1.6;
+            });
+        }
+    }
+    renderer.setScissorTest(false);
+    renderer.setClearColor(0x08090b, 1);
+    renderer.clear();
+    renderer.setScissorTest(true);
+    const glY = height - rect.y - rect.h;
+    renderer.setViewport(rect.x, glY, rect.w, rect.h);
+    renderer.setScissor(rect.x, glY, rect.w, rect.h);
+    renderer.render(st.scene, camera);
+    if(st.selectionBox) st.selectionBox.update();
+}
+function directorShoot(){
+    const st = directorStage;
+    if(!st) return;
+    const btn = directorStageEl.querySelector('[data-director-shoot]');
+    if(btn?.classList.contains('is-busy')) return;
+    const cam = st.data.cameras.find(item => item.id === st.data.activeCameraId) || st.data.cameras[0];
+    const ratio = directorRatioValue(st.data.ratio);
+    const width = 1440;
+    const height = Math.round(width / ratio);
+    const THREE = st.THREE;
+    const shotCamera = new THREE.PerspectiveCamera(cam?.fov || 40, ratio, 0.1, 220);
+    if(cam && st.data.mode === 'camera'){
+        shotCamera.position.set(cam.position[0], cam.position[1], cam.position[2]);
+        shotCamera.lookAt(new THREE.Vector3(cam.target[0], cam.target[1], cam.target[2]));
+    }else{
+        shotCamera.position.copy(st.camera.position);
+        shotCamera.lookAt(st.view.target);
+    }
+    shotCamera.updateProjectionMatrix();
+    const renderer = st.renderer;
+    // 截图是给分镜用的，辅助线 / 机位线框 / 选中框不要进画面
+    const helpers = [st.grid, st.markerGroup, st.selectionBox].filter(Boolean);
+    const visibility = helpers.map(item => item.visible);
+    helpers.forEach(item => { item.visible = false; });
+    const prevRatio = renderer.getPixelRatio();
+    renderer.setPixelRatio(1);
+    renderer.setScissorTest(false);
+    renderer.setSize(width, height, false);
+    renderer.setViewport(0, 0, width, height);
+    renderer.setClearColor(0x0d0f12, 1);
+    renderer.clear();
+    renderer.render(st.scene, shotCamera);
+    let dataUrl = '';
+    try{
+        dataUrl = renderer.domElement.toDataURL('image/png');
+    }catch(err){
+        toast(`截图失败：${String(err?.message || err).slice(0, 80)}`);
+    }
+    helpers.forEach((item, index) => { item.visible = visibility[index]; });
+    renderer.setPixelRatio(prevRatio);
+    directorResize();
+    if(!dataUrl) return;
+    btn?.classList.add('is-busy');
+    // 导演视角拍的就是眼前这一帧，标签别硬套成机位名
+    const camName = st.data.mode === 'camera' ? (cam?.name || '机位') : '导演视角';
+    directorUploadShot(dataUrl, camName, st.data.ratio).finally(() => btn?.classList.remove('is-busy'));
+}
+async function directorUploadShot(dataUrl, cameraName, ratio){
+    const st = directorStage;
+    if(!st) return;
+    let url = '';
+    try{
+        const blob = await (await fetch(dataUrl)).blob();
+        const form = new FormData();
+        form.append('files', blob, `director-${Date.now()}.png`);
+        const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await response.text());
+        const payload = await response.json();
+        url = payload.files?.[0]?.url || '';
+    }catch(err){
+        console.warn('director shot upload failed', err);
+    }
+    const host = nodes.find(node => node.id === st.nodeId);
+    if(!host) return;
+    // 上传失败时退回 dataURL，但超过 2.5MB 就别往画布里塞了（画布 JSON 会被撑爆）
+    if(!url){
+        if(dataUrl.length > 2_500_000){
+            toast('截图上传失败，图片太大没有插入画布');
+            return;
+        }
+        url = dataUrl;
+    }
+    const seq = (host.stage3d?.shots?.length || 0) + 1;
+    pushUndo();
+    host.stage3d.shots.unshift({id:uid('shot'), url, cameraName, ratio, at:Date.now()});
+    const x = Math.round((host.x || 0) + (host.w || DIRECTOR_NODE_DEFAULT_WIDTH) + 90);
+    const y = Math.round((host.y || 0) + Math.min(seq - 1, 6) * 40);
+    const imageNode = createImageNodeAt({x, y}, [{url, name:`镜头 ${seq}.png`}], {select:false, skipRender:true, skipSave:true});
+    imageNode.title = `镜头 ${seq}`;
+    imageNode.directorSourceId = host.id;
+    render();
+    scheduleSave();
+    directorSyncChrome();
+    toast(`已拍摄 ${cameraName}，图片落到画布右侧`);
+}
+function directorInsertShot(index){
+    const st = directorStage;
+    const host = st ? nodes.find(node => node.id === st.nodeId) : null;
+    if(!host) return;
+    const shot = host.stage3d?.shots?.[index];
+    if(!shot) return;
+    pushUndo();
+    const x = Math.round((host.x || 0) + (host.w || DIRECTOR_NODE_DEFAULT_WIDTH) + 90);
+    const y = Math.round((host.y || 0) + 40 + index * 24);
+    const imageNode = createImageNodeAt({x, y}, [{url:shot.url, name:`${shot.cameraName || '镜头'}.png`}], {select:false, skipRender:true, skipSave:true});
+    imageNode.title = shot.cameraName || '镜头';
+    imageNode.directorSourceId = host.id;
+    render();
+    scheduleSave();
+    toast('已再插入一张到画布');
+}
+function directorOpenLightbox(index){
+    const st = directorStage;
+    const host = st ? nodes.find(node => node.id === st.nodeId) : null;
+    const shot = host?.stage3d?.shots?.[index];
+    if(!shot) return;
+    st.lightboxIndex = index;
+    const box = directorStageEl.querySelector('[data-director-lightbox]');
+    if(!box) return;
+    box.hidden = false;
+    const img = box.querySelector('img');
+    if(img) img.src = shot.url;
+}
+function directorCloseLightbox(){
+    if(!directorStage) return;
+    directorStage.lightboxIndex = -1;
+    const box = directorStageEl.querySelector('[data-director-lightbox]');
+    if(box) box.hidden = true;
+}
+function directorDisposeStage(){
+    const st = directorStage;
+    if(!st) return;
+    if(st.raf) cancelAnimationFrame(st.raf);
+    if(st.ro) st.ro.disconnect();
+    try{
+        st.renderer?.dispose();
+        st.scene?.traverse(obj => {
+            obj.geometry?.dispose?.();
+            if(Array.isArray(obj.material)) obj.material.forEach(mat => mat.dispose());
+            else obj.material?.dispose?.();
+        });
+    }catch(err){ /* ignore */ }
+    directorStage = null;
+}
+function closeDirectorStage(){
+    directorCloseLightbox();
+    if(directorStageEl) directorStageEl.hidden = true;
+    directorDisposeStage();
+    render();
+    scheduleSave();
+}
+
 /* ===== 2026-11-03 分镜表 · 视频提示词闭环（第一期）=====
    参考截图那条三步流水线（确认镜头 → 准备资产 → 合成提示词），这一期只做最后一段：
    - 行详情抽屉：音效 / 运动 / 角色 / 视频提示词收进抽屉，主表仍保持六列可读
@@ -22525,6 +23563,7 @@ function nodeBodyHtml(node, layout){
     }
     if(node.type === 'smart-storyboard') return storyboardScriptNodePreviewHtml(node);
     if(node.type === 'smart-shot-table') return shotTableNodeBodyHtml(node);
+    if(node.type === 'smart-director-stage') return directorNodeBodyHtml(node);
     const imgs = (node.images || []).map(imageForDisplay);
     const mediaDeleteButton = img => mediaKindForItem(img) === 'video' ? '' : `<button class="mini-x image-delete" type="button" data-image-index="0" title="${escapeHtml(tr('smart.deleteImage'))}" aria-label="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button>`;
     const isRunNode = Boolean(node.runSettings || smartNodeFixedEngine(node));
@@ -25717,6 +26756,7 @@ function render(){
         const isLoop = node.type === 'smart-loop';
         const isStoryboard = node.type === 'smart-storyboard';
         const isShotTable = node.type === 'smart-shot-table';
+        const isDirectorStage = node.type === 'smart-director-stage';
         const isSmartGroup = node.type === 'smart-group';
         const isWorkflowGroup = node.type === 'workflow-group';
         const isPromptLlm = isPrompt && node.llmEnabled === true;
@@ -25757,7 +26797,7 @@ function render(){
         const gridFrameCount = imgs.length + (hasAppendPending ? Math.max(0, appendPendingCount) : 0);
         const canResizeNode = ((gridFrameCount > 1 || isPendingGroup)
             || (!isImageNode
-            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isShotTable || isSmartGroup))) && !isWorkflowGroup;
+            && Boolean(node.pending || isQueued || isJimengPending || isPrompt || isLoop || isStoryboard || isShotTable || isDirectorStage || isSmartGroup))) && !isWorkflowGroup;
         const nodeStyleExtra = isWorkflowGroup ? workflowGroupFrameStyle(node) : (isSmartGroup ? smartGroupFrameStyle(node) : (isGroup ? imageGroupFrameStyle(node) : ''));
         // 2026-10-12（用户要求：成组后与普通 Group 节点同款）：生成型智能分组也恢复显示外部标题，
         // 卡片内不再有「N 图片」摘要行（hideGeneratedGroupHead 已无意义，恒 false 保留结构）。
@@ -25774,7 +26814,7 @@ function render(){
         const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
             ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
             : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
-        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
+        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isDirectorStage ? 'director-stage-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
             ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -27506,6 +28546,7 @@ function bindNodeEvents(){
             };
         }
         if(nodeForControls?.type === 'smart-shot-table') bindShotTableNodeControls(el, nodeForControls);
+        if(nodeForControls?.type === 'smart-director-stage') bindDirectorStageNodeControls(el, nodeForControls);
         el.onclick = e => {
             e.stopPropagation();
             if(Date.now() < suppressNodeClickUntil) return;
@@ -43041,7 +44082,7 @@ function openCreateMenu(event, options={}){
     createMenuPoint = screenToWorld(event);
     const bounds = smartUsableScreenBounds(14);
     const w = 240;
-    const h = 432; // 2026-10-12 创建菜单新增 Minimax H3 一行（原 386）
+    const h = 620; // 2026-11-03 创建菜单新增「导演台」一行（原 432）
     const left = Math.max(bounds.left, Math.min(bounds.right - w, event.clientX + 8));
     const top = Math.max(bounds.top, Math.min(bounds.bottom - h, event.clientY + 8));
     createMenu.style.maxWidth = `${w}px`;
@@ -43069,6 +44110,7 @@ function createNodeFromMenu(type){
     if(type === 'prompt') created = createPromptNode(p.x - Math.round(PROMPT_NODE_DEFAULT_WIDTH / 2), p.y - Math.round(PROMPT_NODE_DEFAULT_HEIGHT / 2));
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
     else if(type === 'shotTable') created = createShotTableNode(p.x - Math.round(SHOT_TABLE_DEFAULT_WIDTH / 2), p.y - Math.round(SHOT_TABLE_DEFAULT_HEIGHT / 2));
+    else if(type === 'directorStage') created = createDirectorStageNode(p.x - Math.round(DIRECTOR_NODE_DEFAULT_WIDTH / 2), p.y - Math.round(DIRECTOR_NODE_DEFAULT_HEIGHT / 2));
     // 2026-09-20 双击菜单新增：图片 / 视频 / 音频(TTS) 直接建可运行的生成节点
     else if(type === 'image' || type === 'video'){
         // 2026-09-22 修：createImageNodeAt() 内部会立刻 render()，而那一刻节点还没有 runSettings，
@@ -43655,8 +44697,8 @@ window.onmousemove = e => {
             updateNodeElementDuringResize(node);
             return;
         }
-        const minW = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_WIDTH : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_WIDTH : 48;
-        const minH = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_HEIGHT : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_HEIGHT : 48;
+        const minW = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_WIDTH : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_WIDTH : node.type === 'smart-director-stage' ? DIRECTOR_NODE_MIN_WIDTH : 48;
+        const minH = node.type === 'smart-prompt' ? PROMPT_NODE_MIN_HEIGHT : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : node.type === 'smart-shot-table' ? SHOT_TABLE_MIN_HEIGHT : node.type === 'smart-director-stage' ? DIRECTOR_NODE_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
@@ -44457,6 +45499,11 @@ window.addEventListener('paste', e => {
 });
 window.addEventListener('keydown', e => {
     const key = String(e.key || '').toLowerCase();
+    // 3D 导演台打开时，画布快捷键（Delete 删节点 / Ctrl+Z / R 旋转 / 复制粘贴）全部让位
+    if(directorStageEl && !directorStageEl.hidden){
+        if(e.key === 'Escape'){ closeDirectorStage(); e.preventDefault(); }
+        return;
+    }
     if(key === 'escape' && imageReplaceDragState){
         e.preventDefault();
         cancelImageReplaceDrag();

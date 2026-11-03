@@ -2954,3 +2954,71 @@ body.theme-light .shot-row-menu-item:hover {
 body.theme-light .shot-row-menu-sep {
     background: rgba(0, 0, 0, .08);
 }
+
+/* ==========================================================================
+   2026-11-03 3D 导演台节点（smart-director-stage）
+   空态照参考图：节点内一块细边框卡片，中间是三轴图标 + 一句说明 + 「打开导演台」。
+   有镜头记录后换成 2×2 缩略图 + 机位/张数/画幅统计。
+   ========================================================================== */
+html body .world .image-node.director-stage-node:not(.smart-group-member-node) {
+    background: var(--gbz-node-bg) !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--gbz-node-radius) !important;
+    color: var(--gbz-node-text) !important;
+    box-shadow: var(--gbz-node-shadow) !important;
+    overflow: visible !important;
+}
+html body .world .image-node.director-stage-node:not(.smart-group-member-node).selected {
+    box-shadow: var(--gbz-node-shadow-selected) !important;
+}
+html body .world .image-node.director-stage-node .node-body {
+    display: block !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border-radius: var(--gbz-node-radius) !important;
+    overflow: hidden !important;
+}
+.director-empty {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    height: 100%;
+    padding: 24px;
+    border: 1px solid color-mix(in srgb, var(--text) 13%, transparent);
+    border-radius: calc(var(--gbz-node-radius) - 2px);
+    background: transparent;
+    color: var(--text);
+    text-align: center;
+}
+.director-empty-icon { display: inline-flex; color: var(--text); opacity: .34; }
+.director-empty-icon svg { width: 52px; height: 52px; }
+.director-empty p { margin: 18px 0 20px; font-size: 15px; font-weight: 700; letter-spacing: .2px; color: var(--text); opacity: .9; }
+.director-open-btn {
+    height: 38px;
+    padding: 0 20px;
+    border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--text) 9%, transparent);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .14s ease, border-color .14s ease;
+}
+.director-open-btn:hover { background: color-mix(in srgb, var(--text) 15%, transparent); border-color: color-mix(in srgb, var(--text) 26%, transparent); }
+.director-open-btn.is-small { height: 30px; padding: 0 13px; font-size: 11.5px; }
+.director-card { display: flex; flex-direction: column; gap: 8px; height: 100%; padding: 8px; box-sizing: border-box; }
+.director-card-gallery { position: relative; flex: 1 1 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 6px; min-height: 0; }
+.director-card-gallery.is-single { display: flex; align-items: center; justify-content: center; }
+.director-card-gallery.is-single .director-thumb { width: 100%; flex: 0 0 auto; }
+.director-thumb { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--soft); }
+.director-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.director-thumb em { position: absolute; left: 6px; bottom: 5px; padding: 1px 6px; border-radius: 5px; background: rgba(0,0,0,.56); color: #fff; font-style: normal; font-size: 9.5px; font-weight: 800; }
+.director-thumb-more { position: absolute; right: 10px; bottom: 10px; padding: 2px 7px; border-radius: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; font-weight: 800; }
+.director-card-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.director-card-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 700; color: var(--text); opacity: .5; }
