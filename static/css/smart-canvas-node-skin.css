@@ -84,6 +84,18 @@ html body .world .image-node.minimax-h3-node:not(.smart-group-member-node) {
     box-shadow: var(--gbz-node-shadow) !important;
 }
 
+/* 2026-11-04（用户要求，参考稿）：脚本生成器节点本身就是那张卡——单层描边、圆角 12，
+   不再出现「外层节点框 + 内层卡片框」的框中框。底色固定深色（同卡片配色，不跟主题变量）。 */
+html body .world .image-node.storyboard-smart-node.script-generator-node:not(.smart-group-member-node) {
+    background: #2b2b2b !important;
+    border: 1px solid rgba(255,255,255,.12) !important;
+    border-radius: 12px !important;
+}
+html body .world .image-node.storyboard-smart-node.script-generator-node:not(.smart-group-member-node):hover,
+html body .world .image-node.storyboard-smart-node.script-generator-node:not(.smart-group-member-node).selected {
+    border-color: rgba(255,255,255,.12) !important;
+}
+
 html body .world .image-node.empty-node:hover,
 html body .world .image-node.upload-entry-node:hover,
 html body .world .image-node.prompt-smart-node:not(.smart-group-member-node):hover,

@@ -2446,18 +2446,21 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
    输入/发送/模型全部交给选中节点后弹出的画布 composer（storyboard-composer-mode）。
    节点底色本身就是深色（.storyboard-smart-node #181818），这里全部按深色配色写，
    不跟主题变量，避免浅色主题下出现白底黑字的花脸。 */
-.scriptgen-node { width:100%; height:100%; min-height:0; padding:12px; box-sizing:border-box; }
-.scriptgen-card { position:relative; width:100%; height:100%; min-height:0; display:flex; flex-direction:column; padding:14px 14px 10px; border-radius:12px; border:1.5px solid rgba(255,255,255,.22); background:#2c2c2c; box-sizing:border-box; overflow:hidden; }
-.scriptgen-glyph { display:flex; flex-direction:column; align-items:center; gap:5px; align-self:center; width:48px; margin:6px 0 20px; }
-.scriptgen-glyph span { height:4px; border-radius:2px; background:rgba(255,255,255,.28); }
-.scriptgen-glyph span:nth-child(1),.scriptgen-glyph span:nth-child(2) { width:48px; }
-.scriptgen-glyph span:nth-child(3) { width:30px; align-self:flex-start; }
-.scriptgen-glyph span:nth-child(4) { width:20px; align-self:flex-start; }
-.scriptgen-try { color:rgba(255,255,255,.52); font-size:13px; font-weight:700; line-height:1; margin-bottom:8px; }
-.scriptgen-suggest { display:flex; align-items:center; gap:9px; flex:0 0 auto; min-height:42px; padding:0 4px; border:0; border-radius:8px; background:transparent; color:#f0f0f0; font-size:13px; font-weight:600; text-align:left; cursor:pointer; }
+.scriptgen-node { width:100%; height:100%; min-height:0; padding:0; box-sizing:border-box; }
+/* 2026-11-04（用户要求，参考稿）：卡片即节点本体——单层描边、无「框中框」。
+   节点外框颜色/圆角在 smart-canvas-node-skin.css 的 .script-generator-node 里统一，
+   这里只管内层排布：卡片本身不再画边框与底色。 */
+.scriptgen-card { position:relative; width:100%; height:100%; min-height:0; display:flex; flex-direction:column; padding:22px 18px 16px; border-radius:12px; border:0; background:transparent; box-sizing:border-box; overflow:hidden; }
+.scriptgen-glyph { display:flex; flex-direction:column; align-items:center; gap:6px; align-self:center; width:68px; margin:6px 0 32px; }
+.scriptgen-glyph span { height:4px; border-radius:2px; background:rgba(255,255,255,.30); }
+.scriptgen-glyph span:nth-child(1),.scriptgen-glyph span:nth-child(2) { width:68px; }
+.scriptgen-glyph span:nth-child(3) { width:44px; align-self:flex-start; }
+.scriptgen-glyph span:nth-child(4) { width:26px; align-self:flex-start; }
+.scriptgen-try { color:rgba(255,255,255,.52); font-size:13px; font-weight:500; line-height:1; margin-bottom:10px; }
+.scriptgen-suggest { display:flex; align-items:center; gap:12px; flex:0 0 auto; min-height:44px; padding:0 6px; border:0; border-radius:8px; background:transparent; color:#f0f0f0; font-size:14px; font-weight:500; text-align:left; cursor:pointer; }
 .scriptgen-suggest:hover { background:rgba(255,255,255,.07); color:#fff; }
 .scriptgen-suggest.active { background:rgba(255,255,255,.05); color:#fff; }
-.scriptgen-suggest i,.scriptgen-suggest svg { width:15px; height:15px; flex:0 0 auto; color:#cfcfcf; }
+.scriptgen-suggest i,.scriptgen-suggest svg { width:16px; height:16px; flex:0 0 auto; color:#cfcfcf; }
 .scriptgen-suggest span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .scriptgen-loading { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; border-radius:12px; background:rgba(12,12,12,.82); color:#dcdcdc; font-size:12px; font-weight:800; }
 .scriptgen-loading i,.scriptgen-loading svg { width:22px; height:22px; animation:spin 1s linear infinite; }
@@ -6247,7 +6250,7 @@ body.smart-agent-open .smart-quickbar { max-width:calc(100vw - var(--smart-agent
 
 /* Plain uploaded image nodes: preserve media ratio, no decorative frame. */
 /* 2026-11-04：排除导演台节点（它有自己的一层节点底 #262626，与 LLM 节点统一） */
-.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node):not(.asset-card-node):not(.director-stage-node),
+.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node):not(.asset-card-node):not(.director-stage-node):not(.script-generator-node),
 .image-node.upload-entry-node:not(.empty-node) {
     background:transparent !important;
     border:0 !important;
@@ -6255,7 +6258,7 @@ body.smart-agent-open .smart-quickbar { max-width:calc(100vw - var(--smart-agent
     padding:0 !important;
     overflow:visible !important;
 }
-.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node):not(.asset-card-node):not(.director-stage-node) .node-body,
+.image-node:not(.empty-node):not(.group-node):not(.prompt-smart-node):not(.loop-smart-node):not(.smart-group-node):not(.workflow-group-node):not(.shot-table-smart-node):not(.asset-card-node):not(.director-stage-node):not(.script-generator-node) .node-body,
 .image-node.upload-entry-node:not(.empty-node) .node-body {
     padding:0 !important;
     background:transparent !important;
