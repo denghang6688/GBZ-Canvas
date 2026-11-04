@@ -11657,6 +11657,26 @@ html, body {
     box-shadow:0 6px 16px var(--gen-glow);
 }
 .storyboard-node-generate:hover { filter:brightness(1.1); }
+/* 2026-11-04（用户要求，参考稿）：分镜脚本节点底栏的「生成分镜」次级按钮 */
+.storyboard-node-shots {
+    height:26px;
+    flex:0 0 auto;
+    border-radius:6px;
+    font-size:10px;
+    font-weight:800;
+    padding:0 10px;
+    display:flex;
+    align-items:center;
+    gap:4px;
+    cursor:pointer;
+    border:1px solid rgba(154,154,154,.35);
+    background:rgba(255,255,255,.04);
+    color:#dcdcdc;
+}
+.storyboard-node-shots:hover { border-color:rgba(154,154,154,.6); background:rgba(255,255,255,.09); color:#fff; }
+.storyboard-node-shots:disabled { opacity:.55; }
+.storyboard-node-shots i,
+.storyboard-node-shots svg { width:12px; height:12px; }
 
 /* ---------------- 5. 追加生成占位 ---------------- */
 .smart-pending-thumb,

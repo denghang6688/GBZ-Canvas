@@ -5200,6 +5200,9 @@ const SCRIPT_GEN_MIN_HEIGHT = 280;
 // 旧默认（420×448）：老画布里仍停在这个尺寸且用户没手动拉过的，自动收到新默认。
 const SCRIPT_GEN_LEGACY_WIDTH = 420;
 const SCRIPT_GEN_LEGACY_HEIGHT = 448;
+// 2026-11-04（用户要求，参考稿）：拆镜成功后节点自动放大成宽表——712px 宽能完整显示
+// 节点卡片上的前 7 列（镜号/时长/画面/角色1/角色描述1/角色图1/参考/景别），行高 52。
+const SCRIPT_GEN_TABLE_WIDTH = 712;
 const H3_NODE_DEFAULT_WIDTH = 380;
 const H3_NODE_DEFAULT_HEIGHT = 520;
 const H3_COMFY_WORKFLOW = 'custom/H3_Ref2VA_15s.json';
@@ -24323,7 +24326,7 @@ function storyboardScriptNodePreviewHtml(node){
                 </div>`;
             }).join('')}
         </div>
-        <div class="storyboard-node-footer"><select class="storyboard-node-model" data-storyboard-model="${escapeAttr(node.id)}" aria-label="LLM模型"><option>LLM大模型</option><option>GLM-4</option><option>豆包</option></select><button type="button" class="storyboard-node-generate" data-storyboard-generate="${escapeAttr(node.id)}"><i data-lucide="sparkles"></i><span>生成</span></button></div>
+        <div class="storyboard-node-footer"><select class="storyboard-node-model" data-storyboard-model="${escapeAttr(node.id)}" aria-label="LLM模型"><option>LLM大模型</option><option>GLM-4</option><option>豆包</option></select>${storyboardShotsButtonHtml(node)}<button type="button" class="storyboard-node-generate" data-storyboard-generate="${escapeAttr(node.id)}"><i data-lucide="sparkles"></i><span>生成</span></button></div>
     </div>`;
 }
 function createScriptGeneratorNode(x, y, options={}){
@@ -24518,15 +24521,316 @@ function reorderStoryboardScriptRows(fromIndex, toIndex){
     const from = Number(fromIndex);
     const to = Number(toIndex);
     if(!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= state.rows.length || to >= state.rows.length || from === to) return false;
+    // 2026-11-04（用户要求）：拖动排序要同步到下游分镜图组的成员排布，先记下「旧行号 → 新行号」
+    // 注意不能靠行对象 identity：syncStoryboardScriptStateToNode 归一化会重建行对象，
+    // 所以这里先把映射算出来再同步节点。
+    const prevRows = state.rows.slice();
     const rows = state.rows.slice();
     const [item] = rows.splice(from, 1);
     rows.splice(to, 0, item);
+    const oldToNew = new Array(prevRows.length).fill(-1);
+    rows.forEach((row, newIndex) => {
+        const oldIndex = prevRows.indexOf(row);
+        if(oldIndex >= 0) oldToNew[oldIndex] = newIndex;
+    });
     state.rows = rows.map((row, index) => ({...row, shot:String(index + 1)}));
     state.status = '已排序';
     syncStoryboardScriptStateToNode();
+    const node = nodes.find(n => n.id === state.nodeId && isStoryboardScriptNode(n));
+    if(node) syncStoryboardShotsGroupOrder(node, oldToNew);
     renderStoryboardScriptModal();
     render();
     return true;
+}
+/* ===== 2026-11-04 分镜图 / 分镜视频组（对齐 LibTV 参考稿）=====
+   - 点「生成分镜」：按拆镜结果在脚本节点右侧自动建一组分镜图节点（workflow-group 框住），
+     每镜一个节点、提示词取该镜的「分镜提示词」，创建后串行排队生成（复用工作流组执行引擎）。
+   - 分镜图组工具栏多一个「批量生成视频」：右侧再建一组视频节点（图生视频，参考图为该镜分镜图，
+     提示词取「视频运动提示词」），同样串行生成。
+   - 幂等：同一个脚本节点重复点不会建第二组；拖动镜号排序会同步成员位置。
+   ============================================= */
+const STORYBOARD_SHOTS_GRID = {cols:3, cellW:320, cellH:240, gapX:24, gapY:24};
+// 拆镜成功后的节点高度按「真实渲染行高」回填：行高随文案换行变化，
+// 用固定公式算会留一大块空白。量完只在差 8px 以上才改，避免和用户手动拉高打架。
+function fitStoryboardNodeHeight(node){
+    if(!node?.id) return;
+    requestAnimationFrame(() => {
+        try{
+            const el = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
+            if(!el) return;
+            const scale = safeScale(viewport.scale);
+            const rows = [...el.querySelectorAll('.storyboard-node-row')];
+            if(!rows.length) return;
+            const tableH = rows.reduce((sum, row) => sum + (row.getBoundingClientRect().height || 0), 0) / scale;
+            if(tableH < 20) return;
+            // 26 标题栏 + 表格 + 38 底栏 + 2 边框
+            const next = Math.min(620, Math.max(200, Math.round(26 + tableH + 38 + 2)));
+            if(Math.abs(next - (Number(node.h) || 0)) > 8){
+                node.h = next;
+                render();
+                scheduleSave();
+            }
+        }catch(e){}
+    });
+}
+function storyboardShotsButtonHtml(node){    if(!node || node.storyboardChooser === true) return '';
+    const hasRows = (Array.isArray(node.rows) ? node.rows : []).some(row => String(row?.visual || row?.storyboardPrompt || '').trim());
+    if(!hasRows) return '';
+    return `<button type="button" class="storyboard-node-shots" data-storyboard-shots="${escapeAttr(node.id)}" title="按分镜脚本右侧建一组分镜图"><i data-lucide="images"></i><span>生成分镜</span></button>`;
+}
+function storyboardShotRowsOf(node){
+    return (Array.isArray(node?.rows) ? node.rows : []).filter(row => String(row?.visual || row?.storyboardPrompt || '').trim());
+}
+function storyboardShotsGroupForScript(node){
+    if(!node?.id) return null;
+    return nodes.find(n => isWorkflowGroupNode(n) && n.storyboardShots === true && n.storyboardScriptNodeId === node.id) || null;
+}
+function storyboardShotPromptText(row, index=0){
+    const prompt = String(row?.storyboardPrompt || '').trim();
+    if(prompt) return prompt;
+    const parts = [];
+    if(String(row?.visual || '').trim()) parts.push(`画面：${String(row.visual).trim()}`);
+    if(String(row?.scene || '').trim()) parts.push(`景别：${String(row.scene).trim()}`);
+    if(String(row?.emotion || '').trim()) parts.push(`情绪：${String(row.emotion).trim()}`);
+    if(String(row?.lighting || '').trim()) parts.push(`光影：${String(row.lighting).trim()}`);
+    return parts.join('；') || `分镜 ${index + 1}`;
+}
+function storyboardShotsGridPoint(group, index){
+    const grid = group?.storyboardGrid || STORYBOARD_SHOTS_GRID;
+    const col = index % grid.cols;
+    const row = Math.floor(index / grid.cols);
+    return {
+        x:(Number(group?.storyboardGridX) || 0) + col * (grid.cellW + grid.gapX),
+        y:(Number(group?.storyboardGridY) || 0) + row * (grid.cellH + grid.gapY)
+    };
+}
+function storyboardGroupOwnedMembers(group){
+    // 只认 group.items：workflowGroupMembers 先按矩形包含取节点，
+    // 自动建的组一旦压到别人节点上就会把邻居也算进来（还会被一起执行），这里一律按 items 走。
+    const ids = Array.isArray(group?.items) ? group.items : [];
+    return ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
+}
+// 自动落组框前先找一块空白：组框内不能有别的节点中心，否则会被当成成员一起执行
+function storyboardGroupFreeRect(x, y, w, h){
+    const hits = (px, py) => nodes.some(n => {
+        if(!n || isWorkflowGroupNode(n)) return false;
+        const r = nodeRect(n);
+        const cx = r.x + r.width / 2;
+        const cy = r.y + r.height / 2;
+        return cx >= px && cx <= px + w && cy >= py && cy <= py + h;
+    });
+    let px = x;
+    let py = y;
+    for(let i = 0; i < 20 && hits(px, py); i++){
+        py += h + 80;
+        if(i % 5 === 4){ px += w + 120; py = y; }
+    }
+    return {x:px, y:py};
+}
+async function createStoryboardShotsGroup(scriptNodeId, options={}){
+    const scriptNode = nodes.find(n => n.id === scriptNodeId && isStoryboardScriptNode(n));
+    if(!scriptNode) return null;
+    const rows = storyboardShotRowsOf(scriptNode);
+    if(!rows.length){ toast('先拆出分镜脚本，再点「生成分镜」'); return null; }
+    // 幂等：已有分镜图组就只重跑（沿用成员与最新提示词）
+    const existing = storyboardShotsGroupForScript(scriptNode);
+    if(existing){
+        selectedId = existing.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        render();
+        if(options.run === false) return existing;
+        toast('已有分镜图组，开始按最新分镜重新生成');
+        await runWorkflowGroupProcessNodes(existing);
+        return existing;
+    }
+    pushUndo();
+    const baseX = Math.round((Number(scriptNode.x) || 0) + (Number(scriptNode.w) || 420) + 160);
+    const baseY = Math.round(Number(scriptNode.y) || 0);
+    const grid = STORYBOARD_SHOTS_GRID;
+    const rowCount = Math.ceil(rows.length / grid.cols);
+    const groupW = grid.cols * grid.cellW + (grid.cols - 1) * grid.gapX + 56;
+    const groupH = rowCount * grid.cellH + (rowCount - 1) * grid.gapY + 68 + 48;
+    const frame = storyboardGroupFreeRect(baseX - 28, baseY - 68, groupW, groupH);
+    const group = {
+        id:uid('wfgroup'),
+        type:'workflow-group',
+        x:frame.x,
+        y:frame.y,
+        w:groupW,
+        h:groupH,
+        title:`分镜图 · ${String(scriptNode.title || '分镜脚本').slice(0, 16)}`,
+        items:[],
+        storyboardShots:true,
+        storyboardScriptNodeId:scriptNode.id,
+        storyboardGridX:frame.x + 28,
+        storyboardGridY:frame.y + 68,
+        storyboardGrid:grid,
+        created_at:Date.now()
+    };
+    const members = [];
+    rows.forEach((row, index) => {
+        const p = storyboardShotsGridPoint(group, index);
+        const member = createImageNodeAt(
+            {x:p.x + grid.cellW / 2, y:p.y + grid.cellH / 2},
+            [],
+            {skipUndo:true, skipRender:true, skipSave:true, select:false}
+        );
+        makeSmartNodeApiRunnable(member);
+        // createImageNodeAt 是按中心点摆的，节点宽度不等于格宽 → 这里改写成格子左上角，
+        // 保证「创建时」和「拖动排序后」用的是同一套网格坐标
+        member.x = p.x;
+        member.y = p.y;
+        member.title = `分镜图 ${index + 1}`;
+        const text = storyboardShotPromptText(row, index);
+        member.promptDraftHtml = escapeHtml(text);
+        member.promptDraftText = text;
+        member.promptDraftTouched = true;
+        member.storyboardShotRow = index;
+        members.push(member);
+    });
+    group.items = members.map(m => m.id);
+    nodes.push(group);
+    try{ connectInputNode(scriptNode.id, group.id); }catch(e){}
+    render();
+    scheduleSave();
+    selectedId = group.id;
+    render();
+    toast(`已创建分镜图组（${members.length} 镜），串行生成中…`);
+    if(options.run !== false) runWorkflowGroupProcessNodes(group).catch(() => {});
+    return group;
+}
+function storyboardVideosGroupForShots(shotsGroup){
+    if(!shotsGroup?.id) return null;
+    return nodes.find(n => isWorkflowGroupNode(n) && n.storyboardVideos === true && n.storyboardShotsGroupId === shotsGroup.id) || null;
+}
+async function createStoryboardVideosGroup(shotsGroup, options={}){
+    if(!isWorkflowGroupNode(shotsGroup) || shotsGroup.storyboardShots !== true) return null;
+    // 幂等：已有视频组就只重跑
+    const existing = storyboardVideosGroupForShots(shotsGroup);
+    if(existing){
+        selectedId = existing.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        render();
+        toast('已有分镜视频组，开始重新生成');
+        if(options.run !== false) await runWorkflowGroupProcessNodes(existing);
+        return existing;
+    }
+    const scriptNode = nodes.find(n => n.id === shotsGroup.storyboardScriptNodeId) || null;
+    const members = storyboardGroupOwnedMembers(shotsGroup).filter(m => isSmartImageNode(m));
+    if(!members.length){ toast('分镜图组里没有可用的分镜节点'); return null; }
+    const byRow = new Map(members.map(m => [Number.isInteger(m.storyboardShotRow) ? m.storyboardShotRow : members.indexOf(m), m]));
+    const shotImgOf = source => (source.images || []).map(imageForDisplay).find(img => img?.url && mediaKindForItem(img) === 'image');
+    const hasAnyShotImage = [...byRow.values()].some(source => Boolean(shotImgOf(source)));
+    if(!hasAnyShotImage){ toast('分镜图还没有生成结果，先等分镜图完成'); return null; }
+    pushUndo();
+    const rect = nodeRect(shotsGroup);
+    const grid = {...STORYBOARD_SHOTS_GRID, cellW:320, cellH:220};
+    const usableRows = [...byRow.keys()].sort((a, b) => a - b).filter(rowIndex => Boolean(shotImgOf(byRow.get(rowIndex))));
+    const skipped = byRow.size - usableRows.length;
+    const rowCount = Math.ceil(usableRows.length / grid.cols);
+    const groupW = grid.cols * grid.cellW + (grid.cols - 1) * grid.gapX + 56;
+    const groupH = rowCount * grid.cellH + (rowCount - 1) * grid.gapY + 68 + 48;
+    const frame = storyboardGroupFreeRect(Math.round(rect.x + rect.width + 160) - 28, Math.round(rect.y) - 68, groupW, groupH);
+    const group = {
+        id:uid('wfgroup'),
+        type:'workflow-group',
+        x:frame.x,
+        y:frame.y,
+        w:groupW,
+        h:groupH,
+        title:`分镜视频 · ${String(shotsGroup.title || '').replace(/^分镜图\s*·\s*/, '').slice(0, 16)}`,
+        items:[],
+        storyboardVideos:true,
+        storyboardShotsGroupId:shotsGroup.id,
+        storyboardScriptNodeId:shotsGroup.storyboardScriptNodeId || '',
+        storyboardGridX:frame.x + 28,
+        storyboardGridY:frame.y + 68,
+        storyboardGrid:grid,
+        created_at:Date.now()
+    };
+    const videoMembers = [];
+    usableRows.forEach(rowIndex => {
+        const source = byRow.get(rowIndex);
+        const shotImg = shotImgOf(source);
+        const index = videoMembers.length;
+        const p = storyboardShotsGridPoint(group, index);
+        const member = createImageNodeAt(
+            {x:p.x + grid.cellW / 2, y:p.y + grid.cellH / 2},
+            [{...shotImg}],
+            {skipUndo:true, skipRender:true, skipSave:true, select:false}
+        );
+        // 图生视频：API 生视频 + 参考图模式，参考图就是该镜的分镜图。
+        // 注意先清空 runSettings：smartPanelSettingsForKind 会把节点旧参数（image 的 apiKind）
+        // 盖在视频面板参数上，不清空会把 apiKind:'image' 混进来。
+        member.runSettings = {};
+        const videoSettings = {...smartPanelSettingsForKind('video', member), engine:'api', apiKind:'video', videoGenMode:'ref'};
+        member.runSettings = settingsForStorage(videoSettings);
+        member.x = p.x;
+        member.y = p.y;
+        const row = scriptNode?.rows?.[rowIndex] || {};
+        const text = String(row.motionPrompt || '').trim() || `让分镜 ${rowIndex + 1} 的画面按镜头运动提示自然动起来`;
+        member.promptDraftHtml = escapeHtml(text);
+        member.promptDraftText = text;
+        member.promptDraftTouched = true;
+        member.title = `分镜视频 ${rowIndex + 1}`;
+        member.storyboardShotRow = rowIndex;
+        member.storyboardSourceShotId = source.id;
+        videoMembers.push(member);
+    });
+    group.items = videoMembers.map(m => m.id);
+    nodes.push(group);
+    try{ connectInputNode(shotsGroup.id, group.id); }catch(e){}
+    render();
+    scheduleSave();
+    selectedId = group.id;
+    render();
+    toast(`已创建分镜视频组（${videoMembers.length} 条${skipped ? `，${skipped} 镜没出图已跳过` : ''}），串行生成中…`);
+    if(options.run !== false) runWorkflowGroupProcessNodes(group).catch(() => {});
+    return group;
+}
+// 拖动镜号排序后，把分镜图组成员按新顺序重新排到网格位上（视频组同理，按来源分镜图跟随）
+// oldToNew：旧行号 → 新行号（-1 表示这一行没有对应成员）
+function syncStoryboardShotsGroupOrder(scriptNode, oldToNew){
+    const group = storyboardShotsGroupForScript(scriptNode);
+    if(!group || !Array.isArray(oldToNew) || !oldToNew.length) return;
+    const members = storyboardGroupOwnedMembers(group).filter(m => isSmartImageNode(m) && Number.isInteger(m.storyboardShotRow));
+    const byOldRow = new Map(members.map(m => [m.storyboardShotRow, m]));
+    if(!byOldRow.size) return;
+    const placed = [];
+    oldToNew.forEach((newRow, oldRow) => {
+        if(newRow < 0) return;
+        const member = byOldRow.get(oldRow);
+        if(!member) return;
+        const p = storyboardShotsGridPoint(group, newRow);
+        member.x = p.x;
+        member.y = p.y;
+        member.storyboardShotRow = newRow;
+        member.title = `分镜图 ${newRow + 1}`;
+        placed.push({newRow, id:member.id});
+    });
+    // items 顺序必须跟着新行号排，否则组内阅读顺序/批量执行顺序还是旧的
+    placed.sort((a, b) => a.newRow - b.newRow);
+    const nextItems = placed.map(item => item.id);
+    if(nextItems.length) group.items = nextItems.concat((group.items || []).filter(id => !nextItems.includes(id)));
+    // 视频组成员跟着来源分镜图走
+    const videoGroup = storyboardVideosGroupForShots(group);
+    if(videoGroup){
+        const videoMembers = storyboardGroupOwnedMembers(videoGroup).filter(m => isSmartImageNode(m));
+        const shotById = new Map(members.map(m => [m.id, m]));
+        videoMembers.forEach(vm => {
+            const source = shotById.get(vm.storyboardSourceShotId || '');
+            if(!source) return;
+            // 视频成员在自己的组框网格里按「来源分镜的新位置」排，不跟到分镜图框里去
+            const p = storyboardShotsGridPoint(videoGroup, Number(source.storyboardShotRow) || 0);
+            vm.x = p.x;
+            vm.y = p.y;
+            vm.storyboardShotRow = Number(source.storyboardShotRow) || 0;
+            vm.title = `分镜视频 ${vm.storyboardShotRow + 1}`;
+        });
+    }
+    scheduleSave();
 }
 function renderStoryboardScriptModal(){
     if(!storyboardScriptModal || !storyboardScriptState) return;
@@ -24750,8 +25054,13 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collaps
         node.storyboardChooser = false;
         node.scriptError = '';
         node.status = node.status || '已生成';
-        node.w = Math.max(STORYBOARD_NODE_DEFAULT_WIDTH, Math.round(Number(node.w) || 0));
-        node.h = STORYBOARD_NODE_DEFAULT_HEIGHT;
+        // 2026-11-04（用户要求，参考稿）：拆镜成功节点自动放大成 712px 宽表；
+        // 高度按行数算（标题 40 + 表头 26 + 每行 52 + 底栏 46，最多 8 行），封顶 640。
+        const rowCount = Math.max(1, (Array.isArray(node.rows) ? node.rows.length : 0) || 5);
+        node.w = Math.max(SCRIPT_GEN_TABLE_WIDTH, Math.round(Number(node.w) || 0));
+        node.h = Math.min(640, Math.max(STORYBOARD_NODE_DEFAULT_HEIGHT, 26 + 24 + rowCount * 26 + 38));
+        // boxManual=true：放大后的尺寸是用户可见结果，不许被默认尺寸吸附逻辑收回
+        node.boxManual = true;
     } else if(node.storyboardChooser && !generatedOk){
         node.scriptError = String(node.status || '').trim() && node.status !== '正在生成...'
             ? node.status
@@ -24760,6 +25069,8 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collaps
     storyboardScriptState = previousState;
     render();
     scheduleSave();
+    // 生成成功后按真实行高回填节点高度（宽 712 已固定）
+    if(generatedOk && node.storyboardChooser === false) fitStoryboardNodeHeight(node);
     if(openAfter) openStoryboardScriptModal(node.id);
     return ok;
 }
@@ -28191,6 +28502,8 @@ function workflowGroupToolbarHtml(node){
     const hasMembers = members.length > 0;
     const hasMedia = members.some(member => workflowGroupMemberMediaItems(member).length > 0);
     const actions = [
+        // 2026-11-04（用户要求，参考稿）：脚本生成器的「分镜图」组多一个批量生视频键
+        ...(node.storyboardShots === true ? [{key:'gen-videos', icon:'video', label:'批量生成视频', enabled:hasMedia}] : []),
         {key:'run', icon:'play', label:'执行小组', enabled:hasMembers},
         {key:'edit', icon:'pencil', label:'编辑', enabled:true},
         {key:'download-all', icon:'archive', label:'批量下载', enabled:hasMedia},
@@ -28212,7 +28525,7 @@ function workflowGroupToolbarHtml(node){
     const wid = escapeAttr(node.id);
     // 2026-10-30 晚（用户要求）工作流组改为「中文名」版式，不显示「更多」，全部平铺
     const wBtn = (action) => `<button type="button" data-workflow-group-action="${escapeAttr(action.key)}" data-node-id="${wid}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}" aria-label="${escapeAttr(action.label)}"><i data-lucide="${escapeAttr(action.icon)}"></i><span class="snm-lbl">${escapeHtml(action.label)}</span></button>`;
-    const W_ORDER = ['run', 'edit', 'download-all', 'ungroup', 'createAsset', 'copyGroup', 'delete'];
+    const W_ORDER = ['gen-videos', 'run', 'edit', 'download-all', 'ungroup', 'createAsset', 'copyGroup', 'delete'];
     const ordered = W_ORDER.map(k => actions.find(a => a.key === k)).filter(Boolean);
     const buttons = ordered.map(wBtn).join('');
     return `<div class="smart-node-floating-menu workflow-group-menu snm-labeled" data-workflow-group-menu="1">${buttons}<span class="snm-sep"></span>${colorPicker}</div>`;
@@ -28346,6 +28659,10 @@ async function runWorkflowGroupToolbarAction(nodeId, action){
     selectedImage = {nodeId:'', index:-1};
     if(action === 'run'){
         await runWorkflowGroupProcessNodes(group);
+        return;
+    }
+    if(action === 'gen-videos'){
+        await createStoryboardVideosGroup(group);
         return;
     }
     if(action === 'edit'){
@@ -30771,6 +31088,17 @@ function bindNodeEvents(){
         el.querySelectorAll('[data-storyboard-generate]').forEach(btn => {
             btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
             btn.addEventListener('click', async e => { e.preventDefault(); e.stopPropagation(); btn.disabled = true; try { await generateStoryboardScriptForNode(btn.dataset.storyboardGenerate || id, {openAfter:true}); } finally { btn.disabled = false; } });
+        });
+        // 2026-11-04（用户要求，参考稿）：节点底栏「生成分镜」→ 右侧自动建分镜图组并串行生成
+        el.querySelectorAll('[data-storyboard-shots]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', async e => {
+                e.preventDefault();
+                e.stopPropagation();
+                btn.disabled = true;
+                try { await createStoryboardShotsGroup(btn.dataset.storyboardShots || id); }
+                finally { btn.disabled = false; }
+            });
         });
                 el.querySelectorAll('[data-storyboard-inline-send]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const n=nodes.find(x=>x.id===id); const input=el.querySelector('[data-storyboard-inline-input]'); if(n&&input){ n.sourceText=input.value||''; n.storyboardChooser=false; scheduleSave(); render(); openStoryboardScriptModal(id); } }));
 el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const n=nodes.find(x=>x.id===id); if(n){ n.storyboardChooser=false; n.storyboardMode=btn.dataset.storyboardChoice||'script'; scheduleSave(); render(); openStoryboardScriptModal(id); } }); });
@@ -49166,6 +49494,13 @@ document.querySelectorAll('[data-storyboard-batch]').forEach(btn => btn.addEvent
     e.preventDefault(); e.stopPropagation();
     if(!storyboardScriptState) return;
     const kind=btn.dataset.storyboardBatch;
+    // 2026-11-04（用户要求，参考稿）：弹窗底部「生成分镜」→ 关弹窗，脚本节点右侧建分镜图组串行生成
+    if(kind==='shots'){
+        const node = nodes.find(n => n.id === storyboardScriptState.nodeId && isStoryboardScriptNode(n));
+        closeStoryboardScriptModal();
+        if(node) createStoryboardShotsGroup(node.id);
+        return;
+    }
     if(kind==='assets'){ setStoryboardScriptView('creative'); storyboardScriptState.status='资产整理'; renderStoryboardScriptModal(); }
     else { storyboardScriptState.status='提示词已合成'; storyboardScriptState.rows=(storyboardScriptState.rows||[]).map((r,i)=>({...r, storyboardPrompt:r.storyboardPrompt||storyboardScriptNormalizeRow(r,i,storyboardScriptState.sourceRefs,{sourceText:storyboardScriptState.sourceText}).storyboardPrompt, motionPrompt:r.motionPrompt||storyboardScriptNormalizeRow(r,i,storyboardScriptState.sourceRefs,{sourceText:storyboardScriptState.sourceText}).motionPrompt})); renderStoryboardScriptModal(); }
 }));
