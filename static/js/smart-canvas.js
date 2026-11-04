@@ -5191,10 +5191,15 @@ const STORYBOARD_NODE_MIN_WIDTH = 300;
 const STORYBOARD_NODE_MIN_HEIGHT = 150;
 // 2026-11-03（用户要求：对齐 LibTV「脚本生成器」）：分镜脚本节点的空态（storyboardChooser）
 // 不再是原来那块小卡片，而是「居中建议卡 + 底部输入条」的完整输入面板，需要更高的默认框。
-const SCRIPT_GEN_DEFAULT_WIDTH = 420;
-const SCRIPT_GEN_DEFAULT_HEIGHT = 448;
-const SCRIPT_GEN_MIN_WIDTH = 340;
-const SCRIPT_GEN_MIN_HEIGHT = 360;
+// 2026-11-04（用户要求）：脚本生成器空态与 LLM 节点统一成 280×280——节点内只留推荐卡，
+// 输入交给选中节点后弹出的画布 composer（storyboard-composer-mode），不再自带输入条。
+const SCRIPT_GEN_DEFAULT_WIDTH = 280;
+const SCRIPT_GEN_DEFAULT_HEIGHT = 280;
+const SCRIPT_GEN_MIN_WIDTH = 280;
+const SCRIPT_GEN_MIN_HEIGHT = 280;
+// 旧默认（420×448）：老画布里仍停在这个尺寸且用户没手动拉过的，自动收到新默认。
+const SCRIPT_GEN_LEGACY_WIDTH = 420;
+const SCRIPT_GEN_LEGACY_HEIGHT = 448;
 const H3_NODE_DEFAULT_WIDTH = 380;
 const H3_NODE_DEFAULT_HEIGHT = 520;
 const H3_COMFY_WORKFLOW = 'custom/H3_Ref2VA_15s.json';
@@ -6646,7 +6651,10 @@ function promptNodeLLMInputText(node, ctx=smartLoopContext){
 }
 function activePromptLlmComposerNode(){
     const node = selectedNode();
-    return node?.type === 'smart-prompt' && node.llmEnabled === true ? node : null;
+    if(node?.type === 'smart-prompt' && node.llmEnabled === true) return node;
+    // 2026-11-04（脚本生成器）：空态（推荐卡）复用这块弹出面板做输入，参考 LLM 节点
+    if(node?.type === 'smart-storyboard' && node.storyboardChooser === true) return node;
+    return null;
 }
 function ensurePromptNodeLlmDefaults(node){
     if(!node || node.type !== 'smart-prompt') return;
@@ -6656,6 +6664,13 @@ function ensurePromptNodeLlmDefaults(node){
     node.llmModel = resolveChatModel(node.llmModel || remembered.model || '', node.llmProvider);
     node.llmSystemEnabled = node.llmSystemEnabled === true;
     node.llmSystemPrompt = node.llmSystemPrompt || 'You are a helpful prompt assistant.';
+}
+// 脚本生成器空态：面板弹出前补默认模型（不写 llmSystemPrompt 那套 LLM 节点字段）
+function ensureStoryboardLlmDefaults(node){
+    if(!node || node.type !== 'smart-storyboard') return;
+    const remembered = lastLlmSelection();
+    node.llmProvider = resolveLlmProviderWithMemory(node.llmProvider || remembered.provider || '');
+    node.llmModel = resolveChatModel(node.llmModel || remembered.model || '', node.llmProvider);
 }
 function setPromptLlmComposerOpen(open){
     if(!promptLlmComposer) return;
@@ -6777,7 +6792,8 @@ function positionPromptLlmComposer(node=activePromptLlmComposerNode()){
 }
 function syncPromptLlmRefs(node){
     if(!promptLlmRefs) return;
-    const refs = node ? promptNodeInputImages(node) : [];
+    // 2026-11-04（脚本生成器）：空态的引用素材走 scriptGenRefs（上游连线 + 手动参考，含视频）
+    const refs = node ? (node.type === 'smart-storyboard' ? scriptGenRefs(node) : promptNodeInputImages(node)) : [];
     // 2026-10-06（用户要求）LLM 面板引用行与 composer 生图引用行完全同款：
     // 同样的 .input-thumb 缩略图（42px + 图N 角标）+ 同样的 .input-thumb-add「+」按钮；
     // 无引用图时只显示「+」（与 composer 空态一致），不再用旧的「引用图」占位槽。
@@ -6876,10 +6892,19 @@ function syncPromptLlmComposer(node=activePromptLlmComposerNode()){
         setPromptLlmSkillPickerOpen(false);
         return;
     }
-    ensurePromptNodeLlmDefaults(node);
+    const isScriptGen = node.type === 'smart-storyboard';
+    if(isScriptGen) ensureStoryboardLlmDefaults(node);
+    else ensurePromptNodeLlmDefaults(node);
     promptLlmComposer.dataset.nodeId = node.id;
+    // 脚本生成器模式：不显示魔法棒/规则胶囊/技能包（用户要求），占位文案换成脚本文案
+    promptLlmComposer.classList.toggle('scriptgen-mode', isScriptGen);
+    if(promptLlmInstruction){
+        if(isScriptGen) promptLlmInstruction.setAttribute('placeholder', '描述剧情片段、故事，为你生成分镜脚本');
+        else promptLlmInstruction.setAttribute('placeholder', '输入提示词，开启 AI 生成');
+    }
+    const draftValue = isScriptGen ? String(node.scriptDraft || '') : String(node.llmInstruction || '');
     if(promptLlmInstruction && document.activeElement !== promptLlmInstruction){
-        promptLlmInstruction.value = node.llmInstruction || '';
+        promptLlmInstruction.value = draftValue;
         promptLlmInstruction.scrollTop = 0;
         growPromptLlmComposerShell(promptLlmInstruction);
     }
@@ -6892,15 +6917,15 @@ function syncPromptLlmComposer(node=activePromptLlmComposerNode()){
         promptLlmModel.value = node.llmModel;
     }
     syncPromptLlmRefs(node);
-    renderPromptLlmSkillChip(node);
-    syncPromptLlmOptimizeUI(node);
-    const running = node.running === true;
+    if(!isScriptGen) renderPromptLlmSkillChip(node);
+    if(!isScriptGen) syncPromptLlmOptimizeUI(node);
+    const running = isScriptGen ? node.generating === true : node.running === true;
     if(promptLlmRun){
         // 2026-10-19（用户要求简化）：一个按钮两种状态 —— 生成中再点一次 = 取消
         // 2026-10-30（用户要求）与运行按钮统一：纯箭头图标按钮，不再带「生成」文字
         promptLlmRun.classList.toggle('is-running', running);
-        promptLlmRun.title = running ? '生成中，点击取消' : '生成';
-        promptLlmRun.setAttribute('aria-label', running ? '生成中，点击取消' : '生成');
+        promptLlmRun.title = running ? '生成中' : '生成';
+        promptLlmRun.setAttribute('aria-label', running ? '生成中' : '生成');
         promptLlmRun.innerHTML = `<i data-lucide="${running ? 'loader-2' : 'arrow-up'}"></i>`;
     }
     positionPromptLlmComposer(node);
@@ -7036,16 +7061,28 @@ function imageLayout(images, scale=1, node=null){
     if(node?.type === 'smart-prompt') return {cols:1, rows:1, ...promptNodeLayoutSize(node), thumb:96, single:true};
     if(node?.type === 'smart-storyboard') {
         // 2026-11-03：空态（脚本生成器）是「建议卡 + 输入条」，需要比表格态更高的默认框
+        // 2026-11-04：空态改 280×280（与 LLM 统一），输入挪到画布 composer；老默认 420×448 自动收
         const chooser = node.storyboardChooser === true;
         const defW = chooser ? SCRIPT_GEN_DEFAULT_WIDTH : STORYBOARD_NODE_DEFAULT_WIDTH;
         const defH = chooser ? SCRIPT_GEN_DEFAULT_HEIGHT : STORYBOARD_NODE_DEFAULT_HEIGHT;
         const minW = chooser ? SCRIPT_GEN_MIN_WIDTH : STORYBOARD_NODE_MIN_WIDTH;
         const minH = chooser ? SCRIPT_GEN_MIN_HEIGHT : STORYBOARD_NODE_MIN_HEIGHT;
+        let layW = Number(node.w) || defW;
+        let layH = Number(node.h) || defH;
+        // 旧默认 420×448；另有一批节点因旧的下限夹取停在 300×280（2026-11-04 修），一并收回 280
+        const isLegacyChooserBox = (Math.abs(layW - SCRIPT_GEN_LEGACY_WIDTH) <= 2 && Math.abs(layH - SCRIPT_GEN_LEGACY_HEIGHT) <= 2)
+            || (Math.abs(layW - 300) <= 2 && Math.abs(layH - 280) <= 2);
+        if(chooser && node.boxManual !== true && isLegacyChooserBox){
+            layW = SCRIPT_GEN_DEFAULT_WIDTH;
+            layH = SCRIPT_GEN_DEFAULT_HEIGHT;
+            node.w = layW;
+            node.h = layH;
+        }
         return {
             cols:1,
             rows:1,
-            width:Math.round(Math.max(minW, Number(node.w) || defW)),
-            height:Math.round(Math.max(minH, Number(node.h) || defH)),
+            width:Math.round(Math.max(minW, layW)),
+            height:Math.round(Math.max(minH, layH)),
             thumb:96,
             single:true
         };
@@ -7058,14 +7095,26 @@ function imageLayout(images, scale=1, node=null){
         thumb:96,
         single:true
     };
-    if(node?.type === 'smart-director-stage') return {
-        cols:1,
-        rows:1,
-        width:Math.round(Math.max(DIRECTOR_NODE_MIN_WIDTH, Number(node.w) || DIRECTOR_NODE_DEFAULT_WIDTH)),
-        height:Math.round(Math.max(DIRECTOR_NODE_MIN_HEIGHT, Number(node.h) || DIRECTOR_NODE_DEFAULT_HEIGHT)),
-        thumb:96,
-        single:true
-    };
+    if(node?.type === 'smart-director-stage'){
+        // 2026-11-04：默认 280×280（与 LLM 统一）；老默认 560×470 且没手动拉过的自动收
+        let dirW = Number(node.w) || DIRECTOR_NODE_DEFAULT_WIDTH;
+        let dirH = Number(node.h) || DIRECTOR_NODE_DEFAULT_HEIGHT;
+        if(node.boxManual !== true
+            && Math.abs(dirW - DIRECTOR_NODE_LEGACY_WIDTH) <= 2 && Math.abs(dirH - DIRECTOR_NODE_LEGACY_HEIGHT) <= 2){
+            dirW = DIRECTOR_NODE_DEFAULT_WIDTH;
+            dirH = DIRECTOR_NODE_DEFAULT_HEIGHT;
+            node.w = dirW;
+            node.h = dirH;
+        }
+        return {
+            cols:1,
+            rows:1,
+            width:Math.round(Math.max(DIRECTOR_NODE_MIN_WIDTH, dirW)),
+            height:Math.round(Math.max(DIRECTOR_NODE_MIN_HEIGHT, dirH)),
+            thumb:96,
+            single:true
+        };
+    }
     if(node?.type === 'smart-loop'){
         const explicitW = Number(node.w);
         const explicitH = Number(node.h);
@@ -14806,6 +14855,8 @@ function smartRunRequestForButton(node, runSettings){
 }
 function smartRunButtonReadiness(node=selectedNode()){
     if(!node || !isSmartRunnableNode(node)) return {canRun:false, hasPrompt:false, hasRefs:false};
+    // 2026-11-04（脚本生成器）：空态生成中按钮置灰，防止重复提交
+    if(node.type === 'smart-storyboard' && node.generating) return {canRun:false, hasPrompt:false, hasRefs:false, busy:true};
     if(smartNodeInFlight(node) && !canStartConcurrentImageRun(node, smartSettingsForNode(node)) && !canH3RequeueRun(node) && !canRequeueApiVideoRun(node)){
         return {canRun:false, hasPrompt:false, hasRefs:false, busy:true};
     }
@@ -18938,8 +18989,10 @@ function ensureStoryboardNodeData(node, sourceNode=null){
     if(!isStoryboardScriptNode(node)) return node;
     const sourceRefs = Array.isArray(node.sourceRefs) ? node.sourceRefs : (sourceNode ? storyboardScriptSourceRefsForNode(sourceNode) : []);
     node.title = String(node.title || '').trim() || '分镜脚本';
-    node.w = Math.max(STORYBOARD_NODE_MIN_WIDTH, Math.round(Number(node.w) || STORYBOARD_NODE_DEFAULT_WIDTH));
-    node.h = Math.max(STORYBOARD_NODE_MIN_HEIGHT, Math.round(Number(node.h) || STORYBOARD_NODE_DEFAULT_HEIGHT));
+    // 2026-11-04：空态（脚本生成器）用 280 的下限，表格态仍用 300×150
+    const chooserMin = node.storyboardChooser === true;
+    node.w = Math.max(chooserMin ? SCRIPT_GEN_MIN_WIDTH : STORYBOARD_NODE_MIN_WIDTH, Math.round(Number(node.w) || (chooserMin ? SCRIPT_GEN_DEFAULT_WIDTH : STORYBOARD_NODE_DEFAULT_WIDTH)));
+    node.h = Math.max(chooserMin ? SCRIPT_GEN_MIN_HEIGHT : STORYBOARD_NODE_MIN_HEIGHT, Math.round(Number(node.h) || (chooserMin ? SCRIPT_GEN_DEFAULT_HEIGHT : STORYBOARD_NODE_DEFAULT_HEIGHT)));
     node.sourceRefs = sourceRefs;
     node.sourceText = String(node.sourceText || (sourceNode ? storyboardScriptSourceTextForNode(sourceNode) : '') || '');
     node.rows = normalizeStoryboardScriptRows(node.rows, node.sourceRefs).slice(0, 12);
@@ -19817,10 +19870,14 @@ async function shotGenSubmit(){
    它本体是 React + R3F 的独立应用，直接 iframe 进来拿不到画布里的角色资产，所以这里用项目里已有的
    three 0.160 原生实现一套更轻的：素材直接取画布上的资产节点（assetMeta），拍完的图直接落成画布图片节点。
    ============================================================ */
-const DIRECTOR_NODE_DEFAULT_WIDTH = 560;
-const DIRECTOR_NODE_DEFAULT_HEIGHT = 470;
-const DIRECTOR_NODE_MIN_WIDTH = 380;
-const DIRECTOR_NODE_MIN_HEIGHT = 320;
+// 2026-11-04（用户要求）：导演台节点与 LLM 节点统一成 280×280，空态去掉内层边框卡片。
+const DIRECTOR_NODE_DEFAULT_WIDTH = 280;
+const DIRECTOR_NODE_DEFAULT_HEIGHT = 280;
+const DIRECTOR_NODE_MIN_WIDTH = 220;
+const DIRECTOR_NODE_MIN_HEIGHT = 180;
+// 旧默认（560×470）：老画布里仍停在这个尺寸且没手动拉过的，自动收到新默认。
+const DIRECTOR_NODE_LEGACY_WIDTH = 560;
+const DIRECTOR_NODE_LEGACY_HEIGHT = 470;
 const DIRECTOR_RATIOS = [
     {id:'auto', ratio:0, label:'自适应'},
     {id:'21:9', ratio:21 / 9, label:'21:9'},
@@ -20035,15 +20092,15 @@ function directorNodeBodyHtml(node){
             <button class="director-open-btn" type="button" data-director-open="${escapeAttr(node.id)}">打开导演台</button>
         </div>`;
     }
-    const thumbs = shots.slice(0, 4).map((shot, index) => {
-        const ratioCss = String(shot.ratio || data.ratio || '16:9').replace(':', ' / ');
-        return `<span class="director-thumb" style="aspect-ratio:${ratioCss}"><img src="${escapeAttr(shot.url)}" alt="" draggable="false"><em>${escapeHtml(shot.cameraName || `镜头 ${index + 1}`)}</em></span>`;
-    }).join('');
-    const galleryClass = shots.length === 1 ? ' is-single' : (shots.length === 2 ? ' is-double' : '');
+    // 2026-11-04：280×280 下 2×2 缩略图每格只有 ~128px 太碎，改 1 张 16:9 主图 + 底栏统计
+    const mainShot = shots[0];
+    const extraCount = shots.length - 1;
+    const ratioCss = String(mainShot.ratio || data.ratio || '16:9').replace(':', ' / ');
     return `<div class="director-card">
-        <div class="director-card-gallery${galleryClass}">
-            ${thumbs}
-            ${shots.length > 4 ? `<span class="director-thumb-more">+${shots.length - 4}</span>` : ''}
+        <div class="director-card-main" style="aspect-ratio:${ratioCss}">
+            <img src="${escapeAttr(mainShot.url)}" alt="" draggable="false">
+            <em>${escapeHtml(mainShot.cameraName || '镜头 1')}</em>
+            ${extraCount > 0 ? `<span class="director-thumb-more">+${extraCount}</span>` : ''}
         </div>
         <div class="director-card-foot">
             <span class="director-card-meta">${data.cameras.length} 个机位 · ${shots.length} 张镜头图 · ${escapeHtml((DIRECTOR_RATIOS.find(item => item.id === data.ratio) || {}).label || data.ratio)}</span>
@@ -24016,8 +24073,17 @@ const SCRIPT_GEN_MODES = {
         icon: 'user-round',
         short: '角色',
         scaffold: '角色：\n\n场景：\n\n动作与情绪：\n\n片长：30 秒'
+    },
+    // 2026-11-04（用户要求对齐 LibTV）：第三条固定为「自己编写」——直接打开脚本编辑弹窗，不预填
+    manual: {
+        label: '自己编写分镜脚本',
+        icon: 'file-text',
+        short: '手动',
+        scaffold: ''
     }
 };
+// 推荐卡固定顺序（对齐参考图）：剧本 → 角色 → 自己编写；上游连了视频素材时自动追加「视频参考」
+const SCRIPT_GEN_SUGGEST_ORDER = ['script', 'character', 'manual'];
 function scriptGenRefs(node){
     if(!node?.id) return [];
     const refs = [];
@@ -24037,134 +24103,68 @@ function scriptGenRefs(node){
         return refs.filter(ref => ref?.url);
     }
 }
-function scriptGenModelSelectHtml(node){
-    const provider = resolveChatProviderId(node?.llmProvider || smartAgentProvider());
-    const model = resolveChatModel(node?.llmModel || smartAgentModel(provider), provider);
-    const providers = chatApiProviders();
-    if(!providers.length) return `<select class="scriptgen-model-select" data-scriptgen-model aria-label="模型"><option value="">未配置模型</option></select>`;
-    const groups = providers.map(p => {
-        const models = providerChatModels(p.id);
-        if(!models.length) return '';
-        return `<optgroup label="${escapeAttr(p.name || p.id)}">${models.map(item => `<option value="${escapeAttr(`${p.id}::${item}`)}"${p.id === provider && item === model ? ' selected' : ''}>${escapeHtml(item)}</option>`).join('')}</optgroup>`;
-    }).join('');
-    return `<select class="scriptgen-model-select" data-scriptgen-model aria-label="模型">${groups}</select>`;
+function scriptGenHasVideoRef(node){
+    try{
+        return scriptGenRefs(node).some(ref => ref?.url && (ref.kind === 'video'
+            || String(ref.mime || ref.type || '').includes('video')
+            || (typeof outputUrlLooksVideo === 'function' && outputUrlLooksVideo(ref.url))));
+    }catch(e){ return false; }
 }
 function scriptGeneratorNodeHtml(node){
     const mode = String(node?.scriptMode || '');
     const generating = Boolean(node?.generating);
-    const refs = scriptGenRefs(node);
-    const suggestions = Object.entries(SCRIPT_GEN_MODES).map(([id, item]) => `<button type="button" class="scriptgen-suggest${mode === id ? ' active' : ''}" data-scriptgen-suggest="${escapeAttr(id)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`).join('');
     const errorText = String(node?.scriptError || '').trim();
-    const refTip = refs.length ? `已接入 ${refs.length} 个参考素材（图片/视频）` : '把图片或视频节点连到本节点，生成时作为参考';
+    // 2026-11-04（用户要求）：输入挪到选中节点后弹出的画布 composer，节点内只留推荐卡
+    const order = SCRIPT_GEN_SUGGEST_ORDER.concat(scriptGenHasVideoRef(node) ? ['video'] : []);
+    const suggestions = order.map(id => {
+        const item = SCRIPT_GEN_MODES[id];
+        if(!item) return '';
+        return `<button type="button" class="scriptgen-suggest${mode === id ? ' active' : ''}" data-scriptgen-suggest="${escapeAttr(id)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`;
+    }).join('');
     return `<div class="scriptgen-node" data-scriptgen-root="${escapeAttr(node.id)}">
-        <div class="scriptgen-scroll">
-            <div class="scriptgen-card${generating ? ' is-loading' : ''}">
-                <div class="scriptgen-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-                <div class="scriptgen-try">尝试：</div>
-                ${suggestions}
-                ${generating ? `<div class="scriptgen-loading"><i data-lucide="loader-2"></i><span>正在生成分镜脚本…</span></div>` : ''}
-            </div>
-        </div>
-        <div class="scriptgen-composer${generating ? ' is-busy' : ''}">
-            <button type="button" class="scriptgen-expand" data-scriptgen-expand title="放大编辑分镜脚本" aria-label="放大编辑分镜脚本"><i data-lucide="maximize-2"></i></button>
-            <textarea class="scriptgen-input" data-scriptgen-input rows="2" spellcheck="false" placeholder="描述剧情或添加角色参考、视频参考等，为你生成分镜脚本"></textarea>
-            <div class="scriptgen-foot">
-                <label class="scriptgen-model" title="选择用于生成分镜脚本的大模型">
-                    <i data-lucide="dices" class="scriptgen-model-mark"></i>
-                    ${scriptGenModelSelectHtml(node)}
-                    <i data-lucide="chevron-down" class="scriptgen-model-caret"></i>
-                </label>
-                <div class="scriptgen-tools">
-                    <button type="button" class="scriptgen-tool${node?.scriptLang === 'en' ? ' active' : ''}" data-scriptgen-lang title="切换输出语言（中文 / English）" aria-label="切换输出语言"><i data-lucide="languages"></i></button>
-                    <span class="scriptgen-refs" title="${escapeAttr(refTip)}"><i data-lucide="zap"></i><b>${refs.length}</b></span>
-                    <button type="button" class="scriptgen-send" data-scriptgen-send title="生成分镜脚本（Enter）" aria-label="生成分镜脚本"${generating ? ' disabled' : ''}><i data-lucide="${generating ? 'loader-2' : 'arrow-up'}"></i></button>
-                </div>
-            </div>
+        <div class="scriptgen-card${generating ? ' is-loading' : ''}">
+            <div class="scriptgen-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+            <div class="scriptgen-try">尝试：</div>
+            ${suggestions}
             ${errorText ? `<div class="scriptgen-error">${escapeHtml(errorText)}</div>` : ''}
+            ${generating ? `<div class="scriptgen-loading"><i data-lucide="loader-2"></i><span>正在生成分镜脚本…</span></div>` : ''}
         </div>
     </div>`;
-}
-function growScriptGenInput(input){
-    if(!input) return;
-    input.style.height = 'auto';
-    input.style.height = `${Math.max(54, Math.min(126, input.scrollHeight || 54))}px`;
 }
 function scriptGeneratorApplySuggestion(nodeId, mode){
     const node = nodes.find(item => item.id === nodeId && isStoryboardScriptNode(item));
     const preset = SCRIPT_GEN_MODES[mode];
     if(!node || !preset) return false;
+    // 「自己编写」不预填，直接打开脚本编辑弹窗
+    if(mode === 'manual'){
+        openStoryboardScriptModal(node.id);
+        return true;
+    }
     node.scriptMode = mode;
-    if(!String(node.scriptDraft || '').trim()) node.scriptDraft = preset.scaffold;
+    const text = String(preset.scaffold || '');
+    node.scriptDraft = text;
+    // 预填进底部 composer（与 LLM 节点同一个输入框）：同时写入节点草稿，切换选中后再回来不丢
+    node.promptDraftHtml = escapeHtml(text);
+    node.promptDraftText = text;
+    node.promptDraftTouched = true;
+    if(activeComposerNode()?.id === node.id && promptInput){
+        promptInput.textContent = text;
+        promptInput.dataset.promptDraftDirty = '1';
+        delete promptInput.dataset.preserveDraftOnce;
+        if(typeof autoGrowPromptInput === 'function') autoGrowPromptInput();
+        focusPromptInputEnd();
+    }
     render();
     scheduleSave();
-    const input = world.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-scriptgen-input]`);
-    if(input){
-        input.value = String(node.scriptDraft || '');
-        growScriptGenInput(input);
-        input.focus();
-        const end = input.value.length;
-        try{ input.setSelectionRange(end, end); }catch(e){}
-    }
+    syncRunButtonState(node);
     return true;
-}
-async function scriptGeneratorSend(nodeId){
-    const node = nodes.find(item => item.id === nodeId && isStoryboardScriptNode(item));
-    if(!node || node.generating) return false;
-    const input = world.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-scriptgen-input]`);
-    const text = String(input?.value || node.scriptDraft || '').trim();
-    if(!text){
-        toast('先描述剧情，或点一条「尝试」模板');
-        input?.focus?.();
-        return false;
-    }
-    node.scriptDraft = text;
-    node.scriptError = '';
-    node.sourceText = text;
-    const refs = scriptGenRefs(node);
-    if(refs.length) node.sourceRefs = refs;
-    // generateStoryboardScriptFromState 优先读弹窗里的输入框，这里同步一下，
-    // 否则弹窗上次留下的旧文本会盖掉节点输入条里刚写的内容。
-    if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = text;
-    const ok = await generateStoryboardScriptForNode(nodeId, {collapseChooser:true});
-    if(!ok){
-        node.scriptError = String(node.status || '').trim() && node.status !== '正在生成...'
-            ? node.status
-            : '生成失败，检查模型配置后重试';
-        render();
-        scheduleSave();
-    }
-    return ok;
 }
 function bindScriptGeneratorNodeControls(el, node){
     if(!el || !node || node.storyboardChooser !== true) return;
     const root = el.querySelector('[data-scriptgen-root]');
     if(!root) return;
-    const live = () => nodes.find(item => item.id === node.id);
-    const input = root.querySelector('[data-scriptgen-input]');
-    if(input){
-        input.value = String(node.scriptDraft || '');
-        growScriptGenInput(input);
-        input.addEventListener('input', () => {
-            const target = live();
-            if(target) target.scriptDraft = input.value;
-            growScriptGenInput(input);
-        });
-        // 画布全局按键（Delete 删节点、空格平移等）不要吃到输入框里的内容
-        ['keydown', 'keyup', 'keypress'].forEach(type => input.addEventListener(type, e => e.stopPropagation()));
-        input.addEventListener('keydown', e => {
-            if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
-                e.preventDefault();
-                scriptGeneratorSend(node.id);
-            }
-        });
-        input.addEventListener('blur', () => {
-            const target = live();
-            if(target && target.scriptDraft !== input.value){
-                target.scriptDraft = input.value;
-                scheduleSave();
-            }
-        });
-    }
+    // 2026-11-04：输入/发送/模型选择全部交给画布 composer（选中节点自动弹出），
+    // 节点内只剩推荐卡——这里只挂建议项点击。
     root.querySelectorAll('[data-scriptgen-suggest]').forEach(btn => {
         btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
         btn.addEventListener('click', e => {
@@ -24172,51 +24172,6 @@ function bindScriptGeneratorNodeControls(el, node){
             e.stopPropagation();
             scriptGeneratorApplySuggestion(node.id, btn.dataset.scriptgenSuggest || '');
         });
-    });
-    const modelSelect = root.querySelector('[data-scriptgen-model]');
-    modelSelect?.addEventListener('mousedown', e => e.stopPropagation());
-    modelSelect?.addEventListener('change', () => {
-        const target = live();
-        const raw = String(modelSelect.value || '');
-        const sep = raw.indexOf('::');
-        if(!target || sep <= 0) return;
-        target.llmProvider = raw.slice(0, sep);
-        target.llmModel = raw.slice(sep + 2);
-        rememberLlmSelection(target.llmProvider, target.llmModel);
-        scheduleSave();
-    });
-    const langBtn = root.querySelector('[data-scriptgen-lang]');
-    langBtn?.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        const target = live();
-        if(!target) return;
-        target.scriptLang = target.scriptLang === 'en' ? 'zh' : 'en';
-        scheduleSave();
-        render();
-        toast(target.scriptLang === 'en' ? '分镜脚本语言：English' : '分镜脚本语言：中文');
-    });
-    const sendBtn = root.querySelector('[data-scriptgen-send]');
-    sendBtn?.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
-    sendBtn?.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        scriptGeneratorSend(node.id);
-    });
-    const expandBtn = root.querySelector('[data-scriptgen-expand]');
-    expandBtn?.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
-    expandBtn?.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        const target = live();
-        const text = String(input?.value || '').trim();
-        if(target && text){
-            target.scriptDraft = text;
-            target.sourceText = text;
-        }
-        // 弹窗优先读自己的输入框，先同步过去，否则会用上次残留的旧文本
-        if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = text;
-        openStoryboardScriptModal(node.id);
     });
 }
 function storyboardScriptNodePreviewHtml(node){
@@ -24635,6 +24590,7 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collaps
     if(!node) return false;
     ensureStoryboardNodeData(node, nodes.find(n => n.id === node.sourceNodeId) || null);
     node.generating = true;
+    node.scriptError = '';
     node.status = '正在生成...';
     render();
     const previousState = storyboardScriptState;
@@ -24656,18 +24612,25 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collaps
     const ok = await generateStoryboardScriptFromState();
     const finalState = storyboardScriptState;
     node.generating = false;
-    node.status = finalState?.status || (ok ? '已生成' : '生成失败');
+    // generateStoryboardScriptFromState 失败时也返回 true（错误写进 status），
+    // 所以收起推荐卡要按「状态真的是已生成」判定，失败必须留在空态改完重试。
+    const generatedOk = ok && /^已生成/.test(String(finalState?.status || ''));
+    node.status = finalState?.status || (generatedOk ? '已生成' : '生成失败');
     node.title = finalState?.sourceLabel || node.title || '分镜脚本';
     node.sourceText = finalState?.sourceText || node.sourceText || '';
     node.sourceRefs = Array.isArray(finalState?.sourceRefs) ? finalState.sourceRefs.slice() : node.sourceRefs;
     node.rows = normalizeStoryboardScriptRows(finalState?.rows || node.rows, node.sourceRefs || []).slice(0, 12);
-    // 脚本生成器 → 分镜表：生成成功才收起，失败时保留输入条让用户改完再试
-    if(collapseChooser && node.storyboardChooser && ok){
+    // 脚本生成器 → 分镜表：生成成功才收起，失败时把错误留在推荐卡上，composer 里的文本可改完重试
+    if(node.storyboardChooser && generatedOk){
         node.storyboardChooser = false;
         node.scriptError = '';
         node.status = node.status || '已生成';
         node.w = Math.max(STORYBOARD_NODE_DEFAULT_WIDTH, Math.round(Number(node.w) || 0));
         node.h = STORYBOARD_NODE_DEFAULT_HEIGHT;
+    } else if(node.storyboardChooser && !generatedOk){
+        node.scriptError = String(node.status || '').trim() && node.status !== '正在生成...'
+            ? node.status
+            : '生成失败，检查模型配置后重试';
     }
     storyboardScriptState = previousState;
     render();
@@ -28789,15 +28752,6 @@ function render(){
     // 用户正在提示词框(contenteditable)输入时,本次重渲染不要移动 composer:
     // 移动 DOM 节点会打断输入法合成会话,导致输入中断(即使保留焦点描边也接不上)。
     const promptHadFocus = document.activeElement === promptInput;
-    // 2026-11-03（脚本生成器）：节点里的 textarea 在 render 时会被 appendChild 挪一次，
-    // 浏览器会顺手 blur —— 用户输到一半的操作（保存/选中同步/生成进度）都会把光标弄丢。
-    // 这里先记下焦点和光标位置，等 DOM 摆好再原地恢复。
-    const scriptGenFocus = (() => {
-        const active = document.activeElement;
-        if(!active || typeof active.matches !== 'function' || !active.matches('[data-scriptgen-input]')) return null;
-        const nodeEl = active.closest('.image-node');
-        return { nodeId:nodeEl?.dataset?.id || '', start:active.selectionStart, end:active.selectionEnd };
-    })();
     const reusableNodes = new Map();
     const existingNodeEls = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
@@ -28998,16 +28952,6 @@ function render(){
     });
     // 节点尺寸和位置先写入 DOM，再计算连线端点，避免改尺寸后线路仍使用旧边界。
     world.insertAdjacentHTML('beforeend', renderConnections());
-    // 2026-11-03：节点 appendChild 挪位会把里面 textarea 的焦点弄丢，挪完立刻恢复光标。
-    if(scriptGenFocus?.nodeId){
-        const input = world.querySelector(`.image-node[data-id="${CSS.escape(scriptGenFocus.nodeId)}"] [data-scriptgen-input]`);
-        if(input && document.activeElement !== input){
-            try{
-                input.focus({preventScroll:true});
-                if(Number.isInteger(scriptGenFocus.start) && Number.isInteger(scriptGenFocus.end)) input.setSelectionRange(scriptGenFocus.start, scriptGenFocus.end);
-            }catch(e){}
-        }
-    }
     // 2026-10-06 挂回端口拖拽临时连线（右拉菜单打开期间保持连线不断）
     if(portDragTempPath){
         world.querySelector('svg.connection-layer')?.appendChild(portDragTempPath);
@@ -36406,6 +36350,15 @@ function updateComposer(){
         syncComposerFixedEngine(null);
         return;
     }
+    // 2026-11-04（脚本生成器）：空态输入走 LLM 弹出卡，主 composer 不再弹出（避免双面板）
+    if(node?.type === 'smart-storyboard' && node.storyboardChooser === true){
+        syncPromptLlmComposer(node);
+        composer.classList.remove('open');
+        activeComposerSubject = null;
+        lastComposerNodeId = '';
+        activeSmartPanelKind = '';
+        return;
+    }
     syncPromptLlmComposer(node?.type === 'smart-prompt' && node.llmEnabled === true ? node : null);
     composer.classList.toggle('open', !!node);
     if(!isSmartRunnableNode(node)){
@@ -42995,7 +42948,28 @@ function rerunSmartLoopRound(loopId, roundOffset){
 }
 async function runGeneration(){
     const node = selectedNode();
-    if(node?.type === 'smart-storyboard'){ const input=promptInput?.innerText?.trim() || promptInput?.textContent?.trim() || ''; if(input) node.sourceText=input; node.storyboardChooser=false; scheduleSave(); render(); await generateStoryboardScriptForNode(node.id,{openAfter:true}); return; }
+    if(node?.type === 'smart-storyboard'){
+        // 2026-11-04（脚本生成器）：空态输入在画布 composer 里，发送后走生成管线；
+        // 生成期间保留推荐卡蒙层，成功才收起成表格（collapseChooser），失败把错误留在卡片上
+        if(node.generating) return;
+        const input = (promptLlmInstruction?.value || '').trim()
+            || promptInput?.innerText?.trim()
+            || promptInput?.textContent?.trim()
+            || '';
+        if(node.storyboardChooser && !input){
+            toast('先描述剧情，或点一条「尝试」模板');
+            promptInput?.focus?.();
+            return;
+        }
+        if(input){
+            node.sourceText = input;
+            node.scriptDraft = input;
+            // generateStoryboardScriptFromState 优先读弹窗里的输入框，同步一下防旧文本覆盖
+            if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = input;
+        }
+        await generateStoryboardScriptForNode(node.id, {collapseChooser:true});
+        return;
+    }
     if(!node) return;
     clearSmartNodeRunNotice(node);
     if(node.uploadEntry === true){
@@ -49074,6 +49048,13 @@ promptLlmComposer?.addEventListener('wheel', event => event.stopPropagation(), {
 promptLlmInstruction?.addEventListener('input', event => {
     const node = activePromptLlmComposerNode();
     if(!node) return;
+    // 2026-11-04（脚本生成器）：草稿写 scriptDraft；技能包/规则智能体是 LLM 节点能力，空态不走
+    if(node.type === 'smart-storyboard'){
+        node.scriptDraft = event.target.value || '';
+        scheduleSave();
+        growPromptLlmComposerShell(event.target);
+        return;
+    }
     node.llmInstruction = event.target.value || '';
     scheduleSave();
     growPromptLlmComposerShell(event.target);   // 输入/删减多行时输入壳高度自适应（220→280）
@@ -49086,6 +49067,15 @@ promptLlmInstruction?.addEventListener('input', event => {
         });
     }
     else if(promptLlmSkillPicker && !promptLlmSkillPicker.hidden) setPromptLlmSkillPickerOpen(false);
+});
+// 2026-11-04（脚本生成器）：Enter 直接生成（Shift+Enter 换行）
+promptLlmInstruction?.addEventListener('keydown', event => {
+    const node = activePromptLlmComposerNode();
+    if(!node || node.type !== 'smart-storyboard') return;
+    if(event.key === 'Enter' && !event.shiftKey && !event.isComposing && (!promptLlmSkillPicker || promptLlmSkillPicker.hidden)){
+        event.preventDefault();
+        promptLlmRun?.click();
+    }
 });
 promptLlmInstruction?.addEventListener('keydown', event => {
     if(!promptLlmSkillPicker || promptLlmSkillPicker.hidden) return;
@@ -49123,6 +49113,7 @@ document.addEventListener('mousedown', event => {
 promptLlmInstruction?.addEventListener('input', event => {
     const node = activePromptLlmComposerNode();
     if(!node) return;
+    if(node.type === 'smart-storyboard'){ node.scriptDraft = event.target.value || ''; scheduleSave(); return; }
     node.llmInstruction = event.target.value || '';
     scheduleSave();
 });
@@ -49147,6 +49138,22 @@ promptLlmRun?.addEventListener('click', event => {
     event.stopPropagation();
     const node = activePromptLlmComposerNode();
     if(!node) return;
+    // 2026-11-04（脚本生成器）：发送 = 生成分镜脚本，成功后节点收起成表格
+    if(node.type === 'smart-storyboard'){
+        if(node.generating) return;
+        const text = String(promptLlmInstruction?.value || '').trim();
+        if(!text){ toast('先描述剧情，或点一条「尝试」模板'); promptLlmInstruction?.focus?.(); return; }
+        node.scriptDraft = text;
+        node.sourceText = text;
+        node.llmProvider = resolveChatProviderId(promptLlmProvider?.value || node.llmProvider || '');
+        node.llmModel = resolveChatModel(promptLlmModel?.value || node.llmModel || '', node.llmProvider);
+        rememberLlmSelection(node.llmProvider, node.llmModel);
+        // generateStoryboardScriptFromState 优先读弹窗里的输入框，同步一下防旧文本覆盖
+        if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = text;
+        scheduleSave();
+        generateStoryboardScriptForNode(node.id, {collapseChooser:true});
+        return;
+    }
     // 2026-10-19（用户要求简化）：生成中再点同一个按钮 = 取消
     if(node.running){ cancelPromptLLMNode(node.id); return; }
     ensurePromptNodeLlmDefaults(node);
@@ -49184,7 +49191,8 @@ document.getElementById('promptLlmTranslate')?.addEventListener('click', async e
         }).then(async r => { if(!r.ok) throw new Error(await r.text()); return r.json(); });
         const translated = (result.text || '').trim();
         if(!translated){ toast('翻译结果为空'); return; }
-        node.llmInstruction = translated;
+        if(node.type === 'smart-storyboard') node.scriptDraft = translated;
+        else node.llmInstruction = translated;
         if(promptLlmInstruction){ promptLlmInstruction.value = translated; promptLlmInstruction.scrollTop = 0; growPromptLlmComposerShell(promptLlmInstruction); }
         scheduleSave();
         toast('已翻译');
