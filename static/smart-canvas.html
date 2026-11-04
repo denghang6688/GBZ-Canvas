@@ -54,8 +54,8 @@
     <style>
         html.is-embedded #smartBrandDock { display:none !important; }
     </style>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.04.02.1793758197">
-    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.04.02.1793758197">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=V26.11.04.03.1793760858">
+    <link rel="stylesheet" href="/static/css/smart-canvas-node-skin.css?v=V26.11.04.03.1793760858">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -182,12 +182,9 @@
                         <span class="create-card-main"><span class="create-card-title">视频</span></span>
                         <span class="create-card-badge">seedance2.5</span>
                     </button>
-                    <!-- 2026-10-12（用户要求）创建菜单新增 Minimax H3 生视频入口，与端口菜单一致 -->
-                    <button class="create-card" type="button" data-create-type="minimaxH3">
-                        <span class="create-card-icon"><i data-lucide="clapperboard"></i></span>
-                        <span class="create-card-main"><span class="create-card-title">Minimax H3</span></span>
-                        <span class="create-card-badge">生视频</span>
-                    </button>
+                    <!-- 2026-11-04（用户要求）：移除「Minimax H3 本地」创建入口。
+                         旧节点（canvas 里已存在的 H3 节点）仍可正常显示、运行与输出；
+                         仅不再提供新建入口。 -->
                     <button class="create-card" type="button" data-create-type="audio">
                         <span class="create-card-icon"><i data-lucide="music"></i></span>
                         <span class="create-card-main"><span class="create-card-title">音频</span></span>
@@ -1065,7 +1062,7 @@
     <div id="slashPeek" class="slash-peek" aria-hidden="true"></div>
     <!-- 大面板遮罩：点它收起。放 world 之外，展开时把 #world 提到 z-index 100 才不会连面板一起盖住 -->
     <div id="composerExpandMask" class="composer-expand-mask" hidden></div>
-    <script src="/static/js/smart-canvas.js?v=V26.11.04.02.1793758197"></script>
+    <script src="/static/js/smart-canvas.js?v=V26.11.04.03.1793760858"></script>
 </body>
 </html>
 

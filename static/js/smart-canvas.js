@@ -45989,7 +45989,6 @@ function defaultPortNextOptions(fromPort){
         {action:'comfy', icon:'workflow', title:'comfyui', sub:'工作流'},
         {action:'video', icon:'video', title:'API生视频', sub:''},
         {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
-        {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
         {action:'llm', icon:'brain-circuit', title:'LLM', sub:''},
         {action:'loop', icon:'repeat-2', title:'循环', sub:''}
     ];
@@ -46009,9 +46008,10 @@ function portNextOptions(drag){
             {action:'comfy', icon:'workflow', title:'comfyui', sub:'工作流'},
             {action:'video', icon:'video', title:'API生视频', sub:''},
             {action:'audio', icon:'audio-lines', title:'API生音频', sub:'文字转语音'},
-            {action:'minimaxH3', icon:'clapperboard', title:'Minimax H3', sub:'生视频'},
             {action:'llm', icon:'brain-circuit', title:'LLM', sub:''},
             {action:'loop', icon:'repeat-2', title:'循环', sub:''}
+            // 2026-11-04（用户要求）：移除「Minimax H3 本地」拖线入口（新建路径）。
+            // createNodeFromPortNextAction 里的 minimaxH3 分支保留，仅为兼容旧数据/内部调用。
             // 2026-09-26 用户要求去掉「脚本」（分镜脚本）入口，见 createNodeFromPortNextAction 注释
         ];
     }
