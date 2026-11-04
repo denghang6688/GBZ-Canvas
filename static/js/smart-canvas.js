@@ -19011,6 +19011,9 @@ function ensureStoryboardNodeData(node, sourceNode=null){
     node.sourceRefs = sourceRefs;
     node.sourceText = String(node.sourceText || (sourceNode ? storyboardScriptSourceTextForNode(sourceNode) : '') || '');
     node.rows = normalizeStoryboardScriptRows(node.rows, node.sourceRefs).slice(0, 12);
+    // 2026-11-04（用户要求：大模型统一按输入面板来）：脚本节点没选过模型时先落到
+    // 「上次用过的平台/模型」（和输入面板同一份记忆），保证底栏下拉显示的就是真正要跑的模型。
+    if(!node.llmProvider || !node.llmModel) ensureStoryboardLlmDefaults(node);
     return node;
 }
 function storyboardRowsForNode(node){
@@ -24301,6 +24304,19 @@ function bindScriptGeneratorNodeControls(el, node){
         });
     }
 }
+// 2026-11-04（用户要求：大模型统一按下面的输入面板来）——底栏不再写死
+// 「LLM大模型 / GLM-4 / 豆包」三个假选项，直接复用下方 composer 的「服务 + 模型」两个下拉：
+// 同一份 chatApiProviders / chatModelOptions 列表，读写同一组节点字段（llmProvider / llmModel），
+// 面板里换了模型这里跟着变，这里换了面板也跟着变。
+function storyboardNodeModelSelectHtml(node){
+    if(!node) return '';
+    const provider = resolveChatProviderId(node.llmProvider || '');
+    const model = resolveChatModel(node.llmModel || '', provider);
+    const providerHtml = chatApiProviders().length
+        ? `<select class="storyboard-node-provider" data-storyboard-provider="${escapeAttr(node.id)}" title="大模型服务" aria-label="大模型服务">${chatProviderOptions(provider)}</select>`
+        : '';
+    return `${providerHtml}<select class="storyboard-node-model" data-storyboard-model="${escapeAttr(node.id)}" title="大模型" aria-label="大模型">${chatModelOptions(model, provider)}</select>`;
+}
 function storyboardScriptNodePreviewHtml(node){
     if(node.storyboardChooser){ return scriptGeneratorNodeHtml(node); }
     const rows = storyboardRowsForNode(node).slice(0, 5);
@@ -24326,7 +24342,7 @@ function storyboardScriptNodePreviewHtml(node){
                 </div>`;
             }).join('')}
         </div>
-        <div class="storyboard-node-footer"><select class="storyboard-node-model" data-storyboard-model="${escapeAttr(node.id)}" aria-label="LLM模型"><option>LLM大模型</option><option>GLM-4</option><option>豆包</option></select>${storyboardShotsButtonHtml(node)}<button type="button" class="storyboard-node-generate" data-storyboard-generate="${escapeAttr(node.id)}"><i data-lucide="sparkles"></i><span>生成</span></button></div>
+        <div class="storyboard-node-footer">${storyboardNodeModelSelectHtml(node)}${storyboardShotsButtonHtml(node)}<button type="button" class="storyboard-node-generate" data-storyboard-generate="${escapeAttr(node.id)}"><i data-lucide="sparkles"></i><span>生成</span></button></div>
     </div>`;
 }
 function createScriptGeneratorNode(x, y, options={}){
@@ -29296,10 +29312,12 @@ function render(){
         const titleEditAttr = (isGroup || isSmartGroup || isSingleMediaTitle)
             ? ` data-node-title-edit="${escapeAttr(node.id)}" title="${escapeAttr(isSingleMediaTitle && titleTip ? `${titleTip} · 双击修改名称` : '双击修改名称')}"`
             : (titleTip ? ` title="${escapeAttr(titleTip)}"` : '');
-        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isStoryboard && node.storyboardChooser ? 'script-generator-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isDirectorStage ? 'director-stage-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
+        const html = `<div class="image-node ${isEmpty && !isWorkflowGroup ? 'empty-node' : ''} ${isH3 ? 'minimax-h3-node' : ''} ${isUploadEntry ? 'upload-entry-node' : ''} ${isGroup ? 'group-node' : ''} ${isPendingGroup ? 'pending-group-node' : ''} ${isGridSplitGroup ? 'grid-split-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isPromptBasic ? 'prompt-basic-smart-node' : ''} ${isPromptLlm ? 'prompt-llm-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isStoryboard ? 'storyboard-smart-node' : ''} ${isStoryboard && !node.storyboardChooser && Number(layout.width) < 520 ? 'storyboard-narrow-node' : ''} ${isStoryboard && node.storyboardChooser ? 'script-generator-node' : ''} ${isShotTable ? 'shot-table-smart-node' : ''} ${isDirectorStage ? 'director-stage-node' : ''} ${node.assetMeta ? 'asset-card-node' : ''} ${isShotTable ? shotTableWidthClass(layout.width) : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isWorkflowGroup ? 'workflow-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${node.transformDraftPreview === true ? 'transform-draft-preview-node' : ''} ${node.singleI2IPendingOutput === true ? 'single-i2i-output-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${hiddenBranchSourceIds.has(node.id) ? 'display:none;' : ''}${escapeAttr(nodeStyleExtra)}">
             ${hideGeneratedGroupHead || isWorkflowGroup ? '' : `<div class="node-head"><div class="node-title"${titleEditAttr}>${titleHtml}</div>${nodeBarMetaHtml(node, imgs)}<div class="node-actions">${deleteBtn}${uploadPreviewOnly ? '' : smartGroupResizeBtn}</div></div>`}
             ${hideGeneratedGroupHead && isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
-            ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${/* 2026-11-04（用户要求：悬停的垃圾桶去掉）——分镜脚本卡片不再浮出删除按钮，
+                  与 09-28 去掉标题栏垃圾桶保持一致：选中后 Delete/Backspace 删除，进回收站可恢复。 */''}
+            ${!isEmpty && !isGroup && !uploadPreviewOnly && !isImageNode && !isPrompt && !isStoryboard ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${isPending ? '' : (isGridSplitGroup ? gridSplitGroupToolbarHtml(node) : smartNodeToolbarHtml(node))}${smartTransformEditorHtml(node)}${smartGroupToolbarHtml(node)}${workflowGroupToolbarHtml(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
@@ -31102,6 +31120,43 @@ function bindNodeEvents(){
         });
                 el.querySelectorAll('[data-storyboard-inline-send]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const n=nodes.find(x=>x.id===id); const input=el.querySelector('[data-storyboard-inline-input]'); if(n&&input){ n.sourceText=input.value||''; n.storyboardChooser=false; scheduleSave(); render(); openStoryboardScriptModal(id); } }));
 el.querySelectorAll('[data-storyboard-choice]').forEach(btn => { btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const n=nodes.find(x=>x.id===id); if(n){ n.storyboardChooser=false; n.storyboardMode=btn.dataset.storyboardChoice||'script'; scheduleSave(); render(); openStoryboardScriptModal(id); } }); });
+        // 2026-11-04（用户要求：大模型统一按输入面板来）：底栏「服务 / 模型」两个下拉
+        // 与下方 composer 写同一组字段，改完立刻回灌面板（面板开着时同步换选中项）。
+        const syncStoryboardLlmToPanel = n => {
+            if(!n) return;
+            if(activePromptLlmComposerNode()?.id === n.id) syncPromptLlmComposer(n);
+        };
+        el.querySelectorAll('[data-storyboard-provider]').forEach(sel => {
+            // 只吞冒泡（防止触发画布选中/拖拽），不能 preventDefault——否则原生下拉弹不出来
+            sel.addEventListener('mousedown', e => e.stopPropagation(), true);
+            sel.addEventListener('click', e => e.stopPropagation());
+            sel.addEventListener('change', e => {
+                e.stopPropagation();
+                const n = nodes.find(x => x.id === (sel.dataset.storyboardProvider || id));
+                if(!n) return;
+                n.llmProvider = resolveChatProviderId(sel.value);
+                n.llmModel = resolveChatModel('', n.llmProvider);
+                rememberLlmSelection(n.llmProvider, n.llmModel);
+                scheduleSave();
+                render();
+                syncStoryboardLlmToPanel(n);
+            });
+        });
+        el.querySelectorAll('[data-storyboard-model]').forEach(sel => {
+            sel.addEventListener('mousedown', e => e.stopPropagation(), true);
+            sel.addEventListener('click', e => e.stopPropagation());
+            sel.addEventListener('change', e => {
+                e.stopPropagation();
+                const n = nodes.find(x => x.id === (sel.dataset.storyboardModel || id));
+                if(!n) return;
+                n.llmProvider = resolveChatProviderId(n.llmProvider || '');
+                n.llmModel = resolveChatModel(sel.value || '', n.llmProvider);
+                rememberLlmSelection(n.llmProvider, n.llmModel);
+                scheduleSave();
+                render();
+                syncStoryboardLlmToPanel(n);
+            });
+        });
         el.querySelectorAll('[data-storyboard-node-expand]').forEach(btn => {
             btn.addEventListener('mousedown', e => {
                 e.preventDefault();
@@ -49593,6 +49648,8 @@ promptLlmProvider?.addEventListener('change', event => {
     rememberLlmSelection(node.llmProvider, node.llmModel);
     syncPromptLlmComposer(node);
     scheduleSave();
+    // 2026-11-04（用户要求：大模型统一按输入面板来）面板换了服务，节点底栏跟着换
+    render();
 });
 promptLlmModel?.addEventListener('change', event => {
     const node = activePromptLlmComposerNode();
@@ -49600,6 +49657,8 @@ promptLlmModel?.addEventListener('change', event => {
     node.llmModel = event.target.value || resolveChatModel('', node.llmProvider);
     rememberLlmSelection(node.llmProvider, node.llmModel);
     scheduleSave();
+    // 2026-11-04（用户要求：大模型统一按输入面板来）面板换了模型，节点底栏跟着换
+    render();
 });
 promptLlmRun?.addEventListener('click', event => {
     event.preventDefault();
