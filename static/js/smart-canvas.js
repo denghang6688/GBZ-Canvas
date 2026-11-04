@@ -6801,7 +6801,14 @@ function syncPromptLlmRefs(node){
     if(!node){ promptLlmRefs.innerHTML = ''; return; }
     const manualKeys = new Set(manualReferenceImagesFor(node).map(img => inputRefKey(img)).filter(Boolean));
     const addButton = `<button class="input-thumb-add" type="button" data-llm-add-reference title="添加引用图：本地上传" aria-label="添加引用图"><i data-lucide="plus"></i></button>`;
-    if(!refs.length){
+    // 2026-11-04（用户要求，参考稿）：上游接的「文本」剧本也在这里占一个引用位（角标 1），
+    // 让用户一眼看到这次是「按上游剧本拆分镜」，而不是凭空生成。
+    const scriptText = node && node.type === 'smart-storyboard' ? scriptGenUpstreamScriptText(node) : '';
+    const scriptTitle = scriptText ? (scriptText.split('\n').map(line => line.trim()).filter(Boolean)[0] || '剧本') : '';
+    const scriptChip = scriptText
+        ? `<div class="input-thumb text-ref-thumb" title="${escapeHtml(`上游剧本：${scriptTitle}`)}"><i data-lucide="file-text"></i><span class="input-thumb-label">1</span></div>`
+        : '';
+    if(!refs.length && !scriptChip){
         promptLlmRefs.innerHTML = `<div class="input-thumb-list empty">${addButton}</div>`;
         bindPromptLlmRefActions(node);
         refreshIcons();
@@ -6826,7 +6833,7 @@ function syncPromptLlmRefs(node){
             : (seqKey === 'audio' ? `音频${refCounters.audio}` : `图${refCounters.image}`);
         return `<div class="input-thumb${removable ? ' input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(img.originalLocalUrl || img.url || '')}" data-kind="${escapeHtml(kind)}" title="${escapeHtml(`${img.name || label} · LLM 引用图`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
     }).join('');
-    promptLlmRefs.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${addButton}</div>`;
+    promptLlmRefs.innerHTML = `<div class="input-thumb-list">${scriptChip}${thumbsHtml}${addButton}</div>`;
     bindSmartPreviewImageFallbacks(promptLlmRefs);
     bindPromptLlmRefActions(node);
     // 2026-10-11（用户要求）LLM 面板引用图支持拖拽排序：复用 composer 引用行的拖拽逻辑
@@ -14857,6 +14864,11 @@ function smartRunButtonReadiness(node=selectedNode()){
     if(!node || !isSmartRunnableNode(node)) return {canRun:false, hasPrompt:false, hasRefs:false};
     // 2026-11-04（脚本生成器）：空态生成中按钮置灰，防止重复提交
     if(node.type === 'smart-storyboard' && node.generating) return {canRun:false, hasPrompt:false, hasRefs:false, busy:true};
+    // 2026-11-04（用户要求）：输入框留空、但上游接了剧本时同样可运行
+    if(node.type === 'smart-storyboard' && node.storyboardChooser === true){
+        const hasSource = Boolean(String(node.scriptDraft || '').trim() || scriptGenUpstreamScriptText(node));
+        return {canRun:hasSource, hasPrompt:hasSource, hasRefs:false, busy:false};
+    }
     if(smartNodeInFlight(node) && !canStartConcurrentImageRun(node, smartSettingsForNode(node)) && !canH3RequeueRun(node) && !canRequeueApiVideoRun(node)){
         return {canRun:false, hasPrompt:false, hasRefs:false, busy:true};
     }
@@ -24084,6 +24096,62 @@ const SCRIPT_GEN_MODES = {
 };
 // 推荐卡固定顺序（对齐参考图）：剧本 → 角色 → 自己编写；上游连了视频素材时自动追加「视频参考」
 const SCRIPT_GEN_SUGGEST_ORDER = ['script', 'character', 'manual'];
+// 2026-11-04（用户要求，参考稿）：点第一条「剧本生成分镜脚本」时，上游自动接一个「文本」节点，
+// 里面放这份默认剧本；用户不用自己写梗概，直接发送就能拆分镜，也可以再补一句要求。
+const SCRIPT_GEN_DEFAULT_SCRIPT = [
+    '《我在盛唐写天下》',
+    '类型：古风 / 穿越 / 爽文漫剧',
+    '时长建议：60-90 秒',
+    '基调：热血 × 盛唐史诗感 × 爽点节奏',
+    '',
+    '【序幕】',
+    '长安，暮鼓。青衫少年沈砚自梦中惊醒，掌心攥着半枚残缺的鱼符。',
+    '',
+    '【第一幕】',
+    '朱雀大街人潮涌动，胡姬旋舞，驼铃与酒香。沈砚被巡街的金吾卫拦下，鱼符露出一角龙纹。',
+    '',
+    '【第二幕】',
+    '宫墙下，沈砚以一首即兴诗惊动长公主，命运的齿轮自此转动。',
+    '',
+    '【结尾钩子】',
+    '镜头拉远，长安灯火次第亮起，一纸诏书被递到沈砚手中。'
+].join('\n');
+// 上游已连的「文本」节点（剧本来源）：只看有正文的 smart-prompt，避免连了个空节点也算有剧本
+function scriptGenUpstreamPromptNodes(node){
+    if(!node?.id) return [];
+    try{
+        return (inputNodesFor(node) || []).filter(input => input?.type === 'smart-prompt' && String(input.text || '').trim());
+    }catch(e){ return []; }
+}
+function scriptGenUpstreamScriptText(node){
+    try{
+        return scriptGenUpstreamPromptNodes(node)
+            .flatMap(input => promptTextItemsForNode(input))
+            .map(text => String(text || '').trim())
+            .filter(Boolean)
+            .join('\n\n');
+    }catch(e){ return ''; }
+}
+// 幂等：已经有上游文本就不再建第二个，重复点第一条建议不会堆出一串剧本节点
+function ensureScriptGenUpstreamScript(node){
+    if(!node?.id) return null;
+    const existing = scriptGenUpstreamPromptNodes(node)[0];
+    if(existing) return existing;
+    const textNode = createPromptNode(0, 0, {select:false, skipUndo:true, skipRender:true, skipSave:true});
+    textNode.title = '文本';
+    textNode.text = SCRIPT_GEN_DEFAULT_SCRIPT;
+    // 摆在脚本生成器左上方：与参考稿一致的「上游剧本 → 脚本生成器」阅读顺序。
+    // 尺寸标成 boxManual，否则 340×320 会被「旧默认尺寸吸附」收回 280×280。
+    const w = 340;
+    const h = 320;
+    textNode.w = w;
+    textNode.h = h;
+    textNode.boxManual = true;
+    textNode.x = Math.round((Number(node.x) || 0) - w - 120);
+    textNode.y = Math.round((Number(node.y) || 0) - 30);
+    connectInputNode(textNode.id, node.id);
+    return textNode;
+}
 function scriptGenRefs(node){
     if(!node?.id) return [];
     const refs = [];
@@ -24121,15 +24189,26 @@ function scriptGeneratorNodeHtml(node){
         if(!item) return '';
         return `<button type="button" class="scriptgen-suggest${mode === id ? ' active' : ''}" data-scriptgen-suggest="${escapeAttr(id)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`;
     }).join('');
+    // 2026-11-04（用户要求，参考稿）：选过创作方式后卡片只剩居中占位字形，
+    // 推荐列表收起（输入已经在下方弹出的 composer 里）；双击卡片可退回推荐卡重选。
+    const picked = Boolean(mode);
     return `<div class="scriptgen-node" data-scriptgen-root="${escapeAttr(node.id)}">
-        <div class="scriptgen-card${generating ? ' is-loading' : ''}">
-            <div class="scriptgen-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-            <div class="scriptgen-try">尝试：</div>
-            ${suggestions}
+        <div class="scriptgen-card${generating ? ' is-loading' : ''}${picked ? ' is-picked' : ''}"${picked ? ` data-scriptgen-picked="1"` : ''}>
+            <div class="scriptgen-glyph"${picked ? ' title="点一下重新选择创作方式"' : ' aria-hidden="true"'}><span></span><span></span><span></span><span></span></div>
+            ${picked ? '' : `<div class="scriptgen-try">尝试：</div>${suggestions}`}
             ${errorText ? `<div class="scriptgen-error">${escapeHtml(errorText)}</div>` : ''}
             ${generating ? `<div class="scriptgen-loading"><i data-lucide="loader-2"></i><span>正在生成分镜脚本…</span></div>` : ''}
         </div>
     </div>`;
+}
+// 弹卡里的输入框在聚焦状态下不会被 syncPromptLlmComposer 回写（防打断用户输入），
+// 但「点了建议项」属于我们要主动改写，这里显式写一次。
+function scriptGenSyncPanelDraft(node, value){
+    if(!node || !promptLlmInstruction) return;
+    if(activePromptLlmComposerNode()?.id !== node.id) return;
+    promptLlmInstruction.value = String(value || '');
+    promptLlmInstruction.scrollTop = 0;
+    if(typeof growPromptLlmComposerShell === 'function') growPromptLlmComposerShell(promptLlmInstruction);
 }
 function scriptGeneratorApplySuggestion(nodeId, mode){
     const node = nodes.find(item => item.id === nodeId && isStoryboardScriptNode(item));
@@ -24141,6 +24220,34 @@ function scriptGeneratorApplySuggestion(nodeId, mode){
         return true;
     }
     node.scriptMode = mode;
+    node.scriptError = '';
+    // 2026-11-04（用户要求，参考稿）：第一条「剧本」不预填骨架，改成上游自动接一份默认剧本；
+    // 输入框留空，直接发送就按剧本拆分镜，想补充要求再写一句。
+    if(mode === 'script'){
+        const upstream = ensureScriptGenUpstreamScript(node);
+        // 只有空草稿或还停在骨架模板时才清空；用户已经自己写的内容不能因为换方式被抹掉
+        const draft = String(node.scriptDraft || '').trim();
+        const isScaffold = Object.values(SCRIPT_GEN_MODES).some(item => String(item.scaffold || '').trim() === draft);
+        if(!draft || isScaffold){
+            node.scriptDraft = '';
+            node.promptDraftHtml = '';
+            node.promptDraftText = '';
+            node.promptDraftTouched = false;
+            if(activeComposerNode()?.id === node.id && promptInput){
+                promptInput.textContent = '';
+                promptInput.dataset.promptDraftDirty = '1';
+                delete promptInput.dataset.preserveDraftOnce;
+                if(typeof autoGrowPromptInput === 'function') autoGrowPromptInput();
+            }
+        }
+        render();
+        scheduleSave();
+        syncRunButtonState(node);
+        scriptGenSyncPanelDraft(node, node.scriptDraft || '');
+        if(activePromptLlmComposerNode()?.id === node.id) promptLlmInstruction?.focus?.();
+        if(upstream) toast('上游已接入默认剧本，可直接发送或补充要求');
+        return true;
+    }
     const text = String(preset.scaffold || '');
     node.scriptDraft = text;
     // 预填进底部 composer（与 LLM 节点同一个输入框）：同时写入节点草稿，切换选中后再回来不丢
@@ -24157,6 +24264,7 @@ function scriptGeneratorApplySuggestion(nodeId, mode){
     render();
     scheduleSave();
     syncRunButtonState(node);
+    scriptGenSyncPanelDraft(node, text);
     return true;
 }
 function bindScriptGeneratorNodeControls(el, node){
@@ -24173,6 +24281,22 @@ function bindScriptGeneratorNodeControls(el, node){
             scriptGeneratorApplySuggestion(node.id, btn.dataset.scriptgenSuggest || '');
         });
     });
+    // 选过方式后卡片收起推荐列表，点居中占位字形可退回推荐卡重选
+    // 不能用 dblclick：第一次点击会触发节点重渲染换掉 DOM，浏览器就不再派发 dblclick；
+    // 这里和上面的建议按钮一样，先吞掉 mousedown，避免画布选中/拖拽把 DOM 换掉导致 click 丢失。
+    const pickedGlyph = root.querySelector('[data-scriptgen-picked] .scriptgen-glyph');
+    if(pickedGlyph){
+        pickedGlyph.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+        pickedGlyph.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(node.generating) return;
+            node.scriptMode = '';
+            node.scriptError = '';
+            render();
+            scheduleSave();
+        });
+    }
 }
 function storyboardScriptNodePreviewHtml(node){
     if(node.storyboardChooser){ return scriptGeneratorNodeHtml(node); }
@@ -24599,7 +24723,8 @@ async function generateStoryboardScriptForNode(nodeId, {openAfter=false, collaps
         // 脚本生成器空态的标题就是「脚本生成器」，不能拿它当脚本名；
         // 让它走兜底「分镜脚本」，等模型返回 title 再改名。
         sourceLabel:node.storyboardChooser ? '分镜脚本' : (node.title || '分镜脚本'),
-        sourceText:node.sourceText || '',
+        // 2026-11-04（用户要求）：输入框留空时用上游「文本」节点的剧本当素材
+        sourceText:String(node.sourceText || '').trim() || scriptGenUpstreamScriptText(node),
         sourceRefs:Array.isArray(node.sourceRefs) ? node.sourceRefs.slice() : [],
         rows:normalizeStoryboardScriptRows(node.rows, node.sourceRefs || []).slice(0, 12),
         view:'script',
@@ -42952,20 +43077,28 @@ async function runGeneration(){
         // 2026-11-04（脚本生成器）：空态输入在画布 composer 里，发送后走生成管线；
         // 生成期间保留推荐卡蒙层，成功才收起成表格（collapseChooser），失败把错误留在卡片上
         if(node.generating) return;
-        const input = (promptLlmInstruction?.value || '').trim()
+        const typed = (promptLlmInstruction?.value || '').trim()
             || promptInput?.innerText?.trim()
             || promptInput?.textContent?.trim()
             || '';
+        // 2026-11-04（用户要求）：输入框可以空着——上游「文本」节点的剧本就是素材
+        const upstreamScript = scriptGenUpstreamScriptText(node);
+        const input = typed || upstreamScript;
         if(node.storyboardChooser && !input){
             toast('先描述剧情，或点一条「尝试」模板');
-            promptInput?.focus?.();
+            if(promptLlmInstruction) promptLlmInstruction.focus();
+            else promptInput?.focus?.();
             return;
         }
-        if(input){
-            node.sourceText = input;
-            node.scriptDraft = input;
+        if(typed){
+            node.sourceText = typed;
+            node.scriptDraft = typed;
             // generateStoryboardScriptFromState 优先读弹窗里的输入框，同步一下防旧文本覆盖
-            if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = input;
+            if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = typed;
+        } else if(upstreamScript){
+            node.sourceText = upstreamScript;
+            // 清掉弹窗里的残留文本，否则它会盖过刚取到的上游剧本
+            if(storyboardScriptSourceInput) storyboardScriptSourceInput.value = '';
         }
         await generateStoryboardScriptForNode(node.id, {collapseChooser:true});
         return;
@@ -49142,9 +49275,11 @@ promptLlmRun?.addEventListener('click', event => {
     if(node.type === 'smart-storyboard'){
         if(node.generating) return;
         const text = String(promptLlmInstruction?.value || '').trim();
-        if(!text){ toast('先描述剧情，或点一条「尝试」模板'); promptLlmInstruction?.focus?.(); return; }
+        // 2026-11-04（用户要求）：输入留空也能发——上游「文本」节点的剧本就是素材
+        const upstreamScript = text ? '' : scriptGenUpstreamScriptText(node);
+        if(!text && !upstreamScript){ toast('先描述剧情，或点一条「尝试」模板'); promptLlmInstruction?.focus?.(); return; }
         node.scriptDraft = text;
-        node.sourceText = text;
+        node.sourceText = text || upstreamScript;
         node.llmProvider = resolveChatProviderId(promptLlmProvider?.value || node.llmProvider || '');
         node.llmModel = resolveChatModel(promptLlmModel?.value || node.llmModel || '', node.llmProvider);
         rememberLlmSelection(node.llmProvider, node.llmModel);

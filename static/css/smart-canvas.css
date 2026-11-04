@@ -2465,6 +2465,19 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .scriptgen-loading { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; border-radius:12px; background:rgba(12,12,12,.82); color:#dcdcdc; font-size:12px; font-weight:800; }
 .scriptgen-loading i,.scriptgen-loading svg { width:22px; height:22px; animation:spin 1s linear infinite; }
 .scriptgen-error { margin-top:8px; color:#f87171; font-size:10.5px; font-weight:800; line-height:1.4; }
+/* 2026-11-04（用户要求，参考稿）：选过创作方式后切到这个样式——
+   推荐列表收起，卡片里只剩垂直居中的占位字形（输入已经在下方弹出的 composer）。 */
+.scriptgen-card.is-picked { justify-content:center; align-items:center; }
+.scriptgen-card.is-picked .scriptgen-glyph { width:46px; margin:0; gap:7px; cursor:pointer; }
+.scriptgen-card.is-picked .scriptgen-glyph:hover span { background:rgba(255,255,255,.5); }
+.scriptgen-card.is-picked .scriptgen-glyph span:nth-child(1),
+.scriptgen-card.is-picked .scriptgen-glyph span:nth-child(2),
+.scriptgen-card.is-picked .scriptgen-glyph span:nth-child(3) { width:46px; align-self:flex-start; }
+.scriptgen-card.is-picked .scriptgen-glyph span:nth-child(4) { width:28px; align-self:flex-start; }
+.scriptgen-card.is-picked .scriptgen-error { max-width:220px; text-align:center; }
+/* 上游剧本在 composer 引用位显示成一张「文本」卡（左上角 1）：表示这次按上游剧本拆分镜 */
+.input-thumb.text-ref-thumb { display:flex; align-items:center; justify-content:center; background:#2f2f2f; border-color:rgba(255,255,255,.10); color:rgba(255,255,255,.60); cursor:default; }
+.input-thumb.text-ref-thumb i,.input-thumb.text-ref-thumb svg { width:20px; height:20px; }
 .storyboard-node-card {
     position:relative;
     width:100%;

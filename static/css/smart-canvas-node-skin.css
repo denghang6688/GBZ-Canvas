@@ -93,7 +93,8 @@ html body .world .image-node.storyboard-smart-node.script-generator-node:not(.sm
 }
 html body .world .image-node.storyboard-smart-node.script-generator-node:not(.smart-group-member-node):hover,
 html body .world .image-node.storyboard-smart-node.script-generator-node:not(.smart-group-member-node).selected {
-    border-color: rgba(255,255,255,.12) !important;
+    /* 2026-11-04（参考稿）：选中时描边提亮，和「切换到这个样式」的参考图一致 */
+    border-color: rgba(255,255,255,.42) !important;
 }
 
 html body .world .image-node.empty-node:hover,
