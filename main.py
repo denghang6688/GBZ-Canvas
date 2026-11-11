@@ -427,10 +427,11 @@ async def no_cache_static_assets(request, call_next):
     return response
 
 
-# 全局请求体大小上限（默认 100 MiB）。
+# 全局请求体大小上限（2026-11-11 由 100 MiB 上调至 500 MiB）。
 # 单画布 JSON（含节点 + 多张参考图 base64）正常远小于此值；
-# 超过即直接 413，避免服务端在反序列化阶段被恶意 / 异常客户端拖死。
-MAX_REQUEST_BYTES = 100 * 1024 * 1024
+# 用户反馈：工作流包（zip）会把参考图等资源全部打进去，超过 100M 就导入不了，
+# 上调到 500 MiB；超过仍直接 413，避免服务端在反序列化阶段被恶意 / 异常客户端拖死。
+MAX_REQUEST_BYTES = 500 * 1024 * 1024
 
 
 @app.middleware("http")
