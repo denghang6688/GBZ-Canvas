@@ -1527,6 +1527,9 @@ body.theme-light.smart-node-resize .node-resize-handle { color:rgba(0,0,0,.85); 
 .input-thumb.drop-before::before, .input-thumb.drop-after::after { content:""; position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--strong); border-radius:999px; }
 .input-thumb.drop-before::before { left:-4px; }
 .input-thumb.drop-after::after { right:-4px; }
+/* 2026-11-11 对调排序：整张目标缩略图为热区，悬停时青色描边高亮 + 微放大，提示松手即两图互换 */
+.input-thumb.drop-swap { border-color:var(--strong); box-shadow:inset 0 0 0 1.5px var(--strong), 0 0 0 2px rgba(13,148,136,.35); transform:scale(1.07); }
+.input-thumb.drop-swap::after { content:""; position:absolute; inset:0; z-index:5; border-radius:inherit; background:rgba(13,148,136,.18); pointer-events:none; }
 .input-thumb-count { color:var(--faint); font-size:9.5px; font-weight:600; letter-spacing:.05em; padding:0 6px; flex:0 0 auto; }
 .composer-head { grid-area:head; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 2px; }
 .composer-head-left { min-width:0; display:flex; align-items:center; gap:6px; }
@@ -8097,6 +8100,41 @@ body.smart-agent-open {
     min-width:max-content !important;
 }
 
+/* 2026-11-04（用户反馈：输入面板看不到大模型）：脚本节点的「服务 + 模型」下拉放面板左下角，
+   原生 select 只作数据源，视觉是幽灵灰字 + 自绘 chevron（与 LLM 面板同一套观感）。 */
+.composer-model-slot {
+    display:flex;
+    align-items:center;
+    gap:2px;
+    margin-right:auto;
+    min-width:0;
+}
+.composer-model-slot[hidden] { display:none !important; }
+.composer-llm-select {
+    height:28px;
+    border:1px solid transparent !important;
+    border-radius:8px !important;
+    background-color:transparent !important;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.45)' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") !important;
+    background-repeat:no-repeat !important;
+    background-position:right 7px center !important;
+    background-size:8px 8px !important;
+    color:rgba(246,246,246,.62);
+    font-size:12px;
+    font-weight:500;
+    padding:0 20px 0 7px !important;
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    box-shadow:none !important;
+    cursor:pointer;
+    min-width:0;
+    color-scheme:dark;
+}
+.composer-llm-select:hover { background-color:rgba(255,255,255,.07) !important; color:rgba(255,255,255,.92); }
+.composer-llm-provider { max-width:118px; }
+.composer-llm-model { max-width:210px; }
+.composer-llm-select option { background:#262626; color:#e8e8e8; }
+
 .image-mode-slot {
     position:absolute !important;
     top:8px !important;
@@ -11679,6 +11717,48 @@ html, body {
 .storyboard-node-shots:disabled { opacity:.55; }
 .storyboard-node-shots i,
 .storyboard-node-shots svg { width:12px; height:12px; }
+
+/* 2026-11-04（用户要求，参考稿 v3）：脚本卡片上方悬浮工具条——重新生成 / 生成分镜 / 下载。
+   卡片底栏整条删除：大模型统一在下方输入面板选，这里不放任何模型控件。 */
+.storyboard-node-floatbar {
+    position:absolute;
+    left:50%;
+    top:-44px;
+    transform:translateX(-50%);
+    z-index:30;
+    display:flex;
+    align-items:center;
+    gap:2px;
+    padding:4px 5px;
+    background:rgba(24,24,24,.93);
+    border:1px solid rgba(255,255,255,.09);
+    border-radius:999px;
+    box-shadow:0 12px 30px rgba(0,0,0,.55);
+    backdrop-filter:blur(6px);
+    white-space:nowrap;
+}
+.storyboard-fb-btn {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    height:30px;
+    padding:0 12px;
+    border:0;
+    border-radius:999px;
+    background:transparent;
+    color:#d6d6d6;
+    font-size:12.5px;
+    font-weight:500;
+    cursor:pointer;
+}
+.storyboard-fb-btn:hover { background:rgba(255,255,255,.09); color:#fff; }
+.storyboard-fb-btn:disabled { opacity:.6; cursor:wait; }
+.storyboard-fb-btn i,
+.storyboard-fb-btn svg { width:14px; height:14px; flex:0 0 auto; }
+.storyboard-fb-sep { width:1px; height:16px; background:rgba(255,255,255,.16); margin:0 3px; flex:0 0 auto; }
+.storyboard-fb-icon { padding:0 9px; }
+.storyboard-fb-spin { animation:storyboardFbSpin 1s linear infinite; }
+@keyframes storyboardFbSpin { to { transform:rotate(360deg); } }
 
 /* ---------------- 5. 追加生成占位 ---------------- */
 .smart-pending-thumb,
@@ -18757,6 +18837,26 @@ select.llm-rule-input option { background:#1f1f1f; color:#eee; }
 .slash-foot { display:flex; align-items:center; gap:14px; padding:7px 13px; border-top:1px solid var(--line); color:var(--faint); font-size:10px; font-weight:600; }
 .slash-foot b { display:inline-block; padding:0 5px; margin-right:3px; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; color:var(--muted); font-weight:700; font-family:ui-monospace,Consolas,monospace; font-size:9.5px; }
 .slash-foot .slash-foot-src { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* ===== 2026-11-05 / 面板「画布工具」组：工具会真在画布上产出节点，与「插一段词」的模板区分开 =====
+   未实现的工具不做禁用按钮（点不动也没解释），改成整体降透明度 + 角标写原因，键盘照样能选。 */
+.slash-group-note { margin-left:auto; flex:0 0 auto; font-size:9.5px; font-weight:700; letter-spacing:0; color:var(--faint); }
+.slash-item-tool { align-items:center; padding:5px 8px; gap:8px; }
+.slash-item-tool .slash-ico { width:28px; height:28px; border-radius:8px; }
+.slash-item-tool .slash-item-main { gap:0; width:100%; }
+.slash-tool-head { display:flex; align-items:center; gap:6px; min-width:0; }
+.slash-tool-head .slash-name { min-width:0; font-size:11.5px; }
+.slash-badge { margin-left:auto; flex:0 0 auto; padding:0 5px; border-radius:5px; border:1px solid var(--line);
+    background:var(--soft); color:var(--faint); font-size:9px; font-style:normal; font-weight:700; line-height:15px; white-space:nowrap; }
+.slash-item.is-soon { opacity:.55; }
+.slash-item.is-soon:hover, .slash-item.is-soon.active { opacity:.82; }
+.slash-item.is-soon .slash-name { color:var(--muted); }
+.slash-item.is-blocked { opacity:.78; }
+.slash-item.is-blocked:hover, .slash-item.is-blocked.active { opacity:1; }
+.slash-item.is-blocked .slash-badge { color:#e0b062; border-color:rgba(224,176,98,.38); background:rgba(224,176,98,.10); }
+.slash-tool-kv { display:grid; grid-template-columns:auto 1fr; gap:5px 10px; padding:9px 10px; border-radius:9px;
+    border:1px solid var(--line); background:var(--soft); font-size:11px; line-height:1.5; }
+.slash-tool-kv .k { color:var(--faint); font-weight:700; }
+.slash-tool-kv .v { color:var(--text); }
 @media (max-width:760px) { .slash-grid { grid-template-columns:1fr; } }
 
 /* ===== 2026-10-21 模板胶囊：/ 菜单选中的模板以 chip 形式引用，输入框不展开提示词正文 ===== */
@@ -19015,6 +19115,11 @@ select.llm-rule-input option { background:#1f1f1f; color:#eee; }
     display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
 .slash-peek-prompt::after { content:""; position:absolute; left:0; right:0; bottom:0; height:24px;
     background:linear-gradient(transparent, var(--soft)); }
+/* 2026-11-05（用户要求）：提示词正文仅管理员可见，访客看到的是这行锁提示 */
+.slash-peek-locked { display:flex; align-items:center; gap:6px; margin-top:9px; padding:8px 10px;
+    border-radius:9px; border:1px dashed var(--line); background:var(--soft);
+    font-size:11px; color:var(--muted); }
+.slash-peek-locked svg { width:12px; height:12px; flex:none; opacity:.8; }
 .slash-peek-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
 .slash-peek-meta .m { max-width:150px; padding:2px 8px; border-radius:6px; border:1px solid var(--line);
     background:var(--soft); font-size:10px; font-weight:600; color:var(--muted);
