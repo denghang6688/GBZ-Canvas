@@ -318,7 +318,7 @@ async def provider_balance(req: dict):
                 return await _volcengine_query_balance(client)
         except Exception as exc:
             return {"ok": False, "supported": True, "reason": f"查询失败：{exc}"}
-    if protocol in {"gemini", "codex", "gemini-cli"}:
+    if protocol in {"gemini", "codex", "gemini-cli", "doubao-cli", "libtv"}:
         return {"ok": False, "supported": False, "reason": "该平台未提供余额查询接口"}
     if protocol == "runninghub":
         try:
@@ -680,7 +680,7 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "grsai"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "grsai", "libtv", "doubao-cli"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
@@ -728,6 +728,12 @@ CODEX_DEFAULT_IMAGE_MODELS = ["gpt-image-2", "$imagegen"]
 CODEX_DEFAULT_CHAT_MODELS = ["gpt-5.5"]
 GEMINI_CLI_DEFAULT_IMAGE_MODELS = ["auto"]
 GEMINI_CLI_DEFAULT_CHAT_MODELS = ["auto"]
+DOUBAO_DEFAULT_IMAGE_MODELS: list = []
+DOUBAO_DEFAULT_CHAT_MODELS = ["豆包 2.1 Lite", "DeepSeek V4.1 Flash", "Kimi K3.1 Pro", "GLM 5.3", "Qwen 4 Max"]
+try:
+    DOUBAO_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("DOUBAO_CLI_TIMEOUT", "300"))))
+except Exception:
+    DOUBAO_DEFAULT_TIMEOUT = 300
 try:
     CODEX_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("CODEX_CLI_TIMEOUT", "900"))))
 except Exception:
@@ -1285,15 +1291,19 @@ def merge_default_api_providers(providers, inject_missing=True):
             *JIMENG_DEFAULT_VIDEO_MODELS,
             *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
         ])
-    # OpenAI/Antigravity CLI 和即梦一样作为协议使用：用户选中 CLI 协议时再规范化模型与地址，不强制额外注入平台。
+    # OpenAI/Antigravity/豆包 CLI 和即梦一样作为协议使用：用户选中 CLI 协议时再规范化模型与地址，不强制额外注入平台。
     for current in merged:
         current_protocol = str((current or {}).get("protocol") or "").strip().lower()
-        if current_protocol not in {"codex", "gemini-cli"}:
+        if current_protocol not in {"codex", "gemini-cli", "doubao-cli"}:
             continue
         current["protocol"] = current_protocol
         current["base_url"] = ""
-        default_image_models = CODEX_DEFAULT_IMAGE_MODELS if current_protocol == "codex" else GEMINI_CLI_DEFAULT_IMAGE_MODELS
-        default_chat_models = CODEX_DEFAULT_CHAT_MODELS if current_protocol == "codex" else GEMINI_CLI_DEFAULT_CHAT_MODELS
+        default_image_models = CODEX_DEFAULT_IMAGE_MODELS if current_protocol == "codex" else (
+            GEMINI_CLI_DEFAULT_IMAGE_MODELS if current_protocol == "gemini-cli" else DOUBAO_DEFAULT_IMAGE_MODELS
+        )
+        default_chat_models = CODEX_DEFAULT_CHAT_MODELS if current_protocol == "codex" else (
+            GEMINI_CLI_DEFAULT_CHAT_MODELS if current_protocol == "gemini-cli" else DOUBAO_DEFAULT_CHAT_MODELS
+        )
         current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *default_image_models])
         current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *default_chat_models])
         current["video_models"] = []
@@ -1647,7 +1657,11 @@ def normalize_provider(item):
         volc_region = volc_region or VOLCENGINE_DEFAULT_REGION
     if protocol == "jimeng":
         base_url = ""
-    if protocol in {"codex", "gemini-cli"}:
+    if protocol in {"codex", "gemini-cli", "doubao-cli", "libtv"}:
+        base_url = ""
+    if provider_id == "libtv":
+        # LibTV 走本机 CLI 登录态，无需 API Key，也不走 OpenAI 兼容 Base URL 拉取。
+        protocol = "libtv"
         base_url = ""
     if provider_id == "runninghub":
         protocol = "runninghub"
@@ -4582,6 +4596,10 @@ def resolve_chat_provider(provider: str, model: str, ms_model: str):
         raise HTTPException(status_code=400, detail="OpenAI CLI 使用本机 codex 登录态，不需要 API Key。请使用画布/聊天里的 OpenAI CLI 专用通道。")
     if is_gemini_cli_provider(api_provider):
         raise HTTPException(status_code=400, detail="Antigravity CLI 使用本机 agy 登录态，不需要 API Key。请使用画布/聊天里的 Antigravity CLI 专用通道。")
+    if is_doubao_cli_provider(api_provider):
+        raise HTTPException(status_code=400, detail="豆包 CLI 使用本机 doubao 登录态，不需要 API Key。请使用画布/聊天里的豆包 CLI 专用通道。")
+    if is_libtv_provider(api_provider):
+        raise HTTPException(status_code=400, detail="LibTV CLI 使用本机 libtv 登录态，不需要 API Key。请使用画布里的 LibTV CLI 生成通道。")
     base_root = (api_provider.get("base_url") or AI_BASE_URL).rstrip("/")
     if not base_root:
         raise HTTPException(status_code=400, detail=f"{api_provider.get('name') or api_provider['id']} 未配置 Base URL")
@@ -4632,7 +4650,7 @@ def log_net_error(context, exc, url=""):
 
 def api_headers(json_body=True, provider=None, model=""):
     if provider:
-        if is_codex_provider(provider) or is_gemini_cli_provider(provider):
+        if is_codex_provider(provider) or is_gemini_cli_provider(provider) or is_doubao_cli_provider(provider) or is_libtv_provider(provider):
             raise HTTPException(status_code=400, detail="CLI 协议使用本机登录态，不需要 API Key。当前入口应走对应 CLI 专用通道。")
         api_key = provider_env_key_value(provider["id"])
         provider_name = provider.get("name") or provider["id"]
@@ -4654,7 +4672,7 @@ def api_headers_alternate(provider, model=""):
     """返回与 api_headers 相反的鉴权头，用于同一个端点换头重试。"""
     if not provider:
         return None
-    if provider.get("id") and (is_codex_provider(provider) or is_gemini_cli_provider(provider)):
+    if provider.get("id") and (is_codex_provider(provider) or is_gemini_cli_provider(provider) or is_doubao_cli_provider(provider) or is_libtv_provider(provider)):
         return None
     api_key = provider_env_key_value(provider["id"])
     if not api_key:
@@ -5315,7 +5333,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "runninghub", "libtv"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -6276,6 +6294,263 @@ async def gemini_cli_chat_text(payload, history_messages=None):
             except Exception:
                 pass
 
+def is_doubao_cli_provider(provider):
+    return provider_protocol(provider) == "doubao-cli"
+
+def doubao_env_value(key):
+    return os.getenv(key, "") or read_api_env_value(key)
+
+def doubao_cli_executable():
+    configured = str(doubao_env_value("DOUBAO_BIN") or "").strip().strip('"')
+    if configured and os.path.isfile(configured):
+        return configured
+    found = shutil.which("doubao") or shutil.which("doubao.exe") or shutil.which("doubao.cmd") or ""
+    if found:
+        return found
+    # WorkBuddy 自带 Node 的全局 bin 目录兜底
+    candidates = []
+    for root in (
+        os.path.join(os.getenv("APPDATA", ""), "npm"),
+        os.path.join(os.getenv("USERPROFILE", ""), ".workbuddy", "binaries", "node", "versions"),
+    ):
+        if not root:
+            continue
+        if "versions" in root:
+            candidates.extend(glob.glob(os.path.join(root, "*", "doubao.cmd")))
+            candidates.extend(glob.glob(os.path.join(root, "*", "doubao")))
+        else:
+            candidates.append(os.path.join(root, "doubao.cmd"))
+            candidates.append(os.path.join(root, "doubao"))
+    for path in sorted(dict.fromkeys(candidates)):
+        if os.path.isfile(path):
+            return path
+    return ""
+
+def doubao_timeout(default=DOUBAO_DEFAULT_TIMEOUT):
+    try:
+        return max(30, min(3600, int(doubao_env_value("DOUBAO_CLI_TIMEOUT") or os.getenv("DOUBAO_CLI_TIMEOUT", "") or default)))
+    except Exception:
+        return default
+
+def doubao_profile():
+    return str(doubao_env_value("DOUBAO_PROFILE") or "").strip() or "default"
+
+def doubao_chat_mode():
+    value = str(doubao_env_value("DOUBAO_CLI_MODE") or "").strip().lower()
+    return value if value in {"chat", "work", "goal"} else "chat"
+
+def doubao_subprocess_env():
+    # 豆包是国内服务：剥掉代理环境变量，避免登录态/会话请求被本机代理干扰。
+    env = dict(os.environ)
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    return env
+
+def doubao_decode_output(stdout, stderr):
+    for data in (stdout, stderr):
+        if not data:
+            continue
+        for encoding in ("utf-8", "utf-8-sig", "gbk"):
+            try:
+                return data.decode(encoding), (stderr or b"").decode(encoding, "replace")
+            except UnicodeDecodeError:
+                continue
+    return "", ""
+
+def doubao_parse_reply(out_text):
+    """解析 sessions create --wait --json 的输出，取 assistant 回复文本。"""
+    text = str(out_text or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text)
+    except Exception:
+        # CLI 未输出 JSON（如直接打印回复）时按纯文本处理
+        return text
+    if isinstance(data, dict):
+        status = str(data.get("status") or "").lower()
+        reply = data.get("reply") or {}
+        reply_text = ""
+        if isinstance(reply, dict):
+            reply_text = str(reply.get("text") or "").strip()
+        elif isinstance(reply, str):
+            reply_text = reply.strip()
+        if status and status not in {"completed", "ok", "success"} and not reply_text:
+            message = str(data.get("message") or data.get("error") or status)
+            raise HTTPException(status_code=502, detail=f"豆包 CLI 会话未完成：{message[:800]}")
+        return reply_text
+    return str(data)
+
+def doubao_launch_prefix():
+    """返回启动 doubao CLI 的命令前缀。
+
+    npm 的 .cmd 包装层经过 cmd.exe，会把包含换行的参数截断/吞并（多行 prompt 时
+    后续 flag 会被并进消息正文），因此检测到 .cmd/.bat 包装时直接用 node 跑
+    doubao.mjs 入口，绕过 cmd.exe。
+    """
+    exe = doubao_cli_executable()
+    if not exe:
+        return []
+    if exe.lower().endswith((".cmd", ".bat")):
+        exe_dir = os.path.dirname(os.path.abspath(exe))
+        node_exe = os.path.join(exe_dir, "node.exe")
+        if not os.path.isfile(node_exe):
+            node_exe = shutil.which("node") or ""
+        script = os.path.join(exe_dir, "node_modules", "doubao-cli", "bin", "doubao.mjs")
+        if node_exe and os.path.isfile(script):
+            return [node_exe, script]
+    return [exe]
+
+async def run_doubao_cli(prompt, model="", image_paths=None, timeout=None):
+    """通过 doubao headless sessions create 发送一次完整对话并等待回复。"""
+    prefix = doubao_launch_prefix()
+    if not prefix:
+        raise HTTPException(
+            status_code=400,
+            detail="未找到豆包 CLI。请先安装 doubao-cli（npm i -g doubao-cli）并在本机完成登录（doubao headless login）。",
+        )
+    image_paths = [str(path) for path in (image_paths or []) if path and os.path.isfile(str(path))]
+    budget = timeout or doubao_timeout()
+    # 注意：chat 模式不支持 --model（模型选择仅 work 模式有效），payload.model 仅作记录展示。
+    # 消息必须紧跟在 create 之后（位置参数在前，flag 在后），否则 CLI 收不到消息内容。
+    args = [
+        *prefix,
+        "headless",
+        "sessions",
+        "create",
+        str(prompt or ""),
+        "--mode",
+        doubao_chat_mode(),
+        "--wait",
+        "--json",
+        "--timeout",
+        str(budget),
+    ]
+    profile = doubao_profile()
+    if profile and profile != "default":
+        args.extend(["--profile", profile])
+    for path in image_paths:
+        args.extend(["--attach", path])
+
+    async def _run():
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=BASE_DIR,
+            env=doubao_subprocess_env(),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=budget + 30)
+        except asyncio.TimeoutError as exc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise HTTPException(status_code=504, detail="豆包 CLI 执行超时。可设置 DOUBAO_CLI_TIMEOUT 增大等待时间。") from exc
+        out_text, err_text = doubao_decode_output(stdout, stderr)
+        if proc.returncode != 0:
+            raise HTTPException(status_code=502, detail=f"豆包 CLI 调用失败：{(err_text or out_text or f'exit={proc.returncode}')[:1200]}")
+        return out_text
+
+    out_text = await _run()
+    reply = doubao_parse_reply(out_text)
+    if not reply:
+        raise HTTPException(status_code=502, detail="豆包 CLI 返回了空回复。")
+    return {"text": reply, "_stdout": out_text}
+
+def doubao_chat_prompt(payload, history_messages=None):
+    parts = []
+    system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
+    if system_prompt:
+        parts.append(f"系统要求：\n{system_prompt}")
+    for item in (history_messages or [])[-MAX_HISTORY_MESSAGES:]:
+        role = str(item.get("role") or "").strip()
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            label = "用户" if role == "user" else "助手"
+            parts.append(f"{label}：\n{content}")
+    message = str(getattr(payload, "message", "") or "").strip()
+    parts.append(f"用户：\n{message}")
+    parts.append("请直接回答用户，输出纯文本，不要修改项目文件，不要创建任务或项目。")
+    return "\n\n".join(part for part in parts if part).strip()
+
+async def doubao_reference_paths(image_values):
+    """把参考图（url/data url/站内路径）落成本地文件，供 --attach 使用。"""
+    paths, temp_paths = [], []
+    for item in image_values or []:
+        url = str((item or {}).get("url") or "").strip()
+        if not url:
+            continue
+        data_url_match = re.match(r"^data:([^;]+);base64,(.*)$", url, re.S)
+        path = ""
+        if data_url_match:
+            fd, path = tempfile.mkstemp(prefix="doubao_ref_", suffix=".png", dir=OUTPUT_OUTPUT_DIR)
+            os.close(fd)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(data_url_match.group(2)))
+            temp_paths.append(path)
+        elif url.startswith("/output/") or url.startswith("/assets/"):
+            # 站内相对路径（画布图片节点常见形态）：output_file_from_url 解析本地文件。
+            # 不能落进 os.path.isfile 分支——相对路径在进程 CWD 下不存在，图片会被静默丢弃。
+            local = output_file_from_url(url)
+            if local and os.path.isfile(local):
+                path = local
+        elif url.startswith("http://") or url.startswith("https://"):
+            # 本站绝对地址（如 http://127.0.0.1:2000/output/xx.png）：直接读本地文件，
+            # 既避免自连回源失败，也省一次下载
+            local = output_file_from_url(url)
+            if local and os.path.isfile(local):
+                path = local
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                        resp = await client.get(url)
+                    suffix = ".png"
+                    ctype = str(resp.headers.get("content-type") or "").lower()
+                    if "jpeg" in ctype or "jpg" in ctype:
+                        suffix = ".jpg"
+                    elif "webp" in ctype:
+                        suffix = ".webp"
+                    fd, path = tempfile.mkstemp(prefix="doubao_ref_", suffix=suffix, dir=OUTPUT_OUTPUT_DIR)
+                    os.close(fd)
+                    with open(path, "wb") as f:
+                        f.write(resp.content)
+                    temp_paths.append(path)
+                except Exception:
+                    continue
+        elif os.path.isfile(url):
+            path = url
+        if path:
+            paths.append(path)
+    return paths, temp_paths
+
+async def doubao_chat_text(payload, history_messages=None):
+    image_paths = []
+    temp_paths = []
+    try:
+        image_values = []
+        if hasattr(payload, "images"):
+            image_values.extend([{"url": item} for item in (getattr(payload, "images", None) or []) if item])
+        if hasattr(payload, "reference_images"):
+            image_values.extend([ref.dict() for ref in (getattr(payload, "reference_images", None) or []) if getattr(ref, "url", "")])
+        image_paths, temp_paths = await doubao_reference_paths(image_values)
+        raw = await run_doubao_cli(
+            doubao_chat_prompt(payload, history_messages),
+            model=getattr(payload, "model", "") or DOUBAO_DEFAULT_CHAT_MODELS[0],
+            image_paths=image_paths,
+            timeout=doubao_timeout(),
+        )
+        text = str(raw.get("text") or "").strip()
+        return text or "豆包 CLI 返回了空回复。", raw
+    finally:
+        for path in temp_paths:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
 def is_yuli_provider(provider):
     # 玉玉API（yuli.host）的视频接口走自有格式（/v1/video/create + /v1/video/query），
     # 与通用 OpenAI /v1/videos/generations 不同，需单独识别。
@@ -6522,6 +6797,99 @@ def jimeng_login_qr_from_text(text):
         if "login" in value.lower() or "qr" in value.lower() or value.startswith(("data:image", "dreamina://")):
             return value
     return candidates[0] if candidates else ""
+
+JIMENG_QR_CACHE = {"url": "", "data_uri": "", "at": 0.0}
+
+def _qr_ascii_to_png_data_uri(ascii_text, scale=8):
+    """把 qrcode-terminal small 模式输出的半块字符二维码渲染为 PNG data URI。
+    映射规则（反直觉）：黑模块=空格，白模块=█，▀=上白下黑，▄=上黑下白。
+    已用 OpenCV 实测解码验证。"""
+    try:
+        import io as _io
+        from PIL import Image
+    except Exception:
+        return ""
+    lines = [l for l in re.sub(r"\x1b\[[0-9;]*m", "", str(ascii_text or "")).split("\n")
+             if any(c in l for c in "\u2580\u2584\u2588")]
+    if not lines:
+        return ""
+    cols = max(len(l) for l in lines)
+    rows = len(lines) * 2
+    grid = [[False] * cols for _ in range(rows)]
+    for li, line in enumerate(lines):
+        for ci, ch in enumerate(line):
+            if ch == " ":
+                grid[li * 2][ci] = grid[li * 2 + 1][ci] = True
+            elif ch == "\u2580":
+                grid[li * 2 + 1][ci] = True
+            elif ch == "\u2584":
+                grid[li * 2][ci] = True
+    # 裁掉全白边缘行/列，再加标准静区
+    row_idx = [i for i, r in enumerate(grid) if any(r)]
+    col_idx = [j for j in range(cols) if any(r[j] for r in grid)]
+    if not row_idx or not col_idx:
+        return ""
+    grid = [[grid[i][j] for j in range(col_idx[0], col_idx[-1] + 1)] for i in range(row_idx[0], row_idx[-1] + 1)]
+    h = len(grid)
+    w = len(grid[0]) if h else 0
+    if not w:
+        return ""
+    quiet = 4
+    img = Image.new("RGB", ((w + quiet * 2) * scale, (h + quiet * 2) * scale), "white")
+    px = img.load()
+    for r in range(h):
+        for c in range(w):
+            if grid[r][c]:
+                for dy in range(scale):
+                    for dx in range(scale):
+                        px[(c + quiet) * scale + dx, (r + quiet) * scale + dy] = (0, 0, 0)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+def _jimeng_qr_encode_url(text):
+    """取最适合扫码的登录 URL：优先 verification_uri_complete（免手输 user_code）。"""
+    text = str(text or "")
+    m = re.search(r"verification_uri_complete\s*[:=]\s*(\S+)", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"verification_uri\s*[:=]\s*(\S+)", text)
+    if m:
+        return m.group(1)
+    return jimeng_login_qr_from_text(text)
+
+def _jimeng_qr_png_data_uri(url):
+    """把登录 URL 编码为二维码 PNG data URI（复用豆包 CLI 自带的 qrcode-terminal 生成字符码）。"""
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    now = time.time()
+    if JIMENG_QR_CACHE.get("url") == url and JIMENG_QR_CACHE.get("data_uri") \
+            and now - float(JIMENG_QR_CACHE.get("at") or 0) < 120:
+        return JIMENG_QR_CACHE["data_uri"]
+    prefix = doubao_launch_prefix()
+    node_exe = prefix[0] if prefix and prefix[0].lower().endswith(".exe") else (shutil.which("node") or "")
+    exe = doubao_cli_executable()
+    qterminal = ""
+    if exe:
+        cand = os.path.join(os.path.dirname(os.path.abspath(exe)), "node_modules", "doubao-cli",
+                            "node_modules", "qrcode-terminal")
+        if os.path.isdir(cand):
+            qterminal = cand.replace("\\", "/")
+    if not node_exe or not qterminal:
+        return ""
+    script = ("const QR=require(process.argv[1]);"
+              "QR.generate(process.argv[2],{small:true},out=>process.stdout.write(out));")
+    try:
+        proc = subprocess.run([node_exe, "-e", script, qterminal, url],
+                              capture_output=True, timeout=20)
+        ascii_text = proc.stdout.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    data_uri = _qr_ascii_to_png_data_uri(ascii_text)
+    if data_uri:
+        JIMENG_QR_CACHE.update({"url": url, "data_uri": data_uri, "at": now})
+    return data_uri
 
 async def jimeng_login_reader(proc):
     async def read_stream(stream, key):
@@ -12609,6 +12977,694 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
+
+# ===========================================================================
+# 2026-11-10：LibTV CLI provider —— 通过本机 libtv CLI（LibTV 官方，~/.libtv/libtv.exe）
+# 在 LibTV 云端画布创建节点并同步生成，把产物 URL 回填到本地画布节点。
+# 前置：安装 libtv CLI（https://www.liblib.tv/cli）并完成 `libtv login`。
+# CLI 自带凭据，不需要 API Key；画布上下文绑定持久化在 data/libtv/.libtv/project.json。
+# ===========================================================================
+LIBTV_DEFAULT_IMAGE_MODELS = [
+    "AutoPic", "Lib Image 2.6 Fast", "Lib Image 2.6 Pro", "Lib Image 2.5 Pro", "Lib Image 2.5 Fast",
+    "Lib Image", "General image Pro", "General image V2.1", "General image V2",
+    "Seedream 5.0 Pro", "Seedream 5.0 Lite", "Seedream 4.6", "Seedream 4.5", "Seedream 4.0",
+    "Genesis F.3", "Qwen image 3.0", "Qwen Image", "Qwen Edit",
+    "Style Image V8.2", "Style Image V8.1", "Style Image V7", "Style Image Niji 7", "Z-image Turbo",
+]
+LIBTV_DEFAULT_VIDEO_MODELS = [
+    "Seedance 2.5", "Seedance 2.5（样片模式）", "Seedance 2.0 VIP", "Seedance 2.0 Fast VIP", "Seedance 2.0 Mini",
+    "Wan 3.0", "Wan 3.0 Prime", "Wan 2.7", "Wan 2.6", "Wan 2.5", "Wan 2.2",
+    "Kling 4.0", "Kling 4.0 Flash", "Kling O3", "Kling 3.0", "Kling 3.0 Turbo", "Kling3.0 动作迁移", "Kling O1", "Kling 2.6", "Kling 2.5",
+    "Minimax H3", "Minimax H3 Max", "H3-Highspeed", "Hailuo 2.3", "Hailuo 2.3 Fast", "Hailuo 02",
+    "Vidu Q4 Preview", "Vidu Q3 Pro", "Vidu Q2 Pro", "Vidu Q2 Turbo", "Vidu Q2",
+    "Happy Horse 1.1", "Happy Horse 1.0", "Style Video", "OmniHuman 1.5", "Pixverse V5.5", "Pixverse V5",
+]
+LIBTV_IMAGE_RUN_TIMEOUT = int(os.getenv("LIBTV_IMAGE_RUN_TIMEOUT", "900"))
+LIBTV_VIDEO_RUN_TIMEOUT = int(os.getenv("LIBTV_VIDEO_RUN_TIMEOUT", "2400"))
+LIBTV_CLI_TIMEOUT = int(os.getenv("LIBTV_CLI_TIMEOUT", "120"))
+LIBTV_RATIO_OPTIONS = ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
+# 2026-11-11：LibTV 云端偶发网络抖动（CLI 侧报 `TypeError: fetch failed` / `Internal Server Error`），
+# 40 秒的生成白等一场。这里对「可以安全重跑」的情况做有限重试：
+#   · 重试前先用只读的 node 查询确认节点没建出来 —— 建出来了就绝不能重建（会重复建节点 / 重复计费），
+#     改成轮询该节点的产物；
+#   · 校验类错误（modeType 之类）、鉴权类错误不重试，直接抛给用户。
+LIBTV_RUN_RETRIES = max(0, int(os.getenv("LIBTV_RUN_RETRIES", "2")))
+LIBTV_RUN_RETRY_DELAY = float(os.getenv("LIBTV_RUN_RETRY_DELAY", "5"))
+LIBTV_NODE_POLL_SECONDS = float(os.getenv("LIBTV_NODE_POLL_SECONDS", "90"))
+LIBTV_NODE_POLL_INTERVAL = float(os.getenv("LIBTV_NODE_POLL_INTERVAL", "6"))
+# CLI 进程并发上限：前端一次「N 张」会并发发 N 个请求，LibTV 侧同时起太多 CLI 容易互相拖累
+LIBTV_CONCURRENCY = max(1, int(os.getenv("LIBTV_CONCURRENCY", "2")))
+_LIBTV_PROC_SLOTS = threading.Semaphore(LIBTV_CONCURRENCY)
+LIBTV_TRANSIENT_RE = re.compile(
+    r"fetch failed|ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|"
+    r"socket hang up|other side closed|UND_ERR_|Internal Server Error|Bad Gateway|"
+    r"Service Unavailable|Gateway Timeout|upstream (?:connect )?error|请求失败",
+    re.I,
+)
+LIBTV_FATAL_RE = re.compile(
+    r"校验失败|未找到|未登录|登录已|过期|Unauthorized|Forbidden|Not Found|Invalid|"
+    r"modelKey|modeType=|缺少|不允许",
+    re.I,
+)
+
+def libtv_clean_error(text, limit=320):
+    """CLI 的 stderr 里混着 Node 堆栈（`at async requestJson (...)`），只留人看得懂的前两行。"""
+    raw = str(text or "")
+    lines = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s or s.startswith("at ") or s.startswith("Node.js"):
+            continue
+        lines.append(s)
+    cleaned = " · ".join(lines) if lines else raw.strip().replace("\n", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    # 有的 CLI 版本把整段堆栈挤在一行里（`TypeError: fetch failed     at node:internal/...`），
+    # 上面按行过滤不掉，这里再从第一个栈帧处截断。
+    stack_at = re.search(r"\s+at\s+(?:async\s+)?(?:node:|process\.|[\w$.]+\s*\()", cleaned)
+    if stack_at:
+        cleaned = cleaned[:stack_at.start()].strip()
+    return cleaned[:limit]
+
+def libtv_is_transient_error(detail):
+    text = str(detail or "")
+    if not text:
+        return False
+    if LIBTV_FATAL_RE.search(text):
+        return False
+    return bool(LIBTV_TRANSIENT_RE.search(text))
+
+
+def libtv_cli_executable():
+    configured = str(os.getenv("LIBTV_BIN") or "").strip()
+    if configured and os.path.exists(configured):
+        return configured
+    home_default = os.path.join(os.path.expanduser("~"), ".libtv", "libtv.exe")
+    if os.path.exists(home_default):
+        return home_default
+    home_default_nix = os.path.join(os.path.expanduser("~"), ".libtv", "libtv")
+    if os.path.exists(home_default_nix):
+        return home_default_nix
+    return shutil.which("libtv") or shutil.which("libtv.exe") or shutil.which("libtv.cmd") or ""
+
+def libtv_work_dir():
+    work = os.path.join(DATA_DIR, "libtv")
+    os.makedirs(work, exist_ok=True)
+    return work
+
+def libtv_extract_json(text):
+    """从 CLI stdout 里取第一段 JSON（CLI stdout 约定为 JSON，进度走 stderr）。"""
+    text = str(text or "").strip()
+    if not text:
+        return {}
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch not in "[{":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(text[i:])
+            return obj
+        except Exception:
+            continue
+    return {}
+
+def libtv_cli_run(args, timeout=None):
+    exe = libtv_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 libtv CLI。请安装并登录：https://www.liblib.tv/cli （安装后执行 libtv login）")
+    try:
+        # 同一时刻最多 LIBTV_CONCURRENCY 个 CLI 进程（默认 2）：前端「N 张」是并发请求，
+        # 不管的话一次点击就能起 N 个 CLI，反而更容易被上游限流/抖动。
+        with _LIBTV_PROC_SLOTS:
+            proc = subprocess.run(
+                [exe, *args],
+                cwd=libtv_work_dir(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout or LIBTV_CLI_TIMEOUT,
+                check=False,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"libtv {' '.join(args[:2])} 超时（{timeout or LIBTV_CLI_TIMEOUT}s）。注意：生成命令不可中断重试，请稍后在 LibTV 画布查看结果。") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"libtv CLI 启动失败：{exc}") from exc
+    out = proc.stdout.decode("utf-8-sig", errors="replace")
+    err = proc.stderr.decode("utf-8-sig", errors="replace")
+    return proc.returncode, out, err
+
+def libtv_cli_json(args, timeout=None, what="libtv 命令"):
+    rc, out, err = libtv_cli_run(args, timeout)
+    if rc != 0:
+        detail = libtv_clean_error((err or out) or "", 400) or f"exit={rc}"
+        raise HTTPException(status_code=502, detail=f"{what} 失败：{detail}")
+    return libtv_extract_json(out)
+
+def libtv_cli_json_fix_modetype(args, timeout, what, node_name):
+    """建节点时的模式校验失败（已连媒体输入但默认纯文生图/文生视频）自动重试：
+    CLI 错误里会给出所需参数（如 params.modeType=image2image），补上后换名重建。
+    不同模型的 modeType 枚举值不同（image2image / singleImage2image / image2video…），
+    以错误提示为准，避免硬编码踩不中。返回 (结果, 实际节点名)。"""
+    try:
+        return libtv_cli_json(args, timeout=timeout, what=what), node_name
+    except HTTPException as exc:
+        detail = str(getattr(exc, "detail", "") or "")
+        m = re.search(r"params\.modeType=([\w-]+)", detail)
+        if not (m and "校验失败" in detail):
+            raise
+        new_name = f"{node_name}-r2"
+        args = [new_name if a == node_name else a for a in args]
+        pos = args.index("--run")
+        args[pos:pos] = ["-s", f"modeType={m.group(1)}"]
+        print(f"[libtv] {what} 模式校验失败，按提示补 modeType={m.group(1)} 重试：{detail[:120]}")
+        return libtv_cli_json(args, timeout=timeout, what=what), new_name
+
+def libtv_node_exists(node_name, project_uuid):
+    """只读确认节点是否已经建出来（重试前的安全检查）：True/False，查询本身失败给 None（未知）。
+    注意：CLI 对「没这个节点」有两种回法 —— `{"count":0,"matches":[]}`（rc=0）或 stderr 报
+    「未找到…」（rc=1），所以不能只看退出码。"""
+    for name in (node_name, f"{node_name}-r2"):
+        try:
+            rc, out, err = libtv_cli_run(["node", name, "-p", project_uuid], timeout=45)
+        except Exception:
+            return None
+        blob = f"{out or ''}{err or ''}"
+        if rc != 0:
+            if "未找到" in blob or "not found" in blob.lower():
+                continue
+            return None
+        obj = libtv_extract_json(out) or {}
+        if isinstance(obj, dict):
+            node = obj.get("node") if isinstance(obj.get("node"), dict) else obj
+            if node.get("nodeKey") or node.get("id") or node.get("data"):
+                return True
+            if "count" in obj and not obj.get("matches"):
+                continue
+    return False
+
+def libtv_poll_node_urls(node_name, project_uuid):
+    """节点已经建出来时：不重建，轮询它的产物（--run 的产物落地有延迟）。"""
+    deadline = time.time() + LIBTV_NODE_POLL_SECONDS
+    data = {}
+    for name in (node_name, f"{node_name}-r2"):
+        data = libtv_node_data(name, project_uuid)
+        if libtv_result_urls(data):
+            return data
+    while time.time() < deadline:
+        time.sleep(LIBTV_NODE_POLL_INTERVAL)
+        for name in (node_name, f"{node_name}-r2"):
+            data = libtv_node_data(name, project_uuid)
+            if libtv_result_urls(data):
+                return data
+    return data
+
+def libtv_run_node(args, node_name, project_uuid, timeout, what):
+    """建节点 + --run 的同步执行体（放到线程里跑，别卡事件循环）。
+    网络抖动（fetch failed / 5xx）自动重试；重试前先确认节点没建出来——建出来了就绝不重建
+    （会重复建节点、重复计费），改成轮询该节点产物。返回 (结果, 实际节点名)。"""
+    attempt = 0
+    while True:
+        try:
+            return libtv_cli_json_fix_modetype(args, timeout, what, node_name)
+        except HTTPException as exc:
+            detail = libtv_clean_error(str(getattr(exc, "detail", "") or ""), 400) or str(getattr(exc, "detail", "") or "")
+            if not libtv_is_transient_error(detail):
+                raise
+            if attempt >= LIBTV_RUN_RETRIES:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{detail}（LibTV 网络抖动，已自动重试 {attempt} 次仍失败，可直接重试）",
+                ) from exc
+            if libtv_node_exists(node_name, project_uuid):
+                print(f"[libtv] {what} 报网络错误但节点已建出 → 不重建，改为轮询产物：{node_name}")
+                data = libtv_poll_node_urls(node_name, project_uuid)
+                if libtv_result_urls(data):
+                    return data, node_name
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{what} 失败：{detail}（节点已在 LibTV 上创建，但 {int(LIBTV_NODE_POLL_SECONDS)} 秒内没有产物，请到 LibTV 画布查看「{node_name}」）",
+                ) from exc
+            attempt += 1
+            delay = LIBTV_RUN_RETRY_DELAY * attempt
+            print(f"[libtv] {what} 网络抖动，{delay:.0f}s 后第 {attempt}/{LIBTV_RUN_RETRIES} 次重试：{detail[:160]}")
+            time.sleep(delay)
+
+def is_libtv_provider(provider):
+    return provider_protocol(provider) == "libtv" or str((provider or {}).get("id") or "").strip().lower() == "libtv"
+
+def libtv_bound_project_uuid():
+    state_path = os.path.join(libtv_work_dir(), ".libtv", "project.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return str((data or {}).get("projectUuid") or "")
+    except Exception:
+        return ""
+
+_LIBTV_BIND_LOCK = threading.Lock()
+
+def libtv_ensure_project():
+    """返回可用的 LibTV 画布 UUID：优先本地绑定，否则自动新建「AI studio 生成」画布并绑定。
+    并发（N 张 → N 个请求）时加锁，避免同时新建出两张画布。"""
+    with _LIBTV_BIND_LOCK:
+        uuid = libtv_bound_project_uuid()
+        if uuid:
+            return uuid
+        obj = libtv_cli_json(
+            ["project", "create", "AI studio 生成", "-d", "本地 AI studio 画布通过 libtv CLI 自动生成的节点"],
+            timeout=60, what="libtv project create",
+        )
+        meta = obj.get("projectMeta") or obj.get("project") or {}
+        uuid = str(meta.get("uuid") or meta.get("projectUuid") or obj.get("uuid") or "")
+        if not uuid:
+            raise HTTPException(status_code=502, detail=f"libtv project create 未返回画布 uuid：{json.dumps(obj, ensure_ascii=False)[:300]}")
+        libtv_cli_run(["project", "use", uuid], timeout=30)
+        return uuid
+
+def libtv_status():
+    exe = libtv_cli_executable()
+    if not exe:
+        return {"installed": False, "logged_in": False, "message": "未找到 libtv CLI（默认安装到 ~/.libtv/libtv.exe，也可用环境变量 LIBTV_BIN 指定）", "raw": {}}
+    try:
+        _rc, out, _err = libtv_cli_run(["status"], timeout=30)
+        data = libtv_extract_json(out) or {}
+        auth = data.get("auth") or {}
+        logged_in = bool(auth.get("loggedIn"))
+        return {
+            "installed": True,
+            "logged_in": logged_in,
+            "message": "LibTV CLI 已登录" if logged_in else "LibTV CLI 已安装但未登录（请执行 libtv login web --open）",
+            "raw": data,
+        }
+    except Exception as exc:
+        return {"installed": True, "logged_in": False, "message": f"libtv status 执行失败：{exc}", "raw": {}}
+
+_LIBTV_MODEL_SPEC_CACHE = {}
+
+def libtv_model_spec(model):
+    """读某个模型的 tool_spec，拿到它真正开放的 modeType / ratio / resolution / duration。
+    2026-11-11：不同模型差得很远 —— Wan 3.0 根本没有 image2video（只有 frames2video /
+    mixed2video / videoExtend2video），硬编码 image2video 会直接被画布拒绝：
+    「入边组合校验失败：当前模型未开放模式「图片参考」(image2video)」。
+    读不到规格时返回 {}，调用方退回旧行为。"""
+    key = str(model or "").strip()
+    if not key:
+        return {}
+    if key in _LIBTV_MODEL_SPEC_CACHE:
+        return _LIBTV_MODEL_SPEC_CACHE[key]
+    spec = {}
+    try:
+        obj = libtv_cli_json(["model", key], timeout=60, what="libtv model") or {}
+        props = ((obj.get("schema") or {}).get("properties") or {})
+        modes = {}
+        for name, rng in ((props.get("modeType") or {}).get("items") or {}).items():
+            lo, hi = 0, 99
+            if isinstance(rng, (list, tuple)) and len(rng) == 2:
+                try:
+                    lo, hi = int(rng[0]), int(rng[1])
+                except Exception:
+                    pass
+            modes[str(name)] = (lo, hi)
+        spec["modes"] = modes
+        spec["ratios"] = [
+            (e.get("value") if isinstance(e, dict) else e)
+            for e in ((props.get("ratio") or {}).get("enum") or [])
+        ]
+        spec["resolutions"] = [
+            (e.get("value") if isinstance(e, dict) else e)
+            for e in ((props.get("resolution") or {}).get("enum") or [])
+        ]
+        # 2026-11-12（C153）：mixed2video 的「图/视频/音频」各自上限也在规格里
+        # （Wan 3.0：图 10 / 视频 5 / 音频 5），上传前据此裁剪，别等画布校验报错。
+        mixed_cfg = ((props.get("modeType") or {}).get("mixed2videoConfig") or {})
+        if isinstance(mixed_cfg, dict) and mixed_cfg:
+            spec["mixed_limits"] = {
+                "image": int(mixed_cfg.get("imageMax") or 10),
+                "video": int(mixed_cfg.get("videoMax") or 5),
+                "audio": int(mixed_cfg.get("audioMax") or 5),
+            }
+        dur = props.get("duration") or {}
+        spec["duration"] = (dur.get("min"), dur.get("max"))
+    except Exception as exc:
+        print(f"[libtv] 读取模型「{key}」规格失败，按通用规则处理：{exc}")
+        spec = {}
+    _LIBTV_MODEL_SPEC_CACHE[key] = spec
+    return spec
+
+def libtv_live_models():
+    """用 libtv CLI 实时拉取上游模型清单（图片/视频/音频），返回 {image_models, video_models, audio_models}。
+    2026-11-17：模型清单此前是硬编码的（LIBTV_DEFAULT_IMAGE_MODELS / VIDEO_MODELS），
+    新上架模型（如 Seedance 2.5 Flash、MiniMax H3 Image）和音频模型（Seed Audio 1.0 等）都拉不到。
+    现在改走 `libtv model search -t <type>`，实时跟上游一致；任何一类查询失败都退回硬编码清单，
+    保证「拉取模型」永远可用。"""
+    def _names(node_type):
+        obj = libtv_cli_json(["model", "search", "-t", node_type], timeout=90, what=f"libtv 拉取 {node_type} 模型")
+        matches = (obj or {}).get("matches") or []
+        out = []
+        for m in matches:
+            if not isinstance(m, dict):
+                continue
+            name = str(m.get("modelName") or "").strip()
+            if name:
+                out.append(name)
+        return out
+
+    result = {
+        "image_models": list(LIBTV_DEFAULT_IMAGE_MODELS),
+        "video_models": list(LIBTV_DEFAULT_VIDEO_MODELS),
+        "audio_models": [],
+    }
+    for kind, key in (("image", "image_models"), ("video", "video_models"), ("audio", "audio_models")):
+        try:
+            names = _names(kind)
+            if names:
+                result[key] = names
+        except Exception as exc:
+            print(f"[libtv] 实时拉取 {kind} 模型失败，退回内置清单：{exc}")
+    return result
+
+def libtv_pick_option(value, options):
+    """在模型枚举里取合法值（Wan 3.0 的清晰度只认 720P，传 720p 会被校验拒绝）。"""
+    value = str(value or "").strip()
+    options = [str(o) for o in (options or []) if o]
+    if not value or not options:
+        return ""
+    if value in options:
+        return value
+    low = value.lower()
+    for opt in options:
+        if opt.lower() == low:
+            return opt
+    return ""
+
+def libtv_video_mode_type(model, counts):
+    """按模型真实开放的模式，挑一个能容纳当前媒体输入的 modeType。
+
+    counts: {"image": n, "video": n, "audio": n}；传 int 视作「只有 n 张图」（兼容旧调用）。
+    2026-11-12（C153，用户反馈「Wan 3.0 没有引用到视频」）：原来的入参只是媒体总数，
+    参考视频和参考图被当成同一种东西，Wan 3.0 这类「没有 image2video、只有 mixed2video /
+    frames2video / videoExtend2video」的模型就会选错模式 —— 视频要么被丢掉，要么报模式不支持。
+    现在有视频/音频一律走 mixed2video（真正的多模态混合参考），纯图 1~2 张才考虑首尾帧。
+    """
+    if isinstance(counts, int):
+        counts = {"image": counts, "video": 0, "audio": 0}
+    counts = {k: max(0, int((counts or {}).get(k) or 0)) for k in ("image", "video", "audio")}
+    total = sum(counts.values())
+    if total <= 0:
+        return ""
+    spec = libtv_model_spec(model) or {}
+    modes = spec.get("modes") or {}
+    limits = spec.get("mixed_limits") or {}
+    has_motion = bool(counts["video"] or counts["audio"])
+    if not modes:
+        # 拿不到规格：保留旧行为，让 CLI 的校验提示来纠正（libtv_cli_json_fix_modetype）
+        return "mixed2video" if has_motion else "image2video"
+    def fits(name):
+        rng = modes.get(name)
+        if not rng:
+            return False
+        lo, hi = rng
+        if not (lo <= total <= hi):
+            return False
+        if name == "mixed2video" and limits:
+            if counts["image"] > limits.get("image", 10):
+                return False
+            if counts["video"] > limits.get("video", 5):
+                return False
+            if counts["audio"] > limits.get("audio", 5):
+                return False
+        return True
+    if has_motion:
+        # 视频/音频只能进混合参考；videoExtend2video 是「视频续写」，作为最后手段
+        for name in ("mixed2video", "videoExtend2video"):
+            if fits(name):
+                return name
+        return ""
+    if total <= 2 and fits("frames2video"):
+        return "frames2video"
+    for name in ("image2video", "singleImage2video", "frames2video", "mixed2video"):
+        if fits(name):
+            return name
+    for name in modes:
+        if name.endswith("2video") and not any(
+            bad in name for bad in ("videoExtend", "videoEdit", "audio2video", "video2video")
+        ):
+            if fits(name):
+                return name
+    return ""
+
+def libtv_ratio_from_size(size):
+    """把 WxH 映射到 LibTV 支持的 ratio 枚举（取纵横比最接近的项）。"""
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return ""
+    target = width / max(1, height)
+    best, best_diff = "", float("inf")
+    for opt in LIBTV_RATIO_OPTIONS[1:]:
+        try:
+            w, h = [int(x) for x in opt.split(":")]
+        except Exception:
+            continue
+        diff = abs((w / h) - target)
+        if diff < best_diff:
+            best, best_diff = opt, diff
+    return best
+
+def libtv_ref_to_tempfile(value, idx, kind="image"):
+    """把参考素材（http/data/本地路径）落成本地临时文件，供 libtv upload 上传。
+
+    kind: image / video / audio —— 2026-11-12（C153）起支持视频、音频，
+    不再只有「图片 or mp4」两档（旧实现任何非 image 都按 .mp4 存，音频会被误命名）。
+    """
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    os.makedirs(os.path.join(libtv_work_dir(), "refs"), exist_ok=True)
+    suffix = {"image": ".png", "video": ".mp4", "audio": ".mp3"}.get(kind, ".png")
+    # 站内素材（/assets/input/xxx.mp4）直接拷文件，别走 base64 往返 —— 视频动辄几十 MB
+    if value.startswith("/"):
+        local = output_file_from_url(value)
+        if local and os.path.isfile(local):
+            ext = os.path.splitext(local)[1].lower()
+            if ext:
+                suffix = ext
+            path = os.path.join(libtv_work_dir(), "refs", f"ref_{idx}{suffix}")
+            try:
+                shutil.copyfile(local, path)
+                return path
+            except Exception as exc:
+                print(f"[libtv] 参考素材拷贝失败，回退 dataURL：{exc}")
+    if value.startswith("data:") and ";base64," in value:
+        head, b64 = value.split(";base64,", 1)
+        if "jpeg" in head:
+            suffix = ".jpg"
+        elif "webp" in head:
+            suffix = ".webp"
+        raw = base64.b64decode(b64)
+        path = os.path.join(libtv_work_dir(), "refs", f"ref_{idx}{suffix}")
+        with open(path, "wb") as f:
+            f.write(raw)
+        return path
+    if value.startswith("http://") or value.startswith("https://"):
+        try:
+            with httpx.Client(timeout=60, follow_redirects=True) as client:
+                resp = client.get(value)
+                resp.raise_for_status()
+                ctype = (resp.headers.get("content-type") or "").lower()
+                if "jpeg" in ctype:
+                    suffix = ".jpg"
+                elif "webp" in ctype:
+                    suffix = ".webp"
+                path = os.path.join(libtv_work_dir(), "refs", f"ref_{idx}{suffix}")
+                with open(path, "wb") as f:
+                    f.write(resp.content)
+                return path
+        except Exception as exc:
+            print(f"[libtv] 参考图下载失败 {value[:80]}: {exc}")
+            return ""
+    if value.startswith("/"):
+        data_url = reference_to_data_url({"url": value})
+        if data_url and ";base64," in data_url:
+            head, b64 = data_url.split(";base64,", 1)
+            if "video" in head:
+                suffix = ".mp4"
+            elif "audio" in head:
+                suffix = ".mp3"
+            path = os.path.join(libtv_work_dir(), "refs", f"ref_{idx}{suffix}")
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(b64))
+            return path
+    return ""
+
+def libtv_result_urls(obj):
+    """从节点 JSON（--run 终态或 node 查询）里取产物 URL 列表（data.url）。"""
+    urls = []
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "url" and isinstance(v, list):
+                    urls.extend(str(u) for u in v if isinstance(u, str) and u.startswith("http"))
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(obj)
+    return urls
+
+def libtv_node_data(node_name, project_uuid):
+    try:
+        obj = libtv_cli_json(["node", node_name, "-p", project_uuid], timeout=60, what="libtv node 查询")
+        # CLI 返回顶层即节点本体（nodeKey/data/nodeType/name），兼容包一层 node 的情况
+        node = obj.get("node") if isinstance(obj.get("node"), dict) else obj
+        return node.get("data") or {}
+    except Exception:
+        return {}
+
+async def generate_libtv_provider_image(prompt, size, model, reference_images=None, provider=None):
+    """LibTV 生图：建参考图资源节点 → 连线 → 建生图节点（模型/比例）→ --run 同步生成 → 取 data.url。"""
+    # 2026-11-11：所有 CLI 调用都挪到线程里（to_thread）。原来 subprocess.run 直接跑在事件循环上，
+    # 一次 40 秒的生成会把整个服务卡住（自动保存、SSE 都停）。
+    project_uuid = await asyncio.to_thread(libtv_ensure_project)
+    ts = datetime.datetime.now().strftime("%H%M%S") + f"{int(time.time() * 1000) % 1000:03d}"
+    ref_names = []
+    for idx, ref in enumerate((reference_images or [])[:4]):
+        ref_url = ref.get("url") if isinstance(ref, dict) else getattr(ref, "url", "")
+        if not ref_url:
+            continue
+        path = await asyncio.to_thread(libtv_ref_to_tempfile, ref_url, f"{ts}_{idx}", "image")
+        if not path:
+            continue
+        name = f"参考图-{ts}-{idx}"
+        try:
+            await asyncio.to_thread(libtv_cli_json, ["upload", name, "-f", path, "-p", project_uuid], 300, "libtv upload")
+            ref_names.append(name)
+        except HTTPException as exc:
+            print(f"[libtv] 参考图上传失败，已跳过：{exc.detail}")
+        finally:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+    ratio = libtv_ratio_from_size(size)
+    node_name = f"生图-{ts}"
+    args = ["node", "--x", "160", "--y", "160", "create", node_name, "-t", "image",
+            "-p", project_uuid, "-s", f"model={model or 'AutoPic'}"]
+    if ratio:
+        args += ["-s", f"ratio={ratio}"]
+    for name in ref_names:
+        args += ["--left", name]
+    args += ["--prompt", prompt, "--run"]
+    result, node_name = await asyncio.to_thread(libtv_run_node, args, node_name, project_uuid, LIBTV_IMAGE_RUN_TIMEOUT, "LibTV 生图")
+    urls = libtv_result_urls(result)
+    if not urls:
+        urls = libtv_result_urls(await asyncio.to_thread(libtv_node_data, node_name, project_uuid))
+    if not urls:
+        raise HTTPException(status_code=502, detail="LibTV 生图完成但未取到图片 URL（请在 LibTV 画布查看节点状态）")
+    return {"type": "url", "value": urls[0]}, {"output_images": urls, "projectUuid": project_uuid, "node": node_name}
+
+async def generate_libtv_provider_video(payload, provider):
+    """LibTV 生视频：参考图 / 视频 / 音频上传 → 连线 → 建视频节点（模型/比例/时长/分辨率）→ --run 同步生成。
+
+    2026-11-12（C153，用户反馈「Wan 3.0 没有引用到视频」）：旧实现只遍历 payload.images，
+    payload.videos / payload.audios 被静默丢弃 —— 前端明明已经把参考视频提交上来了
+    （实测 payload.videos = ["/assets/input/ai_ref_xxx.mp4"]），LibTV 画布上的节点却只有文本，
+    生成结果自然不带视频。现在三类素材都上传并连线，modeType 也按「图 / 视频 / 音频」的
+    真实构成来选：有视频就必须是 mixed2video，否则等于把视频当没传。
+    """
+    project_uuid = await asyncio.to_thread(libtv_ensure_project)
+    ts = datetime.datetime.now().strftime("%H%M%S") + f"{int(time.time() * 1000) % 1000:03d}"
+    model_name = payload.model or "Seedance 2.5"
+    spec = await asyncio.to_thread(libtv_model_spec, model_name)
+    limits = spec.get("mixed_limits") or {}
+    counts = {"image": 0, "video": 0, "audio": 0}
+    ref_names = []
+
+    async def upload_refs(values, kind, cn, limit):
+        """上传一类参考素材并连线。单条失败只跳过，不打断整次生成。"""
+        for idx, value in enumerate((values or [])[:max(0, int(limit or 0))]):
+            if isinstance(value, dict):
+                ref_url = str(value.get("url") or "").strip()
+            else:
+                # payload.images 是 pydantic AIReference 列表；videos / audios 是纯字符串
+                ref_url = str(getattr(value, "url", value) or "").strip()
+            if not ref_url:
+                continue
+            path = await asyncio.to_thread(libtv_ref_to_tempfile, ref_url, f"{ts}_{kind}{idx}", kind)
+            if not path:
+                print(f"[libtv] 参考{cn}落盘失败，已跳过：{ref_url[:90]}")
+                continue
+            name = f"参考{cn}-{ts}-{idx}"
+            try:
+                await asyncio.to_thread(
+                    libtv_cli_json,
+                    ["upload", name, "-f", path, "-t", cn, "-p", project_uuid],
+                    300, "libtv upload",
+                )
+                ref_names.append(name)
+                counts[kind] += 1
+            except HTTPException as exc:
+                print(f"[libtv] 参考{cn}上传失败，已跳过：{exc.detail}")
+            finally:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
+    # 上限取模型规格（Wan 3.0 的 mixed2videoConfig：图 10 / 视频 5 / 音频 5），读不到用通用上限
+    await upload_refs(payload.images, "image", "图片", limits.get("image") or 10)
+    await upload_refs(payload.videos, "video", "视频", limits.get("video") or 5)
+    await upload_refs(payload.audios, "audio", "音频", limits.get("audio") or 5)
+    if counts["video"] or counts["audio"] or counts["image"] > 4:
+        print(f"[libtv] 参考素材就绪：图 {counts['image']} / 视频 {counts['video']} / 音频 {counts['audio']}")
+    node_name = f"生视频-{ts}"
+    args = ["node", "--x", "160", "--y", "520", "create", node_name, "-t", "video",
+            "-p", project_uuid, "-s", f"model={model_name}"]
+    # 2026-11-10：已连接媒体输入时必须显式声明模式，否则 CLI 校验
+    #   「已连接媒体输入，无法使用纯文生视频」直接拒绝创建。
+    # 2026-11-11：模式不能硬编码 image2video —— Wan 3.0 没开放该模式，会被画布拒绝。
+    if ref_names:
+        mode_type = libtv_video_mode_type(model_name, counts)
+        if mode_type:
+            args += ["-s", f"modeType={mode_type}"]
+        print(
+            f"[libtv] 视频模式：{model_name} × 图{counts['image']}/视频{counts['video']}/音频{counts['audio']}"
+            f" → modeType={mode_type or '(不指定)'}"
+        )
+    ratio = str(payload.aspect_ratio or "").strip()
+    if ratio:
+        picked = libtv_pick_option(ratio, spec.get("ratios"))
+        if picked:
+            args += ["-s", f"ratio={picked}"]
+        else:
+            print(f"[libtv] 模型 {model_name} 不支持比例 {ratio}，改用模型默认")
+    if payload.duration:
+        try:
+            seconds = int(payload.duration)
+            lo, hi = spec.get("duration") or (None, None)
+            if isinstance(lo, (int, float)):
+                seconds = max(int(lo), seconds)
+            if isinstance(hi, (int, float)):
+                seconds = min(int(hi), seconds)
+            args += ["-s", f"duration={seconds}"]
+        except Exception:
+            pass
+    resolution = str(payload.resolution or "").strip()
+    if resolution:
+        picked = libtv_pick_option(resolution, spec.get("resolutions"))
+        if picked:
+            args += ["-s", f"resolution={picked}"]
+        else:
+            print(f"[libtv] 模型 {model_name} 不支持清晰度 {resolution}，改用模型默认")
+    for name in ref_names:
+        args += ["--left", name]
+    args += ["--prompt", payload.prompt, "--run"]
+    result, node_name = await asyncio.to_thread(libtv_run_node, args, node_name, project_uuid, LIBTV_VIDEO_RUN_TIMEOUT, "LibTV 生视频")
+    urls = libtv_result_urls(result)
+    if not urls:
+        urls = libtv_result_urls(await asyncio.to_thread(libtv_node_data, node_name, project_uuid))
+    if not urls:
+        raise HTTPException(status_code=502, detail="LibTV 生视频完成但未取到视频 URL（请在 LibTV 画布查看节点状态）")
+    return {"videos": urls, "task_id": f"libtv-{ts}", "raw": {"projectUuid": project_uuid, "node": node_name}}
+
 async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly"):
     provider = get_api_provider(provider_id)
     if provider["id"] == "modelscope":
@@ -12621,6 +13677,9 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    # 2026-11-10：LibTV CLI provider（官方 libtv CLI 已登录时可直接生成，无需 API Key）
+    if is_libtv_provider(provider):
+        return await generate_libtv_provider_image(prompt, size, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     # 2026-10-24：优云智算 compshare（Qwen-Image）走官方异步任务协议，认域名即可；
@@ -12996,6 +14055,9 @@ async def decide_chat_agent_action(payload, conversation, refs):
     if is_gemini_cli_provider(provider_cfg):
         fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         return fallback
+    if is_doubao_cli_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+        return fallback
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
     custom_system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
@@ -13063,6 +14125,19 @@ async def build_chat_text_reply(payload, conversation):
         model = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
         text, raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+        return {
+            "id": uuid.uuid4().hex,
+            "role": "assistant",
+            "content": text,
+            "created_at": now_ms(),
+            "model": model,
+            "raw_usage": None,
+            "raw": raw,
+        }
+    if is_doubao_cli_provider(provider_cfg):
+        model = selected_model(payload.model, (provider_cfg.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+        text, raw = await doubao_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
         return {
             "id": uuid.uuid4().hex,
             "role": "assistant",
@@ -14412,6 +15487,339 @@ async def gemini_cli_status():
             "message": f"{display_name} 检测失败：{exc}",
         }
 
+@app.get("/api/libtv/status")
+async def libtv_status_endpoint():
+    """LibTV CLI 状态（本机登录态，无需 API Key）。"""
+    st = libtv_status()
+    exe = libtv_cli_executable()
+    return {
+        "installed": st.get("installed", False),
+        "logged_in": st.get("logged_in", False),
+        "path": exe or "",
+        "message": st.get("message", ""),
+        "raw": st.get("raw", {}),
+    }
+
+@app.get("/api/doubao-cli/status")
+async def doubao_cli_status_endpoint():
+    """豆包 CLI 状态（本机 headless 登录态，无需 API Key）。"""
+    exe = doubao_cli_executable()
+    if not exe:
+        return {
+            "installed": False,
+            "logged_in": False,
+            "path": "",
+            "message": "未找到豆包 CLI。请先安装：npm i -g doubao-cli",
+        }
+    prefix = doubao_launch_prefix()
+    proc = await asyncio.create_subprocess_exec(
+        *prefix, "headless", "status", "--json",
+        cwd=BASE_DIR,
+        env=doubao_subprocess_env(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return {"installed": True, "logged_in": None, "path": exe, "message": "豆包 CLI 状态查询超时"}
+    out_text, err_text = doubao_decode_output(stdout, stderr)
+    logged_in = None
+    message = ""
+    try:
+        data = json.loads(out_text or "{}")
+        logged_in = bool(data.get("loggedIn"))
+        account_id = str(data.get("accountId") or "")
+        message = f"豆包 CLI 已登录（账号 {account_id}）" if logged_in else "豆包 CLI 已安装但未登录。请运行：doubao headless login"
+    except Exception:
+        message = (err_text or out_text or "状态查询失败").strip()[:400]
+    return {
+        "installed": True,
+        "logged_in": logged_in,
+        "path": exe,
+        "message": message,
+        "raw": {"stdout": out_text, "stderr": err_text, "returncode": proc.returncode},
+    }
+
+# ---------------------------------------------------------------------------
+# 豆包 CLI / LibTV CLI 登录态管理（参考即梦 CLI 的 start/status/logout 模式，
+# 支持其他人在 API 管理页用自己的账号登录）
+DOUBAO_LOGIN_SESSION = {"proc": None, "stdout": "", "stderr": "", "started_at": 0.0, "restarts": 0}
+LIBTV_LOGIN_SESSION = {"proc": None, "stdout": "", "stderr": "", "started_at": 0.0}
+
+async def cli_login_reader(proc, session):
+    async def read_stream(stream, key):
+        while True:
+            chunk = await stream.readline()
+            if not chunk:
+                break
+            text = chunk.decode("utf-8", errors="replace")
+            if text:
+                session[key] = str(session.get(key) or "") + text
+    await asyncio.gather(read_stream(proc.stdout, "stdout"), read_stream(proc.stderr, "stderr"))
+
+def cli_login_text(session):
+    parts = []
+    for key in ("stdout", "stderr"):
+        value = str(session.get(key) or "").strip()
+        if value:
+            parts.append(value)
+    return "\n".join(parts).strip()
+
+def cli_login_url_from_text(text):
+    for match in re.findall(r"https?://[^\s\"'<>]+", str(text or "")):
+        if "liblib" in match or "login" in match.lower() or "callback" in match.lower():
+            return match
+    return ""
+
+@app.post("/api/doubao-cli/login/start")
+async def doubao_login_start():
+    """启动豆包 CLI 扫码登录：终端里打印 ASCII 二维码，手机豆包 App 扫码确认。"""
+    old_proc = DOUBAO_LOGIN_SESSION.get("proc")
+    if old_proc and getattr(old_proc, "returncode", None) is None:
+        try:
+            old_proc.terminate()
+        except Exception:
+            pass
+    prefix = doubao_launch_prefix()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="未找到豆包 CLI。请先安装：npm i -g doubao-cli")
+    DOUBAO_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time(), "restarts": 0})
+    proc = await asyncio.create_subprocess_exec(
+        *prefix, "headless", "login", "--timeout", "600",
+        cwd=BASE_DIR,
+        env=doubao_subprocess_env(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    DOUBAO_LOGIN_SESSION["proc"] = proc
+    asyncio.create_task(cli_login_reader(proc, DOUBAO_LOGIN_SESSION))
+    await asyncio.sleep(3)
+    return {
+        "success": True,
+        "running": DOUBAO_LOGIN_SESSION.get("proc") is not None and DOUBAO_LOGIN_SESSION["proc"].returncode is None,
+        "text": cli_login_text(DOUBAO_LOGIN_SESSION),
+        "started_at": DOUBAO_LOGIN_SESSION.get("started_at") or 0,
+    }
+
+async def _doubao_restart_login_if_needed(status_result=None):
+    """豆包风控会让 check_qrconnect 偶发失败、CLI 进程直接退出。
+    会话 10 分钟有效期内若进程退出且未登录，自动换新二维码重启（最多 8 次）。"""
+    started_at = float(DOUBAO_LOGIN_SESSION.get("started_at") or 0)
+    if not started_at or time.time() - started_at > 600:
+        return None
+    restarts = int(DOUBAO_LOGIN_SESSION.get("restarts") or 0)
+    if restarts >= 8:
+        return None
+    st = status_result if status_result is not None else await doubao_cli_status_endpoint()
+    if st.get("logged_in"):
+        return None
+    prefix = doubao_launch_prefix()
+    if not prefix:
+        return None
+    remaining = max(30, int(600 - (time.time() - started_at)))
+    DOUBAO_LOGIN_SESSION["restarts"] = restarts + 1
+    DOUBAO_LOGIN_SESSION["stdout"] = ""
+    DOUBAO_LOGIN_SESSION["stderr"] = ""
+    proc = await asyncio.create_subprocess_exec(
+        *prefix, "headless", "login", "--timeout", str(remaining),
+        cwd=BASE_DIR,
+        env=doubao_subprocess_env(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    DOUBAO_LOGIN_SESSION["proc"] = proc
+    asyncio.create_task(cli_login_reader(proc, DOUBAO_LOGIN_SESSION))
+    return proc
+
+@app.get("/api/doubao-cli/login/status")
+async def doubao_login_status():
+    proc = DOUBAO_LOGIN_SESSION.get("proc")
+    running = proc is not None and getattr(proc, "returncode", None) is None
+    if not running:
+        # 进程已退出：先查登录态；未登录且会话仍有效则自动重启（应对豆包风控的瞬时失败）
+        try:
+            st = await doubao_cli_status_endpoint()
+        except Exception:
+            st = {}
+        if st.get("logged_in"):
+            return {"success": True, "running": False, "logged_in": True,
+                    "text": str(st.get("message") or "登录成功")}
+        restarted = await _doubao_restart_login_if_needed(status_result=st)
+        if restarted is not None:
+            running = True
+            await asyncio.sleep(2)
+    text = cli_login_text(DOUBAO_LOGIN_SESSION)
+    logged_in = None
+    if not running:
+        try:
+            st = await doubao_cli_status_endpoint()
+            logged_in = bool(st.get("logged_in"))
+            if st.get("message"):
+                text = (text + "\n" + str(st.get("message"))).strip()
+        except Exception:
+            logged_in = False
+    risk_control = "status check failed" in text or "security check" in text.lower()
+    return {"success": True, "running": running, "logged_in": logged_in,
+            "risk_control": risk_control, "text": text}
+
+class DoubaoLoginCookieRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2000000)
+
+@app.post("/api/doubao-cli/login/cookie")
+async def doubao_login_cookie(payload: DoubaoLoginCookieRequest):
+    """Cookie 文件导入登录（扫码被风控时的备用通道，与 doubao headless login --cookie-file 一致）。"""
+    prefix = doubao_launch_prefix()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="未找到豆包 CLI。请先安装：npm i -g doubao-cli")
+    content = str(payload.content or "").strip()
+    fd, path = tempfile.mkstemp(prefix="doubao_cookie_", suffix=".json", dir=OUTPUT_OUTPUT_DIR)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        proc = await asyncio.create_subprocess_exec(
+            *prefix, "headless", "login", "--cookie-file", path, "--json", "--timeout", "600",
+            cwd=BASE_DIR,
+            env=doubao_subprocess_env(),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise HTTPException(status_code=504, detail="豆包 CLI Cookie 导入超时")
+        out_text, err_text = doubao_decode_output(stdout, stderr)
+        logged_in = None
+        try:
+            st = await doubao_cli_status_endpoint()
+            logged_in = bool(st.get("logged_in"))
+        except Exception:
+            pass
+        return {
+            "success": proc.returncode == 0,
+            "logged_in": logged_in,
+            "text": (out_text or err_text or "").strip()[:4000],
+        }
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+@app.post("/api/doubao-cli/logout")
+async def doubao_logout():
+    prefix = doubao_launch_prefix()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="未找到豆包 CLI")
+    proc = await asyncio.create_subprocess_exec(
+        *prefix, "headless", "logout",
+        cwd=BASE_DIR,
+        env=doubao_subprocess_env(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise HTTPException(status_code=504, detail="豆包 CLI 退出登录超时")
+    out_text, err_text = doubao_decode_output(stdout, stderr)
+    return {"success": proc.returncode == 0, "text": (out_text or err_text or "").strip()[:2000]}
+
+@app.post("/api/libtv/login/web/start")
+async def libtv_login_web_start():
+    """启动 LibTV 浏览器登录：CLI 打印带 callback_url 的登录链接，完成登录后 token 写入本机凭据。"""
+    exe = libtv_cli_executable()
+    if not exe:
+        raise HTTPException(status_code=400, detail="未找到 libtv CLI。请安装：https://www.liblib.tv/cli")
+    old_proc = LIBTV_LOGIN_SESSION.get("proc")
+    if old_proc and getattr(old_proc, "returncode", None) is None:
+        try:
+            old_proc.terminate()
+        except Exception:
+            pass
+    LIBTV_LOGIN_SESSION.update({"proc": None, "stdout": "", "stderr": "", "started_at": time.time()})
+    proc = await asyncio.create_subprocess_exec(
+        exe, "login", "web",
+        cwd=libtv_work_dir(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    LIBTV_LOGIN_SESSION["proc"] = proc
+    asyncio.create_task(cli_login_reader(proc, LIBTV_LOGIN_SESSION))
+    await asyncio.sleep(3)
+    text = cli_login_text(LIBTV_LOGIN_SESSION)
+    return {
+        "success": True,
+        "running": LIBTV_LOGIN_SESSION.get("proc") is not None and LIBTV_LOGIN_SESSION["proc"].returncode is None,
+        "text": text,
+        "url": cli_login_url_from_text(text),
+        "started_at": LIBTV_LOGIN_SESSION.get("started_at") or 0,
+    }
+
+@app.get("/api/libtv/login/status")
+async def libtv_login_status():
+    proc = LIBTV_LOGIN_SESSION.get("proc")
+    text = cli_login_text(LIBTV_LOGIN_SESSION)
+    running = proc is not None and getattr(proc, "returncode", None) is None
+    logged_in = None
+    url = cli_login_url_from_text(text)
+    if not running:
+        st = libtv_status()
+        logged_in = bool(st.get("logged_in"))
+        if st.get("message"):
+            text = (text + "\n" + str(st.get("message"))).strip()
+    return {"success": True, "running": running, "logged_in": logged_in, "text": text, "url": url}
+
+class LibtvPhoneSendRequest(BaseModel):
+    phone: str = Field(min_length=11, max_length=20)
+
+class LibtvPhoneVerifyRequest(BaseModel):
+    phone: str = Field(min_length=11, max_length=20)
+    code: str = Field(min_length=4, max_length=10)
+    captcha: str = Field(default="", max_length=8000)
+
+@app.post("/api/libtv/login/phone/send")
+async def libtv_login_phone_send(payload: LibtvPhoneSendRequest):
+    """LibTV 手机验证码登录第一步：发送短信验证码。"""
+    phone = re.sub(r"\D", "", str(payload.phone or ""))
+    rc, out, err = libtv_cli_run(["login", "phone", "-p", phone], timeout=60)
+    text = (out or err or "").strip()[:4000]
+    return {"success": rc == 0, "text": text}
+
+@app.post("/api/libtv/login/phone/verify")
+async def libtv_login_phone_verify(payload: LibtvPhoneVerifyRequest):
+    """LibTV 手机验证码登录第二步：提交验证码完成登录。"""
+    phone = re.sub(r"\D", "", str(payload.phone or ""))
+    code = re.sub(r"\D", "", str(payload.code or ""))
+    args = ["login", "phone", "-p", phone, "-c", code]
+    if str(payload.captcha or "").strip():
+        args.extend(["--captcha", str(payload.captcha).strip()])
+    rc, out, err = libtv_cli_run(args, timeout=60)
+    logged_in = False
+    try:
+        st = libtv_status()
+        logged_in = bool(st.get("logged_in"))
+    except Exception:
+        pass
+    return {"success": rc == 0, "logged_in": logged_in, "text": (out or err or "").strip()[:4000]}
+
+@app.post("/api/libtv/logout")
+async def libtv_logout():
+    rc, out, err = libtv_cli_run(["logout"], timeout=30)
+    return {"success": rc == 0, "text": (out or err or "").strip()[:2000]}
+
 @app.post("/api/gemini-cli/help")
 async def gemini_cli_help(payload: GeminiCliHelpRequest):
     exe = gemini_cli_executable()
@@ -14522,6 +15930,7 @@ async def jimeng_login_start():
         "running": JIMENG_LOGIN_SESSION.get("proc") is not None and JIMENG_LOGIN_SESSION["proc"].returncode is None,
         "text": text,
         "qr_url": jimeng_login_qr_from_text(text),
+        "qr_png": _jimeng_qr_png_data_uri(_jimeng_qr_encode_url(text)),
         "started_at": JIMENG_LOGIN_SESSION.get("started_at") or 0,
     }
 
@@ -14544,6 +15953,7 @@ async def jimeng_login_status():
         "logged_in": logged_in,
         "text": text,
         "qr_url": jimeng_login_qr_from_text(text),
+        "qr_png": _jimeng_qr_png_data_uri(_jimeng_qr_encode_url(text)),
         "raw": credit_raw,
     }
 
@@ -14699,6 +16109,8 @@ def protocol_from_payload(payload):
         return "runninghub"
     if provider_id == "jimeng":
         return "jimeng"
+    if provider_id == "libtv":
+        return "libtv"
     base_url = str(getattr(payload, "base_url", "") or "").strip().lower()
     if "runninghub.cn" in base_url or "runninghub.ai" in base_url:
         return "runninghub"
@@ -14995,6 +16407,34 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "message": status.get("message") or ("Antigravity CLI 可用" if status.get("installed") else "未找到 Antigravity CLI"),
         })
         return payload_models
+    if protocol == "doubao-cli":
+        status = await doubao_cli_status_endpoint()
+        return {
+            "ok": bool(status.get("installed")) and bool(status.get("logged_in")),
+            "status": 200 if status.get("logged_in") else 0,
+            "message": status.get("message") or ("豆包 CLI 可用" if status.get("installed") else "未找到豆包 CLI"),
+            "model_count": len(DOUBAO_DEFAULT_CHAT_MODELS),
+            "image_models": list(DOUBAO_DEFAULT_IMAGE_MODELS),
+            "chat_models": list(DOUBAO_DEFAULT_CHAT_MODELS),
+            "video_models": [],
+            "all": list(DOUBAO_DEFAULT_CHAT_MODELS),
+            "raw": status,
+        }
+    if protocol == "libtv":
+        status = libtv_status()
+        live = await asyncio.to_thread(libtv_live_models)
+        return {
+            "ok": bool(status.get("installed") and status.get("logged_in")),
+            "status": 200 if status.get("logged_in") else 0,
+            "message": status.get("message") or "LibTV CLI 已登录",
+            "model_count": len(live["image_models"]) + len(live["video_models"]) + len(live["audio_models"]),
+            "image_models": live["image_models"],
+            "chat_models": [],
+            "video_models": live["video_models"],
+            "audio_models": live["audio_models"],
+            "all": [*live["image_models"], *live["video_models"], *live["audio_models"]],
+            "raw": status.get("raw"),
+        }
     if protocol == "jimeng":
         status = await jimeng_status()
         return {
@@ -15315,6 +16755,15 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
             "message": status.get("message") or "Antigravity CLI 本机检测完成",
             "raw": status,
         }
+    if protocol == "doubao-cli":
+        status = await doubao_cli_status_endpoint()
+        return {
+            "ok": bool(status.get("installed")) and bool(status.get("logged_in")),
+            "protocol": "doubao-cli",
+            "status_code": 200 if status.get("logged_in") else 0,
+            "message": status.get("message") or "豆包 CLI 本机检测完成",
+            "raw": status,
+        }
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
     api_key = api_key_from_payload(payload, protocol)
@@ -15460,6 +16909,31 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         payload = gemini_cli_models_payload(raw={"status": status})
         payload["message"] = status.get("message") or payload["message"]
         return payload
+    if protocol == "doubao-cli":
+        status = await doubao_cli_status_endpoint()
+        return {
+            "total": len(DOUBAO_DEFAULT_CHAT_MODELS),
+            "image_models": list(DOUBAO_DEFAULT_IMAGE_MODELS),
+            "chat_models": list(DOUBAO_DEFAULT_CHAT_MODELS),
+            "video_models": [],
+            "all": list(DOUBAO_DEFAULT_CHAT_MODELS),
+            "message": status.get("message") or ("豆包 CLI 可用" if status.get("installed") else "未找到豆包 CLI"),
+        }
+    if protocol == "libtv":
+        # LibTV 走本机 CLI 登录态，无需 API Key。实时用 `libtv model search` 拉取上游清单
+        # （图片/视频/音频），CLI 失败时自动退回内置清单兜底。
+        live = await asyncio.to_thread(libtv_live_models)
+        image_models = live["image_models"]
+        video_models = live["video_models"]
+        audio_models = live["audio_models"]
+        return {
+            "total": len(image_models) + len(video_models) + len(audio_models),
+            "image_models": image_models,
+            "chat_models": [],
+            "video_models": video_models,
+            "audio_models": audio_models,
+            "all": [*image_models, *video_models, *audio_models],
+        }
     if protocol == "jimeng":
         return {
             "total": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
@@ -15634,6 +17108,10 @@ async def fetch_upstream_models(provider_id: str):
         return await fetch_models_from_upstream("", "", "codex", provider.get("image_request_mode") or "openai")
     if is_gemini_cli_provider(provider):
         return await fetch_models_from_upstream("", "", "gemini-cli", provider.get("image_request_mode") or "openai")
+    if is_doubao_cli_provider(provider):
+        return await fetch_models_from_upstream("", "", "doubao-cli", provider.get("image_request_mode") or "openai")
+    if is_libtv_provider(provider):
+        return await fetch_models_from_upstream("", "", "libtv", provider.get("image_request_mode") or "openai")
     api_key = os.getenv(runninghub_wallet_key_env(), "") if provider["id"] == "runninghub" else ""
     if not api_key:
         api_key = provider_env_key_value(provider["id"])
@@ -17843,6 +19321,9 @@ async def canvas_video(payload: CanvasVideoRequest):
         except httpx.HTTPError as exc:
             log_net_error(f"视频(RunningHub) 网络/TLS错误 model={payload.model}", exc)
             raise HTTPException(status_code=502, detail=f"请求 RunningHub 视频接口失败：{exc}") from exc
+    # 2026-11-10：LibTV CLI provider 生视频（同 CLI 登录态，无需 API Key）
+    if is_libtv_provider(provider):
+        return await generate_libtv_provider_video(payload, provider)
     # 2026-10-24：优云智算 MiniMax H3 视频走官方异步任务协议（/minimax/v2），认域名即可
     if is_compshare_provider(provider):
         return await generate_compshare_video(payload, provider)
@@ -18454,6 +19935,11 @@ async def canvas_llm(payload: CanvasLLMRequest):
         model = selected_model(payload.model, (_provider.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
         text, raw = await gemini_cli_chat_text(payload, payload.messages)
+        return {"text": text, "model": model, "raw_usage": None, "raw": raw}
+    if is_doubao_cli_provider(_provider):
+        model = selected_model(payload.model, (_provider.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+        text, raw = await doubao_chat_text(payload, payload.messages)
         return {"text": text, "model": model, "raw_usage": None, "raw": raw}
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     # 判断协议：APIMart 异步 vs 标准 OpenAI
@@ -19511,6 +20997,16 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
             images=[abs_path],
         )
         text, _raw = await gemini_cli_chat_text(payload, [])
+        return text, resolved_model
+    if is_doubao_cli_provider(llm_provider):
+        resolved_model = selected_model(model, (llm_provider.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+        payload = CanvasLLMRequest(
+            message=(prompt or "描述图片").strip() or "描述图片",
+            provider=provider_id or "doubao-cli",
+            model=resolved_model,
+            images=[abs_path],
+        )
+        text, _raw = await doubao_chat_text(payload, [])
         return text, resolved_model
     chat_base, chat_hdrs, resolved_model = resolve_chat_provider(provider_id, model, ms_model)
     is_apimart = is_apimart_provider(llm_provider)
@@ -20814,6 +22310,23 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
             return {"conversation": conversation, "message": assistant_message}
+        if is_doubao_cli_provider(_codex_provider):
+            model = selected_model(payload.model, (_codex_provider.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+            payload.model = model
+            text, raw = await doubao_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            return {"conversation": conversation, "message": assistant_message}
         chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
         _conv_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
         _conv_is_apimart = is_apimart_provider(_conv_provider)
@@ -21598,14 +23111,16 @@ async def chat_agent_stream(payload: ChatRequest, request: Request, x_user_id: s
             save_conversation(user_id, conversation)
             yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message, "agent": {"action": "chat", "decision": decision}})
 
-        if is_codex_provider(provider_cfg) or is_gemini_cli_provider(provider_cfg):
+        if is_codex_provider(provider_cfg) or is_gemini_cli_provider(provider_cfg) or is_doubao_cli_provider(provider_cfg):
             model = selected_model(payload.model, (provider_cfg.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
             payload.model = model
             try:
                 if is_codex_provider(provider_cfg):
                     text, _raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-                else:
+                elif is_gemini_cli_provider(provider_cfg):
                     text, _raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+                else:
+                    text, _raw = await doubao_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
@@ -21766,6 +23281,34 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
 
         return StreamingResponse(gemini_cli_stream(), media_type="text/event-stream")
+
+    if is_doubao_cli_provider(_codex_provider):
+        model = selected_model(payload.model, (_codex_provider.get("chat_models") or DOUBAO_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+
+        async def doubao_stream():
+            yield sse_event({"type": "meta", "conversation": conversation})
+            try:
+                text, raw = await doubao_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            except HTTPException as exc:
+                yield sse_event({"type": "error", "detail": exc.detail})
+                return
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            yield sse_event({"type": "delta", "delta": text})
+            yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
+        return StreamingResponse(doubao_stream(), media_type="text/event-stream")
 
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     conversation_has_images = any(

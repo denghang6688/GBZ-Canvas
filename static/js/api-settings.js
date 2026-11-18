@@ -54,6 +54,19 @@ const geminiCliInfo = document.getElementById('geminiCliInfo');
 const geminiCliHelpOverlay = document.getElementById('geminiCliHelpOverlay');
 const geminiCliHelpCommand = document.getElementById('geminiCliHelpCommand');
 const geminiCliHelpOutput = document.getElementById('geminiCliHelpOutput');
+const doubaoCliPanel = document.getElementById('doubaoCliPanel');
+const doubaoCliStatus = document.getElementById('doubaoCliStatus');
+const doubaoCliInfo = document.getElementById('doubaoCliInfo');
+const doubaoLoginBox = document.getElementById('doubaoLoginBox');
+const doubaoCookieBox = document.getElementById('doubaoCookieBox');
+const doubaoCookieInput = document.getElementById('doubaoCookieInput');
+const libtvCliPanel = document.getElementById('libtvCliPanel');
+const libtvCliStatus = document.getElementById('libtvCliStatus');
+const libtvCliInfo = document.getElementById('libtvCliInfo');
+const libtvLoginBox = document.getElementById('libtvLoginBox');
+const libtvPhoneBox = document.getElementById('libtvPhoneBox');
+const libtvPhoneInput = document.getElementById('libtvPhoneInput');
+const libtvCodeInput = document.getElementById('libtvCodeInput');
 const runninghubConfigBlock = document.getElementById('runninghubConfigBlock');
 const rhPasteInput = document.getElementById('rhPasteInput');
 const rhAppsList = document.getElementById('rhAppsList');
@@ -109,12 +122,17 @@ const CODEX_DEFAULT_IMAGE_MODELS = ['$imagegen'];
 const CODEX_DEFAULT_CHAT_MODELS = ['gpt-5.5'];
 const GEMINI_CLI_DEFAULT_IMAGE_MODELS = ['auto'];
 const GEMINI_CLI_DEFAULT_CHAT_MODELS = ['auto'];
-const CLI_PROTOCOLS = new Set(['jimeng', 'codex', 'gemini-cli']);
-const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'grsai', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli'];
+const DOUBAO_DEFAULT_CHAT_MODELS = ['豆包 2.1 Lite', 'DeepSeek V4.1 Flash', 'Kimi K3.1 Pro', 'GLM 5.3', 'Qwen 4 Max'];
+const LIBTV_DEFAULT_IMAGE_MODELS = ['AutoPic', 'Lib Image 2.6 Pro', 'Lib Image 2.6 Fast', 'Seedream 5.0 Pro', 'Seedream 4.6', 'Qwen Image', 'Z-image Turbo'];
+const LIBTV_DEFAULT_VIDEO_MODELS = ['Seedance 2.5', 'Seedance 2.0 VIP', 'Wan 3.0', 'Kling 4.0', 'Minimax H3', 'Vidu Q3 Pro'];
+const CLI_PROTOCOLS = new Set(['jimeng', 'codex', 'gemini-cli', 'doubao-cli', 'libtv']);
+const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'grsai', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli', 'doubao-cli', 'libtv'];
 const CLI_PROVIDER_PRESETS = {
     jimeng:{id:'jimeng', name:'即梦 CLI', protocol:'jimeng'},
     codex:{id:'codex', name:'GPT CLI', protocol:'codex'},
-    'gemini-cli':{id:'gemini-cli', name:'Antigravity CLI', protocol:'gemini-cli'}
+    'gemini-cli':{id:'gemini-cli', name:'Antigravity CLI', protocol:'gemini-cli'},
+    'doubao-cli':{id:'doubao-cli', name:'豆包 CLI', protocol:'doubao-cli'},
+    libtv:{id:'libtv', name:'LibTV CLI', protocol:'libtv'}
 };
 const ONBOARDING_GUIDES = {
     modelscope:{
@@ -162,6 +180,14 @@ function applyCliProtocolDefaults(item, protocol){
         item.image_models = unique([...(item.image_models || []), ...GEMINI_CLI_DEFAULT_IMAGE_MODELS]);
         item.chat_models = unique([...(item.chat_models || []), ...GEMINI_CLI_DEFAULT_CHAT_MODELS]);
         item.video_models = [];
+    } else if(value === 'doubao-cli'){
+        item.image_models = [];
+        item.chat_models = unique([...(item.chat_models || []), ...DOUBAO_DEFAULT_CHAT_MODELS]);
+        item.video_models = [];
+    } else if(value === 'libtv'){
+        item.image_models = unique([...(item.image_models || []), ...LIBTV_DEFAULT_IMAGE_MODELS]);
+        item.chat_models = [];
+        item.video_models = unique([...(item.video_models || []), ...LIBTV_DEFAULT_VIDEO_MODELS]);
     }
 }
 let rhWorkflowEditorState = { open:false, index:-1, entry:null, config:null, expanded:{}, activeNodeId:'', graph:{ k:1, x:0, y:0, w:0, h:0 }, pan:null, bound:false, previewParams:{}, previewRunning:false, previewStatus:'', previewOutputs:[] };
@@ -774,6 +800,10 @@ function applyProviderOnboardingDefaults(id){
         applyCliProtocolDefaults(item, 'codex');
     } else if(id === 'gemini-cli'){
         applyCliProtocolDefaults(item, 'gemini-cli');
+    } else if(id === 'doubao-cli'){
+        applyCliProtocolDefaults(item, 'doubao-cli');
+    } else if(id === 'libtv'){
+        applyCliProtocolDefaults(item, 'libtv');
     }
     selectedId = item.id;
     renderEditor();
@@ -2606,6 +2636,8 @@ function renderEditor(){
     const isJimeng = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'jimeng';
     const isCodex = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'codex';
     const isGeminiCli = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'gemini-cli';
+    const isDoubaoCli = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'doubao-cli';
+    const isLibtv = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'libtv';
     if(isRunningHub){
         ensureRunningHubLists(item);
         if(rhFreeKeyInput){
@@ -2658,6 +2690,16 @@ function renderEditor(){
         keyInput.placeholder = 'Antigravity CLI 使用本机 agy 登录态，无需 API Key';
         keyHint.textContent = '请先安装 Antigravity CLI，并在终端执行 agy 完成登录';
     }
+    if(isDoubaoCli){
+        applyCliProtocolDefaults(item, 'doubao-cli');
+        keyInput.placeholder = '豆包 CLI 使用本机 doubao 登录态，无需 API Key';
+        keyHint.textContent = '请先安装豆包 CLI（npm i -g doubao-cli），并执行 doubao headless login 扫码登录';
+    }
+    if(isLibtv){
+        applyCliProtocolDefaults(item, 'libtv');
+        keyInput.placeholder = 'LibTV CLI 使用本机 libtv 登录态，无需 API Key';
+        keyHint.textContent = '请先安装 libtv CLI（https://www.liblib.tv/cli），并执行 libtv login 完成登录';
+    }
     document.body.classList.toggle('show-ms', isModelScope);
     document.body.classList.toggle('show-runninghub', isRunningHub);
     document.body.classList.toggle('show-volcengine', isVolcengine);
@@ -2665,6 +2707,8 @@ function renderEditor(){
     document.body.classList.toggle('show-jimeng', isJimeng);
     document.body.classList.toggle('show-codex', isCodex);
     document.body.classList.toggle('show-gemini-cli', isGeminiCli);
+    document.body.classList.toggle('show-doubao-cli', isDoubaoCli);
+    document.body.classList.toggle('show-libtv', isLibtv);
     updateApimartDomesticHint(item);
     renderProviderOnboarding(item);
     renderRecommendApi();
@@ -2694,6 +2738,16 @@ function renderEditor(){
         geminiCliPanel.hidden = !isGeminiCli;
         geminiCliPanel.style.display = isGeminiCli ? 'flex' : 'none';
         if(isGeminiCli) refreshGeminiCliStatus(false);
+    }
+    if(doubaoCliPanel){
+        doubaoCliPanel.hidden = !isDoubaoCli;
+        doubaoCliPanel.style.display = isDoubaoCli ? 'flex' : 'none';
+        if(isDoubaoCli) refreshDoubaoStatus(false);
+    }
+    if(libtvCliPanel){
+        libtvCliPanel.hidden = !isLibtv;
+        libtvCliPanel.style.display = isLibtv ? 'flex' : 'none';
+        if(isLibtv) refreshLibtvStatus(false);
     }
     const deleteBtn = document.getElementById('deleteBtn');
     if(deleteBtn) deleteBtn.style.display = isFixedProvider(item) ? 'none' : 'inline-flex';
@@ -2740,10 +2794,11 @@ function setJimengStatus(text, ok=null){
 function renderJimengLoginBox(data){
     if(!jimengLoginBox) return;
     const text = data?.text || '';
+    // 优先用后端生成的二维码 PNG（qr_png / data:image），网页链接不能当 <img> 加载
+    const qrPng = data?.qr_png || '';
     const qrUrl = data?.qr_url || '';
-    const qrHtml = qrUrl && qrUrl.startsWith('http')
-        ? `<img class="jimeng-qr-img" src="${escapeHtml(qrUrl)}" alt="即梦登录二维码">`
-        : '';
+    const src = qrPng || (qrUrl.startsWith('data:image') ? qrUrl : '');
+    const qrHtml = src ? `<img class="jimeng-qr-img" src="${escapeHtml(src)}" alt="即梦登录二维码">` : '';
     jimengLoginBox.hidden = false;
     jimengLoginBox.innerHTML = `${qrHtml}<pre>${escapeHtml(text || '等待 CLI 输出登录二维码...')}</pre>`;
 }
@@ -2936,6 +2991,336 @@ async function refreshGeminiCliStatus(showInfo=true){
         if(geminiCliInfo) geminiCliInfo.textContent = e.message || String(e);
     }
 }
+function setDoubaoStatus(text, ok=null){
+    if(!doubaoCliStatus) return;
+    doubaoCliStatus.textContent = text || '未检测';
+    doubaoCliStatus.classList.toggle('ok', ok === true);
+    doubaoCliStatus.classList.toggle('bad', ok === false);
+}
+async function refreshDoubaoStatus(showInfo=true){
+    if(!doubaoCliPanel || doubaoCliPanel.hidden) return;
+    setDoubaoStatus('检测中...');
+    try {
+        const data = await fetch('/api/doubao-cli/status').then(r => r.json());
+        setDoubaoStatus(data.logged_in ? '已登录' : (data.installed ? '未登录' : '未安装'), data.logged_in === true);
+        if(showInfo && doubaoCliInfo){
+            const parts = [];
+            if(data.path) parts.push(data.path);
+            if(data.message) parts.push(data.message);
+            doubaoCliInfo.textContent = parts.join(' · ');
+        }
+    } catch(e){
+        setDoubaoStatus('检测失败', false);
+        if(doubaoCliInfo) doubaoCliInfo.textContent = e.message || String(e);
+    }
+}
+function setLibtvStatus(text, ok=null){
+    if(!libtvCliStatus) return;
+    libtvCliStatus.textContent = text || '未检测';
+    libtvCliStatus.classList.toggle('ok', ok === true);
+    libtvCliStatus.classList.toggle('bad', ok === false);
+}
+async function refreshLibtvStatus(showInfo=true){
+    if(!libtvCliPanel || libtvCliPanel.hidden) return;
+    setLibtvStatus('检测中...');
+    try {
+        const data = await fetch('/api/libtv/status').then(r => r.json());
+        setLibtvStatus(data.logged_in ? '已登录' : (data.installed ? '未登录' : '未安装'), data.logged_in === true);
+        if(showInfo && libtvCliInfo){
+            const parts = [];
+            if(data.path) parts.push(data.path);
+            if(data.message) parts.push(data.message);
+            libtvCliInfo.textContent = parts.join(' · ');
+        }
+    } catch(e){
+        setLibtvStatus('检测失败', false);
+        if(libtvCliInfo) libtvCliInfo.textContent = e.message || String(e);
+    }
+}
+function asciiQrToImage(text){
+    // 把 qrcode-terminal 的半块字符（▀▄█/空格）解析为模块矩阵，重绘成真正的二维码图片
+    try {
+        const clean = String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
+        const qlines = clean.split('\n').filter(l => /[\u2580\u2584\u2588]/.test(l));
+        if(!qlines.length) return null;
+        const cols = Math.max(...qlines.map(l => l.length));
+        const rows = qlines.length * 2;
+        const modules = Array.from({length: rows}, () => new Array(cols).fill(false));
+        // qrcode-terminal small 模式映射（反直觉）：黑色模块=空格，白色模块=█
+        // '▀'(U+2580)=上白下黑；'▄'(U+2584)=上黑下白；'█'=全白；' '=全黑
+        qlines.forEach((line, li) => {
+            for(let ci = 0; ci < line.length && ci < cols; ci++){
+                const ch = line[ci];
+                if(ch === ' '){ modules[li*2][ci] = true; modules[li*2+1][ci] = true; }
+                else if(ch === '\u2580'){ modules[li*2+1][ci] = true; }
+                else if(ch === '\u2584'){ modules[li*2][ci] = true; }
+            }
+        });
+        const quiet = 4, scale = 4;
+        const width = (cols + quiet*2) * scale, height = (rows + quiet*2) * scale;
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#000000';
+        modules.forEach((row, r) => row.forEach((dark, c) => {
+            if(dark) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+        }));
+        return canvas.toDataURL('image/png');
+    } catch(e){ return null; }
+}
+function renderDoubaoLoginBox(data){
+    if(!doubaoLoginBox) return;
+    const text = data?.text || '';
+    doubaoLoginBox.hidden = false;
+    doubaoLoginBox.style.display = '';
+    const qrDataUrl = asciiQrToImage(text);
+    if(qrDataUrl){
+        // 与即梦一致的布局：左侧白底二维码图片 + 右侧说明
+        // 豆包 URL 长、二维码模块密（57x57），必须按 canvas 原始尺寸 1:1 显示并禁用平滑，否则缩小后糊掉扫不出来
+        doubaoLoginBox.innerHTML = `<img class="jimeng-qr-img" style="width:auto;height:auto;image-rendering:pixelated" src="${qrDataUrl}" alt="豆包登录二维码">` +
+            `<div style="color:var(--text);font-size:12px;line-height:1.7;font-weight:600">` +
+            `<div style="font-weight:800;margin-bottom:4px">请使用豆包手机 App 扫码并确认登录</div>` +
+            `<div style="opacity:.65;font-size:11px">二维码会话最长等待 10 分钟；若被风控中断会自动换新二维码，请以最新显示的码为准。</div>` +
+            `<div style="opacity:.65;font-size:11px;margin-top:8px">被风控拦截时，可改用上方「Cookie 导入」方式登录。</div>` +
+            `</div>`;
+    } else {
+        // 兜底：ASCII 原文（等宽、白底，保证可扫）
+        const lines = text.split('\n');
+        const maxLen = Math.max(16, ...lines.map(l => l.length));
+        const avail = Math.max(200, (doubaoLoginBox.clientWidth || 480) - 40);
+        const fs = Math.max(3.5, Math.min(7, avail / (maxLen * 0.62)));
+        doubaoLoginBox.innerHTML = `<div style="display:flex;justify-content:center;padding:4px 0">` +
+            `<pre style="white-space:pre;font-size:${fs.toFixed(1)}px;line-height:1.02;margin:0;user-select:all;background:#ffffff;color:#000000;padding:12px 14px;border-radius:10px;max-width:100%;overflow-x:auto;box-shadow:0 4px 14px rgba(0,0,0,.25)">${escapeHtml(text || '等待豆包 CLI 输出登录二维码...')}</pre>` +
+            `</div>`;
+    }
+}
+let doubaoLoginTimer = null;
+async function startDoubaoLogin(){
+    setDoubaoStatus('等待扫码...');
+    if(doubaoCookieBox) doubaoCookieBox.hidden = true;
+    try {
+        const data = await fetch('/api/doubao-cli/login/start', {method:'POST'}).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '启动登录失败');
+            return json;
+        });
+        renderDoubaoLoginBox(data);
+        clearInterval(doubaoLoginTimer);
+        doubaoLoginTimer = setInterval(pollDoubaoLogin, 2500);
+        refreshIcons();
+    } catch(e){
+        setDoubaoStatus('登录失败', false);
+        if(doubaoLoginBox){
+            doubaoLoginBox.hidden = false;
+            doubaoLoginBox.innerHTML = `<pre>${escapeHtml(e.message || String(e))}</pre>`;
+        }
+    }
+}
+let doubaoLoginFails = 0;
+async function pollDoubaoLogin(){
+    if(doubaoCliPanel?.hidden){ clearInterval(doubaoLoginTimer); return; }
+    try {
+        const data = await fetch('/api/doubao-cli/login/status').then(r => {
+            if(!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        });
+        doubaoLoginFails = 0;
+        if(data.text) renderDoubaoLoginBox(data);
+        if(data.logged_in === true){
+            clearInterval(doubaoLoginTimer);
+            setDoubaoStatus('已登录', true);
+            if(doubaoCliInfo) doubaoCliInfo.textContent = '登录成功！本机豆包 CLI 登录态已更新，可直接在画布中使用豆包通道。';
+        } else if(data.running){
+            setDoubaoStatus('等待扫码...');
+            if(data.risk_control && doubaoCliInfo){
+                doubaoCliInfo.textContent = '⚠ 豆包服务端正在风控拦截扫码流程（二维码会频繁自动换新、扫码后无法确认）。扫码大概率走不通，请改用「Cookie 导入」方式登录：电脑浏览器登录 doubao.com → F12 → 网络 → 任选一条请求 → 复制请求头里完整的 Cookie 值粘贴到「Cookie 导入」。';
+            }
+        } else if(data.logged_in === false){
+            clearInterval(doubaoLoginTimer);
+            const expired = /timed out|timeout|过期/i.test(data.text || '');
+            setDoubaoStatus(expired ? '二维码已过期' : '未登录', false);
+            if(doubaoCliInfo) doubaoCliInfo.textContent = expired
+                ? '二维码已过期（会话最长等待 10 分钟）。请重新点击「扫码登录」获取新二维码。'
+                : '豆包 CLI 未登录。请点击「扫码登录」或使用「Cookie 导入」。';
+        }
+    } catch(e){
+        // 偶发失败（如服务重启/网络抖动）不清定时器，连续 3 次失败才判定异常
+        doubaoLoginFails += 1;
+        if(doubaoLoginFails >= 3){
+            clearInterval(doubaoLoginTimer);
+            setDoubaoStatus('登录检测失败', false);
+            if(doubaoCliInfo) doubaoCliInfo.textContent = (e.message || String(e)) + '。请重新点击「扫码登录」。';
+        }
+    }
+}
+function toggleDoubaoCookie(){
+    if(!doubaoCookieBox) return;
+    doubaoCookieBox.hidden = !doubaoCookieBox.hidden;
+    if(!doubaoCookieBox.hidden && doubaoLoginBox) doubaoLoginBox.hidden = true;
+}
+async function importDoubaoCookie(){
+    const content = doubaoCookieInput?.value.trim() || '';
+    if(!content){ alert('请先粘贴 Cookie 会话文件（JSON）内容'); return; }
+    setDoubaoStatus('导入中...');
+    try {
+        const data = await fetch('/api/doubao-cli/login/cookie', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({content})
+        }).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '导入失败');
+            return json;
+        });
+        if(doubaoLoginBox){
+            doubaoLoginBox.hidden = false;
+            doubaoLoginBox.innerHTML = `<pre>${escapeHtml(data.text || '导入完成')}</pre>`;
+        }
+        setDoubaoStatus(data.logged_in ? '已登录' : '导入完成', data.logged_in === true);
+        if(data.logged_in === true && doubaoCookieBox) doubaoCookieBox.hidden = true;
+    } catch(e){
+        setDoubaoStatus('导入失败', false);
+        if(doubaoCliInfo) doubaoCliInfo.textContent = e.message || String(e);
+    }
+}
+async function logoutDoubao(){
+    if(!confirm('确认退出豆包 CLI 登录？')) return;
+    try {
+        await fetch('/api/doubao-cli/logout', {method:'POST'}).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '退出失败');
+            return json;
+        });
+        setDoubaoStatus('未登录', false);
+        if(doubaoLoginBox) doubaoLoginBox.hidden = true;
+        if(doubaoCliInfo) doubaoCliInfo.textContent = '';
+    } catch(e){
+        setDoubaoStatus('退出失败', false);
+        if(doubaoCliInfo) doubaoCliInfo.textContent = e.message || String(e);
+    }
+}
+function renderLibtvLoginBox(data){
+    if(!libtvLoginBox) return;
+    const text = data?.text || '';
+    const url = data?.url || '';
+    const urlHtml = url && url.startsWith('http')
+        ? `<div style="margin-bottom:6px"><a href="${escapeAttr(url)}" target="_blank" rel="noopener" style="color:#60a5fa;font-size:11.5px;word-break:break-all">${escapeHtml(url)}</a><div style="color:var(--muted);font-size:10.5px;margin-top:2px">在服务所在电脑的浏览器打开该链接完成登录（回调指向本机）。</div></div>`
+        : '';
+    libtvLoginBox.hidden = false;
+    libtvLoginBox.innerHTML = `${urlHtml}<pre>${escapeHtml(text || '等待 LibTV CLI 输出登录链接...')}</pre>`;
+}
+let libtvLoginTimer = null;
+async function startLibtvWebLogin(){
+    setLibtvStatus('等待浏览器登录...');
+    if(libtvPhoneBox) libtvPhoneBox.hidden = true;
+    try {
+        const data = await fetch('/api/libtv/login/web/start', {method:'POST'}).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '启动登录失败');
+            return json;
+        });
+        renderLibtvLoginBox(data);
+        clearInterval(libtvLoginTimer);
+        libtvLoginTimer = setInterval(pollLibtvLogin, 2500);
+        refreshIcons();
+    } catch(e){
+        setLibtvStatus('登录失败', false);
+        if(libtvLoginBox){
+            libtvLoginBox.hidden = false;
+            libtvLoginBox.innerHTML = `<pre>${escapeHtml(e.message || String(e))}</pre>`;
+        }
+    }
+}
+async function pollLibtvLogin(){
+    if(libtvCliPanel?.hidden){ clearInterval(libtvLoginTimer); return; }
+    try {
+        const data = await fetch('/api/libtv/login/status').then(r => r.json());
+        renderLibtvLoginBox(data);
+        if(data.logged_in === true){
+            clearInterval(libtvLoginTimer);
+            setLibtvStatus('已登录', true);
+        } else if(data.running){
+            setLibtvStatus('等待浏览器登录...');
+        } else if(data.logged_in === false){
+            clearInterval(libtvLoginTimer);
+            setLibtvStatus('未登录', false);
+        }
+    } catch(e){
+        clearInterval(libtvLoginTimer);
+        setLibtvStatus('登录检测失败', false);
+    }
+}
+function toggleLibtvPhone(){
+    if(!libtvPhoneBox) return;
+    libtvPhoneBox.hidden = !libtvPhoneBox.hidden;
+    if(!libtvPhoneBox.hidden && libtvLoginBox) libtvLoginBox.hidden = true;
+}
+async function sendLibtvSms(){
+    const phone = libtvPhoneInput?.value.trim() || '';
+    if(!/^1\d{10}$/.test(phone)){ alert('请输入 11 位中国大陆手机号'); return; }
+    setLibtvStatus('发送验证码...');
+    try {
+        const data = await fetch('/api/libtv/login/phone/send', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({phone})
+        }).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '发送失败');
+            return json;
+        });
+        if(data.success) setLibtvStatus('验证码已发送', true);
+        else {
+            setLibtvStatus('发送失败', false);
+            if(libtvCliInfo) libtvCliInfo.textContent = data.text || '发送失败';
+        }
+    } catch(e){
+        setLibtvStatus('发送失败', false);
+        if(libtvCliInfo) libtvCliInfo.textContent = e.message || String(e);
+    }
+}
+async function verifyLibtvCode(){
+    const phone = libtvPhoneInput?.value.trim() || '';
+    const code = libtvCodeInput?.value.trim() || '';
+    if(!/^1\d{10}$/.test(phone)){ alert('请输入 11 位中国大陆手机号'); return; }
+    if(!/^\d{4,6}$/.test(code)){ alert('请输入短信验证码'); return; }
+    setLibtvStatus('验证中...');
+    try {
+        const data = await fetch('/api/libtv/login/phone/verify', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({phone, code})
+        }).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '验证失败');
+            return json;
+        });
+        if(data.logged_in === true){
+            setLibtvStatus('已登录', true);
+            if(libtvPhoneBox) libtvPhoneBox.hidden = true;
+        } else {
+            setLibtvStatus('未登录', false);
+            if(libtvCliInfo) libtvCliInfo.textContent = data.text || '验证未通过';
+        }
+    } catch(e){
+        setLibtvStatus('验证失败', false);
+        if(libtvCliInfo) libtvCliInfo.textContent = e.message || String(e);
+    }
+}
+async function logoutLibtv(){
+    if(!confirm('确认退出 LibTV CLI 登录？')) return;
+    try {
+        await fetch('/api/libtv/logout', {method:'POST'}).then(async r => {
+            const json = await r.json();
+            if(!r.ok) throw new Error(json.detail || '退出失败');
+            return json;
+        });
+        setLibtvStatus('未登录', false);
+        if(libtvLoginBox) libtvLoginBox.hidden = true;
+        if(libtvCliInfo) libtvCliInfo.textContent = '';
+    } catch(e){
+        setLibtvStatus('退出失败', false);
+        if(libtvCliInfo) libtvCliInfo.textContent = e.message || String(e);
+    }
+}
 function openGeminiCliHelp(){
     if(!geminiCliHelpOverlay) return;
     geminiCliHelpOverlay.style.display = 'flex';
@@ -3115,7 +3500,7 @@ async function probeAsync(){
         const detectedProtocol = String(data.protocol || '').toLowerCase();
         const isAsync = data.ok === true && detectedProtocol === 'apimart';
         const isOpenAiCompat = data.ok === true && detectedProtocol === 'openai';
-        const keepManualProtocol = ['gemini', 'grsai', 'volcengine', 'jimeng', 'codex', 'gemini-cli'].includes(currentProtocol);
+        const keepManualProtocol = ['gemini', 'grsai', 'volcengine', 'jimeng', 'codex', 'gemini-cli', 'doubao-cli', 'libtv'].includes(currentProtocol);
         if(protocolInput && !keepManualProtocol){
             applyDetectedProtocol(detectedProtocol || (isAsync ? 'apimart' : 'openai'));
         }
@@ -3144,7 +3529,7 @@ async function probeAsync(){
                 <pre style="margin-top:6px;padding:10px 12px;border-radius:10px;background:var(--soft);border:1px solid var(--line-2);font-size:10.5px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;color:var(--text);max-height:200px;overflow:auto">${escapeHtml(rawJson)}</pre>
             </details>`);
     } catch(e){
-        const keepManualProtocol = ['gemini', 'grsai', 'volcengine', 'jimeng', 'codex', 'gemini-cli'].includes(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        const keepManualProtocol = ['gemini', 'grsai', 'volcengine', 'jimeng', 'codex', 'gemini-cli', 'doubao-cli', 'libtv'].includes(String(protocolInput?.value || item.protocol || '').toLowerCase());
         if(protocolInput && !keepManualProtocol){ protocolInput.value = 'openai'; protocolInput.dispatchEvent(new Event('change')); }
         const suffix = keepManualProtocol ? '，已保留当前手动选择的协议' : '，协议已设为 OpenAI 兼容';
         showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}${suffix}</div>`);
@@ -3205,6 +3590,8 @@ async function testConnection(){
             const jimengNote = isJimeng ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">即梦 CLI 已可用，可在画布里选择“即梦 CLI”生成。</div>` : '';
             const codexNote = currentProtocol === 'codex' ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">OpenAI Codex CLI 已可用，可在画布里选择“OpenAI CLI”聊天或生成图片。</div>` : '';
             const geminiCliNote = currentProtocol === 'gemini-cli' ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">Antigravity CLI 已可用，可在画布里选择“Antigravity CLI”聊天或测试生图。</div>` : '';
+            const doubaoNote = currentProtocol === 'doubao-cli' ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">豆包 CLI 已可用，可在画布聊天里选择“豆包 CLI”对话。</div>` : '';
+            const libtvNote = currentProtocol === 'libtv' ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">LibTV CLI 已可用，可在画布里选择“LibTV CLI”生成图片/视频。</div>` : '';
             const grsaiNote = (detectedProtocol === 'grsai' || currentProtocol === 'grsai')
                 ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">Grsai 原生协议已启用：视频走 /v1/api/generate（minimax-h3），对话与生图按 OpenAI/Gemini 兼容自动处理。</div>`
                 : '';
@@ -3212,7 +3599,7 @@ async function testConnection(){
             const runninghubNote = isRunningHubNow
                 ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
                 : imageModeNote;
-            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}${grsaiNote}`);
+            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}${doubaoNote}${libtvNote}${grsaiNote}`);
             setSiteState('已连接', 'ok');
         } else {
             setSiteState('验证失败', 'bad');
@@ -4060,7 +4447,9 @@ const PROTOCOL_LABELS = {
     runninghub: 'RunningHub OpenAPI',
     jimeng: '即梦 CLI',
     codex: 'OpenAI Codex CLI',
-    'gemini-cli': 'Antigravity CLI'
+    'gemini-cli': 'Antigravity CLI',
+    'doubao-cli': '豆包 CLI',
+    libtv: 'LibTV CLI'
 };
 function syncProtocolPill(){
     const cur = String(protocolInput?.value || 'openai');
