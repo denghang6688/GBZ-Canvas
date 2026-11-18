@@ -4244,13 +4244,49 @@ function removeModel(kind, index){
     renderModels(kind);
     if(kind === 'image') renderMsLoras();
 }
+// 2026-11-18：豆包/LibTV CLI 平台是 V26.11.18.1 新增的。老用户升级后本地 data/api_providers.json
+// 里没有这两个条目，平台列表看不到，也就看不到 CLI 登录栏。加载时自动补齐缺失项（与 addCliProvider 同构）。
+function seedMissingCliProviders(){
+    let seeded = false;
+    for(const kind of ['doubao-cli', 'libtv']){
+        const preset = CLI_PROVIDER_PRESETS[kind];
+        if(!preset) continue;
+        const exists = providers.some(p => p.id === preset.id || String(p.protocol || '').toLowerCase() === preset.protocol);
+        if(exists) continue;
+        const item = {
+            id:preset.id,
+            name:preset.name,
+            base_url:'',
+            protocol:preset.protocol,
+            image_request_mode:'openai',
+            image_edit_route:'general',
+            image_generation_endpoint:'',
+            image_edit_endpoint:'',
+            enabled:true,
+            primary:false,
+            image_models:[],
+            chat_models:[],
+            video_models:[],
+            model_protocols:{},
+            has_key:false,
+            key_preview:''
+        };
+        applyCliProtocolDefaults(item, preset.protocol);
+        providers.push(item);
+        seeded = true;
+    }
+    return seeded;
+}
 async function loadProviders(){
     setStatus(tr('api.loading'));
     try {
         const data = await fetch('/api/providers').then(r => r.json());
         providers = data.providers || [];
+        const seededCli = seedMissingCliProviders();
         selectedId = sortedProviders()[0]?.id || '';
+        renderProviderList();
         renderEditor();
+        if(seededCli) saveProviders();
         // 2026-10-30（用户要求）：加载完不再自动 openRecommendApi（一进页面就跳推荐平台），
         // 只按当前视图标志同步标题/侧栏；推荐平台由页头「推荐API」按钮或 #recommend 主动进入。
         syncRecommendView();
